@@ -4,7 +4,7 @@
 // the left, aligned with the project badge, title and location in the middle,
 // time and state on the right. Children hang off the indent, with no line and
 // no frame. What is new: the count is the toggle, there is no chevron.
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef } from "react";
 import {
   experimental_useSidebarThreadActions as useSidebarThreadActions,
   experimental_useSidebarThreadSplit as useSidebarThreadSplit,
@@ -31,6 +31,11 @@ import {
 } from "@/components/sidenav/provider-glyph";
 import { RowMenu } from "@/components/sidenav/row-menu";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  beginThreadDrag,
+  consumeDragClick,
+  useCardDropWhere,
+} from "@/components/sidenav/thread-drag";
 
 /**
  * In selection mode the checkbox takes the glyph's place rather than a column of
@@ -56,8 +61,6 @@ function SelectMark({
     />
   );
 }
-
-export const THREAD_DRAG_TYPE = "application/x-aside-thread";
 
 /** Where a dragged card lands: before, after, or inside. */
 export type DropWhere = "before" | "after" | "into";
@@ -185,10 +188,7 @@ export function ThreadCard({
 }) {
   const { root, children } = family;
   const { splitProps } = useSidebarThreadSplit(root.id);
-  const [dropWhere, setDropWhere] = useState<DropWhere | null>(null);
-  // A drag ends with a click event. Without this latch, every nesting gesture
-  // would also open the dragged thread.
-  const dragging = useRef(false);
+  const dropWhere = useCardDropWhere(root.id);
   // The root's mark stands for the whole family, not just for the root itself —
   // exactly as the project row's mark stands for all of its families. Otherwise
   // the root would stay silent while a child works, and the signal would jump
@@ -210,47 +210,21 @@ export function ThreadCard({
         <div
           data-aside-card={root.id}
           // Dragging and selecting are the same gesture with the same button.
-          // While a selection is running the card stays put.
-          draggable={selection === null && pinnedIn === undefined}
-          onDragStart={(event: DragEvent<HTMLDivElement>) => {
-            dragging.current = true;
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData(THREAD_DRAG_TYPE, root.id);
-            // Some environments only start a drag with a standard type aboard.
-            event.dataTransfer.setData("text/plain", threadTitle(root));
-          }}
-          onDragOver={(event) => {
-            if (!event.dataTransfer.types.includes(THREAD_DRAG_TYPE)) return;
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
-            // The top and bottom 30% reorder, the middle nests. Two targets on
-            // the same card, but with clearly separated affordances: line
-            // versus frame.
-            const bounds = event.currentTarget.getBoundingClientRect();
-            const share = (event.clientY - bounds.top) / bounds.height;
-            setDropWhere(share < 0.3 ? "before" : share > 0.7 ? "after" : "into");
-          }}
-          onDragLeave={() => setDropWhere(null)}
-          onDragEnd={() => {
-            setDropWhere(null);
-            window.setTimeout(() => {
-              dragging.current = false;
-            }, 0);
-          }}
-          onDrop={(event) => {
-            const where = dropWhere ?? "into";
-            setDropWhere(null);
-            const draggedId = event.dataTransfer.getData(THREAD_DRAG_TYPE);
-            if (!draggedId || draggedId === root.id) return;
-            event.preventDefault();
-            event.stopPropagation();
-            if (where === "into") callbacks.onNest(draggedId, root.id);
-            else callbacks.onReorder(draggedId, root.id, where);
+          // While a selection is running the card stays put. Pointer events,
+          // not `draggable`: the host's split props block native drags.
+          onPointerDown={(event) => {
+            if (selection !== null) return;
+            splitProps.onPointerDown?.(event);
+            if (pinnedIn !== undefined) return;
+            beginThreadDrag(event, root.id, (draggedId, targetId, where) => {
+              if (where === "into") callbacks.onNest(draggedId, targetId);
+              else callbacks.onReorder(draggedId, targetId, where);
+            });
           }}
           onClick={(event) => {
             // A rapid double click must not open the thread twice; renaming
             // now lives in the context menu, not on the second click.
-            if (renaming || dragging.current || event.detail > 1) return;
+            if (renaming || consumeDragClick() || event.detail > 1) return;
             // In selection mode the whole row is the checkbox: hitting a 14px
             // box for every thread you want gone is the part people give up on.
             if (selection !== null) {
@@ -259,7 +233,6 @@ export function ThreadCard({
             }
             callbacks.onOpen(root.id, event.metaKey || event.ctrlKey);
           }}
-          {...(selection === null ? splitProps : {})}
           className={cn(
             "grid cursor-pointer grid-cols-[14px_minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-0.5 rounded-lg px-2",
             compact ? "min-h-9 grid-rows-[16px] py-1" : "min-h-12 grid-rows-[16px_16px] py-1.5",

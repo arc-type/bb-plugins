@@ -7,7 +7,10 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { cn } from "@/lib/utils";
 import { RowCount, RowTail } from "@/components/sidenav/row-slots";
 import type { ThreadState } from "@/lib/tree";
-import { THREAD_DRAG_TYPE } from "@/components/sidenav/thread-card";
+import {
+  registerSectionDrop,
+  useSectionDropActive,
+} from "@/components/sidenav/thread-drag";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -76,6 +79,8 @@ export function SectionRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const [dropAt, setDropAt] = useState<"before" | "after" | null>(null);
+  const threadOver = useSectionDropActive(id);
+  useEffect(() => registerSectionDrop(id, onDropThread), [id, onDropThread]);
   useEffect(() => {
     if (!renaming) return;
     ref.current?.focus();
@@ -102,15 +107,9 @@ export function SectionRow({
             }, 0);
           }}
           onDragOver={(event) => {
-            if (
-              !event.dataTransfer.types.includes(THREAD_DRAG_TYPE) &&
-              !event.dataTransfer.types.includes(SECTION_DRAG_TYPE)
-            ) {
-              return;
-            }
+            if (!event.dataTransfer.types.includes(SECTION_DRAG_TYPE)) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
-            if (!event.dataTransfer.types.includes(SECTION_DRAG_TYPE)) return;
             if (draggedSectionId === id) {
               setDropAt(null);
               return;
@@ -139,13 +138,7 @@ export function SectionRow({
                   ? "after"
                   : "before",
               );
-              return;
             }
-            const threadId = event.dataTransfer.getData(THREAD_DRAG_TYPE);
-            if (!threadId) return;
-            event.preventDefault();
-            event.stopPropagation();
-            onDropThread(threadId);
           }}
           onClick={(event) => {
             if (dragging.current || renaming || event.detail > 1) return;
@@ -156,7 +149,12 @@ export function SectionRow({
             onStartRename();
           }}
           data-drop={dropAt ?? undefined}
-          className="relative mt-1 flex cursor-grab select-none items-center gap-2 rounded-md px-2 py-0.5 hover:bg-sidebar-accent/60 active:cursor-grabbing"
+          // Thread cards drag on pointer events and find their target by this.
+          data-aside-section={id}
+          className={cn(
+            "relative mt-1 flex cursor-grab select-none items-center gap-2 rounded-md px-2 py-0.5 hover:bg-sidebar-accent/60 active:cursor-grabbing",
+            threadOver && "bg-sidebar-accent/60",
+          )}
         >
           {renaming ? (
             <input

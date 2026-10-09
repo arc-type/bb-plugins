@@ -147,9 +147,9 @@ describe("thread card in selection mode", () => {
   });
 
   it("stops dragging while the mode is on", () => {
+    const addListener = vi.spyOn(window, "addEventListener");
     const { container } = render(card({ selected: new Set(), onToggle: vi.fn() }));
-    expect(container.querySelector("[data-aside-card]")?.getAttribute("draggable")).toBe(
-      "false",
-    );
+    fireEvent.pointerDown(container.querySelector("[data-aside-card]")!, { button: 0 });
+    expect(addListener).not.toHaveBeenCalledWith("pointermove", expect.anything());
   });
 });

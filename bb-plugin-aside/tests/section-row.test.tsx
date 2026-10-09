@@ -7,7 +7,6 @@ import type React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { SectionRow, SECTION_DRAG_TYPE } from "@/components/sidenav/section-row";
-import { THREAD_DRAG_TYPE } from "@/components/sidenav/thread-card";
 import { OPEN_SELECT_GUARD_MS } from "@/components/ui/context-menu";
 
 afterEach(() => {
@@ -145,14 +144,6 @@ describe("section row drag and drop", () => {
     expect(onReorder).not.toHaveBeenCalled();
   });
 
-  it("still drops a thread onto the section", () => {
-    const onDropThread = vi.fn();
-    render(row(vi.fn(), { onDropThread }));
-    const handle = screen.getByText("Backlog").closest("[draggable]")!;
-    fireEvent.drop(handle, { dataTransfer: dataTransfer({ [THREAD_DRAG_TYPE]: "t1" }) });
-    expect(onDropThread).toHaveBeenCalledWith("t1");
-  });
-
   it("marks the drop position while another section hovers and clears it on drop", () => {
     render(row(vi.fn()));
     const handle = screen.getByText("Backlog").closest("[draggable]")!;
@@ -176,13 +167,6 @@ describe("section row drag and drop", () => {
     fireEvent(handle, over);
     expect(handle.getAttribute("data-drop")).toBe("after");
     dropAt(handle, 15, transfer);
-    expect(handle.hasAttribute("data-drop")).toBe(false);
-  });
-
-  it("shows no drop mark while a thread hovers", () => {
-    render(row(vi.fn()));
-    const handle = screen.getByText("Backlog").closest("[draggable]")!;
-    fireEvent.dragOver(handle, { dataTransfer: dataTransfer({ [THREAD_DRAG_TYPE]: "t1" }) });
     expect(handle.hasAttribute("data-drop")).toBe(false);
   });
 });
