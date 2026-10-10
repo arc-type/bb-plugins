@@ -315,8 +315,8 @@ export function Sidenav({
   const workingCount = useMemo(() => countWorkingFamilies(blocks), [blocks]);
   const waitingCount = useMemo(() => countWaitingFamilies(blocks), [blocks]);
   const pinned = useMemo(
-    () => (view.pinnedGroup ? pinnedFamilies(blocks) : []),
-    [blocks, view.pinnedGroup],
+    () => (view.pinnedGroup ? pinnedFamilies(blocks, view.pinnedOrder) : []),
+    [blocks, view.pinnedGroup, view.pinnedOrder],
   );
   const projectFilterNames = useMemo(
     () =>
@@ -422,6 +422,16 @@ export function Sidenav({
             );
         }
       },
+      onReorderPinned: (threadId, targetThreadId, where) => {
+        const pinnedOrder = moveInOrder(
+          view.pinnedOrder,
+          pinned.map((entry) => entry.family.root.id),
+          threadId,
+          targetThreadId,
+          where,
+        ).slice(-MAX_IDS);
+        patchView({ pinnedOrder });
+      },
       onNewSubThread: (threadId) => {
         const parent = threads.find((thread) => thread.id === threadId);
         if (parent === undefined) return;
@@ -454,7 +464,19 @@ export function Sidenav({
       },
       onDropRejected: report,
     }),
-    [actions, grouped, openThread, patchView, report, rpc, threads, view.threadOrder, view.threadSort],
+    [
+      actions,
+      grouped,
+      openThread,
+      patchView,
+      pinned,
+      report,
+      rpc,
+      threads,
+      view.pinnedOrder,
+      view.threadOrder,
+      view.threadSort,
+    ],
   );
 
   const selection: SelectionProps | null = useMemo(

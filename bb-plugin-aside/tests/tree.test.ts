@@ -690,6 +690,23 @@ describe("pinned group", () => {
     ).filter((block) => block.project.id === "p1");
     expect(pinnedFamilies(blocks)).toEqual([]);
   });
+
+  it("follows a dragged order across projects, undragged pins first", () => {
+    const blocks = groupThreads(
+      [
+        thread({ id: "a", projectId: "p1", isPinned: true }),
+        thread({ id: "c", projectId: "p2", isPinned: true }),
+        thread({ id: "d", projectId: "p2", isPinned: true }),
+      ],
+      [project("p1"), project("p2")],
+      options,
+    );
+    expect(pinnedFamilies(blocks, ["c", "a"]).map((entry) => entry.family.root.id)).toEqual([
+      "d",
+      "c",
+      "a",
+    ]);
+  });
 });
 
 describe("section reach", () => {

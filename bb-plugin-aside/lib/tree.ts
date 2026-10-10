@@ -476,15 +476,23 @@ export interface PinnedEntry {
  * search and tag filter as the list below it — a pin from a project you
  * filtered away would be a row that contradicts the filter chip above it.
  * The threads stay in their projects too: the group is a shortcut, not a move.
+ * A dragged order (`pinnedOrder`) wins; pins never dragged keep project order
+ * and come first, like everywhere else.
  */
-export function pinnedFamilies(blocks: readonly ProjectBlock[]): PinnedEntry[] {
+export function pinnedFamilies(
+  blocks: readonly ProjectBlock[],
+  pinnedOrder: readonly string[] = [],
+): PinnedEntry[] {
   const entries: PinnedEntry[] = [];
   for (const block of blocks) {
     for (const family of block.families) {
       if (family.root.isPinned) entries.push({ family, project: block.project });
     }
   }
-  return entries;
+  const rank = new Map(pinnedOrder.map((id, index) => [id, index]));
+  return entries.sort(
+    (left, right) => (rank.get(left.family.root.id) ?? -1) - (rank.get(right.family.root.id) ?? -1),
+  );
 }
 
 /**

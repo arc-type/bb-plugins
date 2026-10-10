@@ -48,6 +48,8 @@ export interface ViewState {
    * project, so this order is the same everywhere it appears.
    */
   sectionOrder: string[];
+  /** The pinned group's own order: it spans projects, so no project order fits it. */
+  pinnedOrder: string[];
   /** Collapsed projects, as project ids. */
   collapsedProjects: string[];
   /** Collapsed sections, as `projectId:sectionId`. */
@@ -87,6 +89,7 @@ export const DEFAULT_VIEW: ViewState = {
   personalAfter: null,
   threadOrder: [],
   sectionOrder: [],
+  pinnedOrder: [],
   collapsedProjects: [],
   collapsedSections: [],
   openQuiet: [],
@@ -154,6 +157,7 @@ export function parseViewState(value: unknown): ViewState {
         : null,
     threadOrder: readIds(raw.threadOrder),
     sectionOrder: readIds(raw.sectionOrder),
+    pinnedOrder: readIds(raw.pinnedOrder),
     collapsedProjects: readIds(raw.collapsedProjects),
     collapsedSections: readIds(raw.collapsedSections),
     openQuiet: readIds(raw.openQuiet),
@@ -241,6 +245,7 @@ export function resetViewSettings(view: ViewState): ViewState {
     personalAfter: view.personalAfter,
     threadOrder: view.threadOrder,
     sectionOrder: view.sectionOrder,
+    pinnedOrder: view.pinnedOrder,
     collapsedProjects: view.collapsedProjects,
     collapsedSections: view.collapsedSections,
   };

@@ -17,9 +17,10 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function card(id: string) {
+function card(id: string, group: "list" | "pinned" = "list") {
   const element = document.createElement("div");
   element.dataset.asideCard = id;
+  element.dataset.asideGroup = group;
   vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
     top: 0, bottom: 100, height: 100, left: 0, right: 200, width: 200, x: 0, y: 0,
     toJSON: () => ({}),
@@ -28,10 +29,11 @@ function card(id: string) {
   return element;
 }
 
-function press(threadId: string, onCard = vi.fn()) {
+function press(threadId: string, onCard = vi.fn(), group: "list" | "pinned" = "list") {
   beginThreadDrag(
     { button: 0, clientX: 10, clientY: 10 } as unknown as React.PointerEvent<HTMLElement>,
     threadId,
+    group,
     onCard,
   );
   return onCard;
@@ -91,6 +93,22 @@ describe("thread drag", () => {
     const onCard = press("t1");
     fireEvent.pointerMove(window, { clientX: 10, clientY: 90 });
     fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.pointerUp(window);
+    expect(onCard).not.toHaveBeenCalled();
+  });
+
+  it("reorders inside the pinned group, without nesting", () => {
+    pointAt(card("t2", "pinned"));
+    const onCard = press("t1", vi.fn(), "pinned");
+    fireEvent.pointerMove(window, { clientX: 10, clientY: 45 });
+    fireEvent.pointerUp(window);
+    expect(onCard).toHaveBeenCalledWith("t1", "t2", "before");
+  });
+
+  it("does not drop a pin onto the list's copy of a thread", () => {
+    pointAt(card("t2", "list"));
+    const onCard = press("t1", vi.fn(), "pinned");
+    fireEvent.pointerMove(window, { clientX: 10, clientY: 45 });
     fireEvent.pointerUp(window);
     expect(onCard).not.toHaveBeenCalled();
   });

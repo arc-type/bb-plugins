@@ -9,8 +9,11 @@
 import { useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import type { DropWhere } from "@/components/sidenav/thread-card";
 
+/** The list below, or the pinned group at the top: a drag stays in its own. */
+export type ThreadDragGroup = "list" | "pinned";
+
 export type ThreadDropTarget =
-  | { kind: "card"; id: string; where: DropWhere }
+  | { kind: "card"; id: string; group: ThreadDragGroup; where: DropWhere }
   | { kind: "section"; id: string };
 
 /** Pixels the pointer travels before a press becomes a drag. */
@@ -26,14 +29,21 @@ export function targetAt(
   element: Element | null,
   clientY: number,
   draggedId: string,
+  group: ThreadDragGroup = "list",
 ): ThreadDropTarget | null {
   const card = element?.closest<HTMLElement>("[data-aside-card]");
   const cardId = card?.dataset.asideCard;
   if (card && cardId) {
-    if (cardId === draggedId) return null;
+    // A pin shows up twice — in the group and in its project. Only the copy in
+    // the dragged card's own group is a target.
+    if (cardId === draggedId || (card.dataset.asideGroup ?? "list") !== group) return null;
     const bounds = card.getBoundingClientRect();
-    return { kind: "card", id: cardId, where: dropWhereAt((clientY - bounds.top) / bounds.height) };
+    const share = (clientY - bounds.top) / bounds.height;
+    // The pinned group is a flat shortcut list: no nesting there.
+    const where = group === "pinned" ? (share < 0.5 ? "before" : "after") : dropWhereAt(share);
+    return { kind: "card", id: cardId, group, where };
   }
+  if (group === "pinned") return null;
   const sectionId = element?.closest<HTMLElement>("[data-aside-section]")?.dataset.asideSection;
   return sectionId ? { kind: "section", id: sectionId } : null;
 }
@@ -46,6 +56,7 @@ function setTarget(next: ThreadDropTarget | null) {
   if (
     next?.kind === target?.kind &&
     next?.id === target?.id &&
+    (next?.kind !== "card" || target?.kind !== "card" || next.group === target.group) &&
     (next?.kind !== "card" || target?.kind !== "card" || next.where === target.where)
   ) {
     return;
@@ -60,9 +71,11 @@ function subscribe(listener: () => void) {
 }
 
 /** Where a drag would land on this card, or `null`. */
-export function useCardDropWhere(cardId: string): DropWhere | null {
+export function useCardDropWhere(cardId: string, group: ThreadDragGroup): DropWhere | null {
   return useSyncExternalStore(subscribe, () =>
-    target?.kind === "card" && target.id === cardId ? target.where : null,
+    target?.kind === "card" && target.id === cardId && target.group === group
+      ? target.where
+      : null,
   );
 }
 
@@ -96,6 +109,7 @@ export function registerSectionDrop(sectionId: string, onDrop: (threadId: string
 export function beginThreadDrag(
   event: ReactPointerEvent<HTMLElement>,
   threadId: string,
+  group: ThreadDragGroup,
   onCard: (threadId: string, targetId: string, where: DropWhere) => void,
 ) {
   if (event.button !== 0) return;
@@ -113,7 +127,7 @@ export function beginThreadDrag(
       document.body.style.userSelect = "none";
     }
     setTarget(
-      targetAt(document.elementFromPoint(moveEvent.clientX, moveEvent.clientY), moveEvent.clientY, threadId),
+      targetAt(document.elementFromPoint(moveEvent.clientX, moveEvent.clientY), moveEvent.clientY, threadId, group),
     );
   };
   const stop = () => {

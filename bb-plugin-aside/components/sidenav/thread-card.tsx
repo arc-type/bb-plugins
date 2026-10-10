@@ -85,6 +85,8 @@ export interface CardCallbacks {
   onNewSubThread: (threadId: string) => void;
   onNest: (threadId: string, parentThreadId: string) => void;
   onReorder: (threadId: string, targetThreadId: string, where: "before" | "after") => void;
+  /** Reorders inside the pinned group at the top, which spans projects. */
+  onReorderPinned: (threadId: string, targetThreadId: string, where: "before" | "after") => void;
   onDropRejected: (reason: string) => void;
 }
 
@@ -188,7 +190,8 @@ export function ThreadCard({
 }) {
   const { root, children } = family;
   const { splitProps } = useSidebarThreadSplit(root.id);
-  const dropWhere = useCardDropWhere(root.id);
+  const group = pinnedIn === undefined ? "list" : "pinned";
+  const dropWhere = useCardDropWhere(root.id, group);
   // The root's mark stands for the whole family, not just for the root itself —
   // exactly as the project row's mark stands for all of its families. Otherwise
   // the root would stay silent while a child works, and the signal would jump
@@ -209,15 +212,16 @@ export function ThreadCard({
       >
         <div
           data-aside-card={root.id}
+          data-aside-group={group}
           // Dragging and selecting are the same gesture with the same button.
           // While a selection is running the card stays put. Pointer events,
           // not `draggable`: the host's split props block native drags.
           onPointerDown={(event) => {
             if (selection !== null) return;
             splitProps.onPointerDown?.(event);
-            if (pinnedIn !== undefined) return;
-            beginThreadDrag(event, root.id, (draggedId, targetId, where) => {
+            beginThreadDrag(event, root.id, group, (draggedId, targetId, where) => {
               if (where === "into") callbacks.onNest(draggedId, targetId);
+              else if (group === "pinned") callbacks.onReorderPinned(draggedId, targetId, where);
               else callbacks.onReorder(draggedId, targetId, where);
             });
           }}
@@ -234,8 +238,9 @@ export function ThreadCard({
             callbacks.onOpen(root.id, event.metaKey || event.ctrlKey);
           }}
           className={cn(
-            "grid cursor-pointer grid-cols-[14px_minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-0.5 rounded-lg px-2",
+            "grid grid-cols-[14px_minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-0.5 rounded-lg px-2",
             compact ? "min-h-9 grid-rows-[16px] py-1" : "min-h-12 grid-rows-[16px_16px] py-1.5",
+            selection === null ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
             isActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
             // A checked box on a 14px glyph is easy to miss while scanning a
             // long list, so the row carries the state as well.

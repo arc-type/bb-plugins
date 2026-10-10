@@ -71,6 +71,7 @@ beforeEach(() => {
     onCreateSection: vi.fn(),
     onNest: vi.fn(),
     onReorder: vi.fn(),
+    onReorderPinned: vi.fn(),
     onDropRejected: vi.fn(),
   };
 });

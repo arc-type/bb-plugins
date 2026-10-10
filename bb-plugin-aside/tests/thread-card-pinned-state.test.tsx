@@ -65,6 +65,7 @@ const callbacks: CardCallbacks = {
   onCreateSection: vi.fn(),
   onNest: vi.fn(),
   onReorder: vi.fn(),
+  onReorderPinned: vi.fn(),
   onDropRejected: vi.fn(),
   onNewSubThread: vi.fn(),
 };
