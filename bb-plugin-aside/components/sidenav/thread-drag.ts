@@ -19,9 +19,10 @@ export type ThreadDropTarget =
 /** Pixels the pointer travels before a press becomes a drag. */
 const ENGAGE_DISTANCE = 4;
 
-/** The top and bottom 30% reorder, the middle nests. */
+/** The upper half drops before, the lower half after. A drag never nests:
+ *  that turned an accidental drop into a sub-thread you could not drag out. */
 export function dropWhereAt(share: number): DropWhere {
-  return share < 0.3 ? "before" : share > 0.7 ? "after" : "into";
+  return share < 0.5 ? "before" : "after";
 }
 
 /** The drop target under a point, read from the rows' data attributes. */
@@ -39,9 +40,7 @@ export function targetAt(
     if (cardId === draggedId || (card.dataset.asideGroup ?? "list") !== group) return null;
     const bounds = card.getBoundingClientRect();
     const share = (clientY - bounds.top) / bounds.height;
-    // The pinned group is a flat shortcut list: no nesting there.
-    const where = group === "pinned" ? (share < 0.5 ? "before" : "after") : dropWhereAt(share);
-    return { kind: "card", id: cardId, group, where };
+    return { kind: "card", id: cardId, group, where: dropWhereAt(share) };
   }
   if (group === "pinned") return null;
   const sectionId = element?.closest<HTMLElement>("[data-aside-section]")?.dataset.asideSection;

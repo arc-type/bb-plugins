@@ -63,7 +63,7 @@ function SelectMark({
 }
 
 /** Where a dragged card lands: before, after, or inside. */
-export type DropWhere = "before" | "after" | "into";
+export type DropWhere = "before" | "after";
 
 /**
  * The selection mode, or `null` while it is off.
@@ -83,7 +83,8 @@ export interface CardCallbacks {
   onSetSection: (threadId: string, sectionId: string | null) => void;
   onCreateSection: (threadId: string) => void;
   onNewSubThread: (threadId: string) => void;
-  onNest: (threadId: string, parentThreadId: string) => void;
+  /** Lifts a sub-thread back to the top level of its project. */
+  onDetach: (threadId: string) => void;
   onReorder: (threadId: string, targetThreadId: string, where: "before" | "after") => void;
   /** Reorders inside the pinned group at the top, which spans projects. */
   onReorderPinned: (threadId: string, targetThreadId: string, where: "before" | "after") => void;
@@ -220,8 +221,7 @@ export function ThreadCard({
             if (selection !== null) return;
             splitProps.onPointerDown?.(event);
             beginThreadDrag(event, root.id, group, (draggedId, targetId, where) => {
-              if (where === "into") callbacks.onNest(draggedId, targetId);
-              else if (group === "pinned") callbacks.onReorderPinned(draggedId, targetId, where);
+              if (group === "pinned") callbacks.onReorderPinned(draggedId, targetId, where);
               else callbacks.onReorder(draggedId, targetId, where);
             });
           }}
@@ -245,7 +245,6 @@ export function ThreadCard({
             // A checked box on a 14px glyph is easy to miss while scanning a
             // long list, so the row carries the state as well.
             selection?.selected.has(root.id) && "bg-sidebar-accent",
-            dropWhere === "into" && "ring-1 ring-muted-foreground",
             dropWhere === "before" && "shadow-[inset_0_1px_0_0_var(--muted-foreground)]",
             dropWhere === "after" && "shadow-[inset_0_-1px_0_0_var(--muted-foreground)]",
           )}
@@ -389,6 +388,7 @@ function ChildRow({
       onSetSection={(sectionId) => callbacks.onSetSection(thread.id, sectionId)}
       onCreateSection={() => callbacks.onCreateSection(thread.id)}
       onNewSubThread={() => callbacks.onNewSubThread(thread.id)}
+      onDetach={() => callbacks.onDetach(thread.id)}
     >
       <div
         onClick={(event) => {

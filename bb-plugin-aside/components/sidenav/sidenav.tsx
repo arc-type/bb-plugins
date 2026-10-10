@@ -445,19 +445,9 @@ export function Sidenav({
             report(cause instanceof Error ? cause.message : String(cause)),
           );
       },
-      onNest: (threadId, parentThreadId) => {
-        const dragged = threads.find((thread) => thread.id === threadId);
-        const target = threads.find((thread) => thread.id === parentThreadId);
-        if (dragged === undefined || target === undefined) return;
-        // A thread does not change projects: `updateThread` has no projectId.
-        // We say so instead of swallowing it silently.
-        if (dragged.projectId !== target.projectId) {
-          report("A thread does not change projects.");
-          return;
-        }
+      onDetach: (threadId) => {
         void rpc
-          .call("thread_set_parent", { threadId, parentThreadId })
-          .then(() => setOpenChildren((current) => ({ ...current, [parentThreadId]: true })))
+          .call("thread_set_parent", { threadId, parentThreadId: null })
           .catch((cause: unknown) =>
             report(cause instanceof Error ? cause.message : String(cause)),
           );

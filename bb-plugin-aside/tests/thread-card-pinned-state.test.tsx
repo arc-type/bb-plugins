@@ -63,7 +63,7 @@ const callbacks: CardCallbacks = {
   onRename: vi.fn(),
   onSetSection: vi.fn(),
   onCreateSection: vi.fn(),
-  onNest: vi.fn(),
+  onDetach: vi.fn(),
   onReorder: vi.fn(),
   onReorderPinned: vi.fn(),
   onDropRejected: vi.fn(),

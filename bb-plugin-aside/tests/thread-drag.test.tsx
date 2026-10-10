@@ -44,9 +44,10 @@ function pointAt(element: Element | null) {
 }
 
 describe("thread drag", () => {
-  it("splits a card into before, into and after", () => {
+  it("splits a card into before and after, never into", () => {
     expect(dropWhereAt(0.1)).toBe("before");
-    expect(dropWhereAt(0.5)).toBe("into");
+    expect(dropWhereAt(0.49)).toBe("before");
+    expect(dropWhereAt(0.5)).toBe("after");
     expect(dropWhereAt(0.9)).toBe("after");
   });
 

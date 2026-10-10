@@ -41,6 +41,7 @@ export function RowMenu({
   onSetSection,
   onCreateSection,
   onNewSubThread,
+  onDetach,
   children,
 }: {
   thread: PluginSidebarThread;
@@ -50,6 +51,8 @@ export function RowMenu({
   onCreateSection: () => void;
   /** New thread, one level under this one — created and opened right away. */
   onNewSubThread: () => void;
+  /** Only on sub-threads: back to the top level of the project. */
+  onDetach?: () => void;
   children: ReactNode;
 }) {
   const actions = useSidebarThreadActions();
@@ -69,6 +72,9 @@ export function RowMenu({
           <ContextMenuShortcut>⌘Click</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem onSelect={onNewSubThread}>New sub-thread</ContextMenuItem>
+        {onDetach !== undefined && thread.parentThreadId ? (
+          <ContextMenuItem onSelect={onDetach}>Detach from parent</ContextMenuItem>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={onRename}>Rename</ContextMenuItem>
         <ContextMenuItem
