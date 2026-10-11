@@ -242,7 +242,7 @@ describe("crew file validation", () => {
   });
 
   describe("skills catalogue", () => {
-    const catalog = { names: new Set(["memory", "gitlab"]) };
+    const catalog = { names: new Set(["memory", "gitlab"]), bodies: new Map() };
     it("positive: known skill names give no warning", () => {
       const spec = base();
       spec.skills = ["memory"];

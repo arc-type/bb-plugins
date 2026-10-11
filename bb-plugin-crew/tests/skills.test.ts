@@ -74,4 +74,16 @@ describe("resolveSkillsCatalog", () => {
     const catalog = await resolveSkillsCatalog({ homeDir: "/home", projectPath: null }, fs);
     expect(catalog.names.size).toBe(0);
   });
+
+  it("positive: bodies holds the SKILL.md text without frontmatter, by resolved name", async () => {
+    const fs = fakeFs({ "/home/.bb/skills/memory/SKILL.md": frontmatter("memory") });
+    const catalog = await resolveSkillsCatalog({ homeDir: "/home", projectPath: null }, fs);
+    expect(catalog.bodies.get("memory")).toBe("Body.");
+  });
+
+  it("positive: bodies falls back to the full content when there is no frontmatter", async () => {
+    const fs = fakeFs({ "/home/.bb/skills/gitlab/SKILL.md": "# Gitlab\n\nNo frontmatter here." });
+    const catalog = await resolveSkillsCatalog({ homeDir: "/home", projectPath: null }, fs);
+    expect(catalog.bodies.get("gitlab")).toBe("# Gitlab\n\nNo frontmatter here.");
+  });
 });
