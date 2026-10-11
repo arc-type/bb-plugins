@@ -51,11 +51,10 @@ export function taken(run: CanvasRun): Set<string> {
     const key = edgeKey(edge);
     const toAttempts = attempts.get(edge.to) ?? [];
     if (toAttempts.length === 0) continue;
-    if (back.has(key)) {
-      if (toAttempts.length < 2) continue;
-    } else if (edge.from !== START_NODE && (attempts.get(edge.from) ?? []).length === 0) {
-      continue;
-    }
+    // Both kinds need the source attempted: a failed step retried in place
+    // has two attempts too, but nothing came back to it over the loop.
+    if (edge.from !== START_NODE && (attempts.get(edge.from) ?? []).length === 0) continue;
+    if (back.has(key) && toAttempts.length < 2) continue;
     keys.add(key);
   }
   return keys;
