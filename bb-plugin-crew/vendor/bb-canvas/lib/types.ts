@@ -30,6 +30,11 @@ export type CanvasNode = {
 
 export type CanvasEdgeVariant = "flow" | "back" | "message";
 
+/** Whether this edge was taken in the current run (solid) or is being taken
+ *  right now (animated). Undefined draws exactly as before BBP-146 — a plain
+ *  `--border` line. A `message` edge never carries this: that is BBP-97's. */
+export type CanvasEdgeState = "now" | "taken";
+
 /**
  * An edge beyond the tree itself: `layoutTree` draws the parent/child line for
  * every visible node on its own, so only the exceptions — a back reference, a
@@ -42,4 +47,5 @@ export type CanvasEdge = {
   variant: CanvasEdgeVariant;
   label?: string;
   count?: number;
+  state?: CanvasEdgeState;
 };

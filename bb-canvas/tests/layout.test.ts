@@ -119,4 +119,63 @@ describe("layoutTree", () => {
     const { edges: placed } = layoutTree(nodes, new Set(), edges);
     expect(placed).toHaveLength(0);
   });
+
+  describe("edge state (BBP-146)", () => {
+    it("leaves a tree line without a state when its child was never attempted", () => {
+      const nodes = [node("run", null, { kind: "graph-run" }), node("a", "run", { kind: "step" })];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("marks a tree line 'taken' once its child has a status other than running", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step", status: "done" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBe("taken");
+    });
+
+    it("marks a tree line 'now' while its child is running", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step", status: "running" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBe("now");
+    });
+
+    it("counts a skipped step as taken, like the host's own nodeRuns entry does", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        // canvas-layer.ts maps a skipped attempt's status to "idle" — there is
+        // no separate "skipped" CanvasStatus.
+        node("a", "run", { kind: "step", status: "idle" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBe("taken");
+    });
+
+    it("passes a declared back edge's own state through unchanged", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step" }),
+        node("b", "run", { kind: "step" }),
+      ];
+      const edges: CanvasEdge[] = [{ from: "b", to: "a", variant: "back", state: "now" }];
+      const { edges: placed } = layoutTree(nodes, new Set(["run"]), edges);
+      expect(placed.find((edge) => edge.variant === "back")!.state).toBe("now");
+    });
+
+    it("leaves a declared edge without a state when none was given", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step" }),
+        node("b", "run", { kind: "step" }),
+      ];
+      const edges: CanvasEdge[] = [{ from: "b", to: "a", variant: "back" }];
+      const { edges: placed } = layoutTree(nodes, new Set(["run"]), edges);
+      expect(placed.find((edge) => edge.variant === "back")!.state).toBeUndefined();
+    });
+  });
 });
