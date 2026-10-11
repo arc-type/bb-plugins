@@ -145,7 +145,13 @@ describe("layoutTree", () => {
       expect(edges[0]!.state).toBe("now");
     });
 
-    it("counts a skipped step as taken, like the host's own nodeRuns entry does", () => {
+    it("leaves the line to an idle node plain — idle members are not a path the run took", () => {
+      const nodes = [node("crew", null, { kind: "crew" }), node("m1", "crew", { status: "idle" })];
+      const { edges } = layoutTree(nodes, new Set(["crew"]));
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("does not count a skipped step as taken (lead decision: skipped is where routing did not go)", () => {
       const nodes = [
         node("run", null, { kind: "graph-run" }),
         // canvas-layer.ts maps a skipped attempt's status to "idle" — there is
@@ -153,7 +159,7 @@ describe("layoutTree", () => {
         node("a", "run", { kind: "step", status: "idle" }),
       ];
       const { edges } = layoutTree(nodes, new Set(["run"]));
-      expect(edges[0]!.state).toBe("taken");
+      expect(edges[0]!.state).toBeUndefined();
     });
 
     it("passes a declared back edge's own state through unchanged", () => {

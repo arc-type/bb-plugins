@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { CanvasShell } from "@/components/CanvasShell";
+import { CanvasShell, colorLightness } from "@/components/CanvasShell";
 import type { CanvasEdge, CanvasNode } from "@/lib/types";
 
 afterEach(cleanup);
@@ -57,5 +57,15 @@ describe("CanvasShell", () => {
     );
     const card = screen.getByRole("button", { name: new RegExp("^steps-impl — ") });
     expect(card.style.border).not.toContain("var(--border)");
+  });
+});
+
+describe("colorLightness", () => {
+  it("treats a fully transparent background as unreadable, not as black", () => {
+    expect(colorLightness("rgba(0, 0, 0, 0)")).toBeNull();
+  });
+
+  it("reads an opaque light background as light", () => {
+    expect(colorLightness("rgb(250, 250, 250)")).toBeGreaterThan(0.5);
   });
 });

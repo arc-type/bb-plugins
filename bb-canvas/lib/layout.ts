@@ -156,10 +156,13 @@ export function layoutTree(
 /** A tree line's state follows the child it leads to, not a declared edge —
  *  there is no `CanvasEdge` for it to read one from. A child with no status
  *  was never attempted; `running` is "now"; anything else it already has a
- *  status for was attempted, so the line is "taken" (a `skipped` step counts
- *  too — it has a `nodeRuns` entry, it just was not where the run went). */
+ *  status for was attempted, so the line is "taken" — except `idle`, which is
+ *  also what a `skipped` step maps to: routing did not go there. */
 function flowEdgeState(child: CanvasNode): CanvasEdgeState | undefined {
-  if (child.status === undefined) return undefined;
+  // `idle` is a status, but nothing went there: an idle crew member must not
+  // light its line up like a step the run passed through, or every member
+  // list turns blue and the run's real path disappears in it.
+  if (child.status === undefined || child.status === "idle") return undefined;
   return child.status === "running" ? "now" : "taken";
 }
 

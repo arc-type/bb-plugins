@@ -29,20 +29,27 @@ export function useHostColorMode(): [React.RefObject<HTMLDivElement | null>, Col
   const [mode, setMode] = useState<ColorMode>("system");
   const measure = useCallback(() => {
     if (!ref.current || typeof getComputedStyle !== "function") return;
-    const background = getComputedStyle(ref.current).backgroundColor;
-    const lightness = colorLightness(background);
-    if (lightness !== null) setMode(lightness < 0.5 ? "dark" : "light");
+    // The shell itself is transparent, and `rgba(0, 0, 0, 0)` would read as
+    // black: walk up to the first painted background, the one actually on
+    // screen behind the canvas.
+    for (let element: Element | null = ref.current; element; element = element.parentElement) {
+      const lightness = colorLightness(getComputedStyle(element).backgroundColor);
+      if (lightness === null) continue;
+      setMode(lightness < 0.5 ? "dark" : "light");
+      return;
+    }
   }, []);
   useLayoutEffect(measure);
   return [ref, mode];
 }
 
 /** Perceived lightness (0–1) of an `rgb()`/`rgba()` string, or `null` if it
- *  cannot be read — a transparent background, for instance. */
+ *  cannot be read or is fully transparent. */
 export function colorLightness(color: string): number | null {
   const match = color.match(/rgba?\(([^)]+)\)/);
   if (!match) return null;
-  const [r, g, b] = match[1]!.split(",").map((part) => Number(part.trim()));
+  const [r, g, b, alpha] = match[1]!.split(",").map((part) => Number(part.trim()));
+  if (alpha === 0) return null;
   if (r === undefined || g === undefined || b === undefined || [r, g, b].some(Number.isNaN)) return null;
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }

@@ -72,7 +72,9 @@ type Border = { border: string; pulse: boolean };
  *  the same regardless of which colour mode the toolbar is set to. */
 function borderFor(status: CanvasStatus | undefined, kind: CanvasNodeKind | undefined, colorMode: NodeCardColorMode): Border {
   if (status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
-  if (status === "waiting") return { border: `1.5px dashed ${AMBER}`, pulse: false };
+  // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
+  // state that needs the human — it must not read weaker than "running".
+  if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false };
   if (status === "escalated") return { border: `1.5px solid ${AMBER}`, pulse: false };
   if (status === "running") {
     return { border: `1.5px solid var(--primary)`, pulse: true };
