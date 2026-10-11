@@ -10,11 +10,22 @@ import { SearchBox } from "@/components/SearchBox";
 import { layoutTree } from "@/lib/layout";
 import type { CanvasEdge, CanvasNode } from "@/lib/types";
 
+/** What loading a node's children hands back — a thread's turns, typically. */
+export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly CanvasEdge[] };
+
 export type CanvasViewProps = {
   nodes: readonly CanvasNode[];
   edges?: readonly CanvasEdge[];
   /** Expanded by default — e.g. every node up to the member level. */
   initialExpanded?: ReadonlySet<string>;
+  /**
+   * Loads a node's children the first time it is expanded — a thread's turns
+   * from the SDK timeline, say. Called at most once per node id; its own
+   * provider never needs to know this ran, since the result just joins
+   * `nodes`/`edges` for layout purposes. Nodes that come with their children
+   * already in `nodes` (crew, graph-run, …) need none of this.
+   */
+  loadChildren?: (node: CanvasNode) => Promise<LoadedChildren>;
   className?: string;
 };
 
@@ -22,27 +33,38 @@ function parentOf(byId: Map<string, CanvasNode>, node: CanvasNode): string | nul
   return node.parentId !== null && byId.has(node.parentId) ? node.parentId : null;
 }
 
-export function CanvasView({ nodes, edges = [], initialExpanded, className }: CanvasViewProps) {
+export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, className }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded ?? []));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [loaded, setLoaded] = useState<ReadonlyMap<string, LoadedChildren>>(new Map());
+  const loading = useRef<Set<string>>(new Set());
   const shellRef = useRef<CanvasShellHandle>(null);
 
-  const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const allNodes = useMemo(
+    () => [...nodes, ...[...loaded.values()].flatMap((result) => result.nodes)],
+    [nodes, loaded],
+  );
+  const allEdges = useMemo(
+    () => [...edges, ...[...loaded.values()].flatMap((result) => result.edges ?? [])],
+    [edges, loaded],
+  );
+
+  const byId = useMemo(() => new Map(allNodes.map((node) => [node.id, node])), [allNodes]);
   const visible = useMemo(
-    () => layoutTree(nodes, expanded, edges).positions.map((placed) => byId.get(placed.id)!),
-    [nodes, expanded, edges, byId],
+    () => layoutTree(allNodes, expanded, allEdges).positions.map((placed) => byId.get(placed.id)!),
+    [allNodes, expanded, allEdges, byId],
   );
   const visibleIds = useMemo(() => new Set(visible.map((node) => node.id)), [visible]);
   const hasChildren = useMemo(() => {
     const parents = new Set<string>();
-    for (const node of nodes) {
+    for (const node of allNodes) {
       const parent = parentOf(byId, node);
       if (parent !== null) parents.add(parent);
     }
     return parents;
-  }, [nodes, byId]);
+  }, [allNodes, byId]);
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
 
@@ -50,8 +72,22 @@ export function CanvasView({ nodes, edges = [], initialExpanded, className }: Ca
     setSelectedId(id);
   }
 
+  /** Opens a node, and — the first time, if a loader was given — fetches its
+   *  children. A node with no children and no loader simply stays as it was. */
   function expand(id: string) {
     setExpanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    const node = byId.get(id);
+    if (!node || !loadChildren || loaded.has(id) || loading.current.has(id)) return;
+    loading.current.add(id);
+    void loadChildren(node).then(
+      (result) => {
+        loading.current.delete(id);
+        setLoaded((prev) => new Map(prev).set(id, result));
+      },
+      () => {
+        loading.current.delete(id);
+      },
+    );
   }
 
   function collapse(id: string) {
@@ -127,8 +163,12 @@ export function CanvasView({ nodes, edges = [], initialExpanded, className }: Ca
       case "ArrowRight":
       case "Enter":
         event.preventDefault();
-        if (selectedId !== null && hasChildren.has(selectedId)) expand(selectedId);
-        else if (event.key === "ArrowRight") moveToFirstChild();
+        if (selectedId === null) break;
+        // Always expand, even with no known children yet — a lazily loaded
+        // node (a thread, before its turns arrive) looks exactly like that
+        // until `loadChildren` resolves.
+        expand(selectedId);
+        if (event.key === "ArrowRight" && hasChildren.has(selectedId)) moveToFirstChild();
         break;
       case "ArrowLeft":
         event.preventDefault();
@@ -175,7 +215,7 @@ export function CanvasView({ nodes, edges = [], initialExpanded, className }: Ca
       onKeyDown={handleKeyDown}
       style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none" }}
     >
-      <Breadcrumb nodes={nodes} selectedId={selectedId} onSelect={select} />
+      <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
       {searchOpen ? (
         <SearchBox
           value={searchQuery}
@@ -188,9 +228,9 @@ export function CanvasView({ nodes, edges = [], initialExpanded, className }: Ca
         <div style={{ flex: 1, minWidth: 0 }}>
           <CanvasShell
             ref={shellRef}
-            nodes={nodes}
+            nodes={allNodes}
             expanded={expanded}
-            edges={edges}
+            edges={allEdges}
             selectedId={selectedId}
             onSelect={select}
           />

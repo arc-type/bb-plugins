@@ -2,7 +2,7 @@
 //
 // Keyboard navigation over fixture data (BBP-131 WI2) — one test per key, as
 // the acceptance criterion asks: each is a real gate, not a smoke test.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CanvasView } from "@/components/CanvasView";
 import type { CanvasNode } from "@/lib/types";
@@ -124,5 +124,36 @@ describe("CanvasView keyboard navigation", () => {
       fireEvent.keyDown(root, { key: "+" });
       fireEvent.keyDown(root, { key: "-" });
     }).not.toThrow();
+  });
+});
+
+describe("CanvasView lazy children", () => {
+  it("loads a node's children on first expand and renders them once they resolve", async () => {
+    const loadChildren = vi.fn(async (node: CanvasNode) => ({
+      nodes: [{ id: `${node.id}:turn-1`, kind: "turn" as const, label: "Turn 1", parentId: node.id }],
+    }));
+    const { container } = render(
+      <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card("orch-lead — member"));
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(loadChildren).toHaveBeenCalledWith(expect.objectContaining({ id: "m1" }));
+    expect(await screen.findByRole("button", { name: "Turn 1 — turn" })).toBeTruthy();
+  });
+
+  it("does not call the loader twice for the same node", async () => {
+    const loadChildren = vi.fn(async (node: CanvasNode) => ({
+      nodes: [{ id: `${node.id}:turn-1`, kind: "turn" as const, label: "Turn 1", parentId: node.id }],
+    }));
+    const { container } = render(
+      <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card("orch-lead — member"));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await screen.findByRole("button", { name: "Turn 1 — turn" });
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(loadChildren).toHaveBeenCalledOnce();
   });
 });
