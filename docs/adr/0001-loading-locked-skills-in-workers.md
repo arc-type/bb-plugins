@@ -18,11 +18,15 @@ Probe on 2026-10-11, Claude Code in BB worker threads:
   rejects the graph on save and says why.
 - **Crew: skill injection.** Members get their work as follow-up messages
   (`[crew] From: …`), so slash invocation is not possible there. The crew plugin
-  puts the SKILL.md text of each member skill into the member instructions.
-  The human chose these skills in crew.yaml; that is the user invocation the
-  flag protects.
+  puts the SKILL.md text of each member skill into the kickoff brief and the
+  `crew_whoami` response. BB instructions are capped at 4096 characters
+  (`INSTRUCTION_LIMIT`) and SKILL.md texts don't fit, so the instructions keep
+  only a short hint ("Skill text: crew_whoami"). The human chose these skills
+  in crew.yaml; that is the user invocation the flag protects.
 
 ## Consequences
 - No local copies, so no drift from upstream skills.
 - Graph nodes carry at most one locked skill.
-- Crew instructions grow by the size of the injected SKILL.md files.
+- A member's kickoff brief and `crew_whoami` response grow by the size of its
+  injected SKILL.md files; the instructions themselves stay within
+  `INSTRUCTION_LIMIT`.
