@@ -14,10 +14,10 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { layoutTree, type TreeLayout } from "@/lib/layout";
-import { NodeCard, type NodeCardProps } from "@/components/NodeCard";
-import { StatusEdge, type StatusEdgeData } from "@/components/StatusEdge";
-import type { CanvasEdge, CanvasNode } from "@/lib/types";
+import { layoutTree, type TreeLayout } from "../lib/layout";
+import { NodeCard, type NodeCardProps } from "./NodeCard";
+import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
+import type { CanvasEdge, CanvasNode } from "../lib/types";
 
 /** React Flow's colour mode, read from the BB theme actually on screen —
  *  left at its default, React Flow paints white chrome inside a dark host. */

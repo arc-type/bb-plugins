@@ -1,7 +1,7 @@
 // Details of the selected node. Part 1 shows what a provider put in `meta` —
 // a chat or replay feed for `thread`/`turn` nodes is a later ticket, once
 // there is a timeline to lazily load into this same slot.
-import type { CanvasNode } from "@/lib/types";
+import type { CanvasNode } from "../lib/types";
 
 export type SidebarProps = {
   node: CanvasNode;

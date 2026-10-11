@@ -6,7 +6,7 @@
 // Status is a neutral dot in this package: colour by status is BBP-146, once
 // the view it feeds exists to judge the colours against.
 import type { ReactNode } from "react";
-import type { CanvasStatus } from "@/lib/types";
+import type { CanvasStatus } from "../lib/types";
 
 export type NodeCardProps = {
   label: string;

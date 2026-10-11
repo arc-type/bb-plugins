@@ -3,7 +3,7 @@
 // plain dashed line (its pulse and counter land later, once there is
 // traffic to show one for).
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
-import type { CanvasEdgeVariant } from "@/lib/types";
+import type { CanvasEdgeVariant } from "../lib/types";
 
 export type StatusEdgeData = {
   variant: CanvasEdgeVariant;

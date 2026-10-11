@@ -1,6 +1,6 @@
 // The path from the tree's root to the selected node. Nothing selected shows
 // nothing — a breadcrumb with no destination is noise, not orientation.
-import type { CanvasNode } from "@/lib/types";
+import type { CanvasNode } from "../lib/types";
 
 export type BreadcrumbProps = {
   nodes: readonly CanvasNode[];
