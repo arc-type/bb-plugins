@@ -23,8 +23,10 @@ export const nodeSkillsFs: SkillsFs = {
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
 
-/** The `name:` frontmatter field of `<dir>/SKILL.md`, the directory name when absent, or null when there is no SKILL.md there. */
-async function skillName(fs: SkillsFs, dir: string, fallback: string): Promise<string | null> {
+type SkillEntry = { name: string; body: string };
+
+/** The resolved name and body (text without frontmatter) of `<dir>/SKILL.md`, or null when there is no SKILL.md there. */
+async function readSkill(fs: SkillsFs, dir: string, fallback: string): Promise<SkillEntry | null> {
   let content: string;
   try {
     content = await fs.readFile(join(dir, "SKILL.md"));
@@ -32,22 +34,23 @@ async function skillName(fs: SkillsFs, dir: string, fallback: string): Promise<s
     return null;
   }
   const match = FRONTMATTER.exec(content);
+  const body = match ? content.slice(match[0].length).trim() : content.trim();
   if (match) {
     const front = YAML.parse(match[1]!) as { name?: unknown } | null;
-    if (front && typeof front.name === "string" && front.name.trim() !== "") return front.name.trim();
+    if (front && typeof front.name === "string" && front.name.trim() !== "") return { name: front.name.trim(), body };
   }
-  return fallback;
+  return { name: fallback, body };
 }
 
 /** One root's immediate subdirectories that hold a SKILL.md, by their resolved name. */
-async function scanRoot(fs: SkillsFs, root: string): Promise<string[]> {
+async function scanRoot(fs: SkillsFs, root: string): Promise<SkillEntry[]> {
   const entries = await fs.readdir(root).catch(() => []);
-  const names: string[] = [];
+  const skills: SkillEntry[] = [];
   for (const entry of entries) {
-    const name = await skillName(fs, join(root, entry), entry);
-    if (name) names.push(name);
+    const skill = await readSkill(fs, join(root, entry), entry);
+    if (skill) skills.push(skill);
   }
-  return names;
+  return skills;
 }
 
 export type SkillsRoots = {
@@ -66,8 +69,12 @@ export async function resolveSkillsCatalog(roots: SkillsRoots, fs: SkillsFs = no
   ];
   if (roots.projectPath) dirs.push(join(roots.projectPath, ".bb", "skills"), join(roots.projectPath, ".claude", "skills"));
   const names = new Set<string>();
+  const bodies = new Map<string, string>();
   for (const dir of dirs) {
-    for (const name of await scanRoot(fs, dir)) names.add(name);
+    for (const skill of await scanRoot(fs, dir)) {
+      names.add(skill.name);
+      bodies.set(skill.name, skill.body);
+    }
   }
-  return { names };
+  return { names, bodies };
 }

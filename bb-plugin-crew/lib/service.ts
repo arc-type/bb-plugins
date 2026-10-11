@@ -98,6 +98,7 @@ export function createCrewService(deps: ServiceDeps) {
     journal: createJournal(deps.store, deps.newId),
     // A lead's kickoff brief carries a short directory of the other crews (§3.9.3).
     directoryFor: (projectId: string, crewName: string) => formatDirectory(buildDirectory(deps.store, models, projectId), crewName).join("\n"),
+    skillsCatalog: (projectId: string) => (deps.skills ? deps.skills(projectId).catch(() => null) : Promise.resolve(null)),
   };
   const readText = deps.readText ?? ((path: string) => readFile(path, "utf8"));
   const catalog = async () => (deps.catalog ? await deps.catalog().catch(() => null) : null);

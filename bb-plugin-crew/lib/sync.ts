@@ -4,10 +4,10 @@
 // member an honest result — nothing is restarted silently. All BB access goes
 // through the ThreadPort, all state through the Store, so the functions run
 // unchanged against the fakes in tests.
-import { messagingRules } from "./delivery";
+import { messagingRules, skillsText } from "./delivery";
 import type { Journal } from "./journal";
 import { workRules } from "./queue";
-import { buildInstructions, hasErrors, type CrewSpec, type ResolvedMember, type Validation } from "./spec";
+import { buildInstructions, hasErrors, type CrewSpec, type ResolvedMember, type SkillsCatalog, type Validation } from "./spec";
 import { memberRowId, type CrewRow, type CrewStatus, type MemberRow, type Store } from "./store";
 import type { PortEnvironment, ThreadInfo, ThreadPatch, ThreadPort } from "./thread-port";
 
@@ -17,6 +17,8 @@ export type SyncContext = {
   journal: Journal;
   /** Short directory of the project's crews for a lead's kickoff brief (§3.9.3). */
   directoryFor?: (projectId: string, crewName: string) => string;
+  /** The project's skill bodies for the kickoff brief and `crew_whoami`; null/absent skips the lookup. */
+  skillsCatalog?: (projectId: string) => Promise<SkillsCatalog | null>;
 };
 
 export type PlanAction = "reuse" | "unarchive" | "spawn" | "update" | "remove";
@@ -136,8 +138,14 @@ export async function plan(
   return items;
 }
 
-/** First message of a new thread: role, address, peers, rules, first task. */
-export function kickoffBrief(spec: CrewSpec, member: ResolvedMember, members: readonly ResolvedMember[], directory: string | null = null): string {
+/** First message of a new thread: role, address, peers, rules, skills, first task. */
+export function kickoffBrief(
+  spec: CrewSpec,
+  member: ResolvedMember,
+  members: readonly ResolvedMember[],
+  directory: string | null = null,
+  skillsCatalog: SkillsCatalog | null = null,
+): string {
   const peers = members
     .filter((peer) => peer.key !== member.key)
     .map((peer) => `- ${peer.key} (${peer.address})${peer.lead ? " (lead)" : ""}${peer.role ? `: ${peer.role}` : ""}`);
@@ -155,6 +163,7 @@ export function kickoffBrief(spec: CrewSpec, member: ResolvedMember, members: re
     messagingRules(member, policy),
     workRules(member.lead, member.integrator),
     member.lead && directory ? `Crews in this project (crew_directory for details):\n${directory}` : "",
+    skillsText(member.skills, skillsCatalog),
     `First task: ${member.kickoff ?? "Wait for instructions from your lead."}`,
   ]
     .filter(Boolean)
@@ -351,10 +360,17 @@ export async function spawnMember(
   const opId = journal.begin(row.id, "spawn");
   let thread: ThreadInfo;
   try {
+    const skillsCatalog = (await ctx.skillsCatalog?.(crew.projectId).catch(() => null)) ?? null;
     thread = await port.spawn({
       projectId: crew.projectId,
       prompt: [
-        kickoffBrief(args.spec, member, args.members, member.lead ? (ctx.directoryFor?.(crew.projectId, crew.name) ?? null) : null),
+        kickoffBrief(
+          args.spec,
+          member,
+          args.members,
+          member.lead ? (ctx.directoryFor?.(crew.projectId, crew.name) ?? null) : null,
+          skillsCatalog,
+        ),
         args.note ?? "",
       ]
         .filter(Boolean)

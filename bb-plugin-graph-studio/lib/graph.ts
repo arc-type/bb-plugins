@@ -484,6 +484,14 @@ export type GraphProblem = { level: "error" | "warning"; message: string };
 export type GraphResolver = (id: string) => Graph | null;
 
 /**
+ * Whether a skill name is locked (`disable-model-invocation: true`), as read
+ * by the skill catalog (`lib/skill-catalog.ts`). Passed in rather than
+ * imported for the same reason as `GraphResolver` — the catalog touches the
+ * filesystem, and `lib/graph.ts` must stay testable without it.
+ */
+export type LockedSkillResolver = (name: string) => boolean;
+
+/**
  * Every node id reachable from this graph, including those inside embedded
  * subgraphs, with the graph each came from. Returns `null` on a cycle across
  * graph boundaries, which the caller reports — following one here would not
@@ -516,6 +524,7 @@ export function reachableNodeIds(
 export function validateGraph(
   graph: Graph,
   resolve: GraphResolver = () => null,
+  isLockedSkill: LockedSkillResolver = () => false,
   /**
    * Graph ids already on the way down, so validating an embedded graph cannot
    * recurse forever when two graphs embed each other. The circle itself is
@@ -926,7 +935,10 @@ export function validateGraph(
     // The child must be runnable on its own, or the run fails somewhere deep
     // inside a graph the author was not even looking at.
     if (seen.includes(child.id)) continue;
-    const childProblems = validateGraph(child, resolve, [...seen, graph.id]).filter(
+    const childProblems = validateGraph(child, resolve, isLockedSkill, [
+      ...seen,
+      graph.id,
+    ]).filter(
       (problem) => problem.level === "error",
     );
     if (childProblems.length > 0) {
@@ -1262,6 +1274,23 @@ export function validateGraph(
       level: "warning",
       message: `"${node?.label ?? id}" is never reached from Start.`,
     });
+  }
+
+  // A locked skill (`disable-model-invocation: true`) is loaded by prefixing
+  // the worker prompt with `/<skill>`, and that only works for a single skill
+  // — the first line can invoke one slash command, not several. A node with
+  // two or more locked skills would silently load only the first; refused
+  // here rather than left for `composeNodePrompt` to pick one.
+  for (const node of graph.nodes) {
+    const locked = node.skills.filter((skill) => isLockedSkill(skill));
+    if (locked.length > 1) {
+      problems.push({
+        level: "error",
+        message: `Node "${node.id}" has more than one locked skill: ${locked
+          .map((skill) => `"${skill}"`)
+          .join(", ")}.`,
+      });
+    }
   }
 
   return problems;
@@ -1814,25 +1843,39 @@ export function fieldContract(fields: readonly GraphField[]): string {
  * What a worker thread actually receives: skills first (adopt the method),
  * then the task, then the output contract (how to answer).
  */
+/** The node's first locked skill, if any, naming the one `/<skill>` loads. */
+function lockedSkillOf(
+  node: GraphNode,
+  lockedSkills?: ReadonlySet<string>,
+): string | undefined {
+  return lockedSkills ? node.skills.find((skill) => lockedSkills.has(skill)) : undefined;
+}
+
+/** The skill-hint paragraph for the skills not already loaded via `/<skill>`. */
+function skillHint(skills: readonly string[]): string | undefined {
+  if (skills.length === 0) return undefined;
+  const list = skills.map((skill) => `\`${skill}\``).join(", ");
+  return skills.length === 1
+    ? `Apply the skill ${list} first and work to what it says.`
+    : `Apply these skills first and work to what they say: ${list}.`;
+}
+
 export function composeNodePrompt(
   node: GraphNode,
   state: RunState,
   known?: ReadonlySet<string>,
+  lockedSkills?: ReadonlySet<string>,
 ): string {
+  const locked = lockedSkillOf(node, lockedSkills);
   const parts: string[] = [];
-  if (node.skills.length > 0) {
-    const list = node.skills.map((skill) => `\`${skill}\``).join(", ");
-    parts.push(
-      node.skills.length === 1
-        ? `Apply the skill ${list} first and work to what it says.`
-        : `Apply these skills first and work to what they say: ${list}.`,
-    );
-  }
+  const hint = skillHint(node.skills.filter((skill) => skill !== locked));
+  if (hint) parts.push(hint);
   const body = renderPrompt(node.prompt, state, known);
   if (body) parts.push(body);
   const contract = fieldContract(node.fields);
   if (contract) parts.push(contract);
-  return parts.join("\n\n");
+  const composed = parts.join("\n\n");
+  return locked ? `/${locked} \n\n${composed}` : composed;
 }
 
 /** Raised when a worker's answer does not satisfy the node's field contract. */
@@ -1881,16 +1924,12 @@ export function composeDialogPrompt(
   node: GraphNode,
   state: RunState,
   known?: ReadonlySet<string>,
+  lockedSkills?: ReadonlySet<string>,
 ): string {
+  const locked = lockedSkillOf(node, lockedSkills);
   const parts: string[] = [];
-  if (node.skills.length > 0) {
-    const list = node.skills.map((skill) => `\`${skill}\``).join(", ");
-    parts.push(
-      node.skills.length === 1
-        ? `Apply the skill ${list} first and work to what it says.`
-        : `Apply these skills first and work to what they say: ${list}.`,
-    );
-  }
+  const hint = skillHint(node.skills.filter((skill) => skill !== locked));
+  if (hint) parts.push(hint);
   const body = renderPrompt(node.prompt, state, known);
   if (body) parts.push(body);
   parts.push(DIALOG_CONTRACT);
@@ -1900,7 +1939,8 @@ export function composeDialogPrompt(
       `When you report \`done: true\`, these keys additionally belong in the same JSON object:\n${contract}`,
     );
   }
-  return parts.join("\n\n");
+  const composed = parts.join("\n\n");
+  return locked ? `/${locked} \n\n${composed}` : composed;
 }
 
 export type DialogTurn = { done: boolean; question: string };

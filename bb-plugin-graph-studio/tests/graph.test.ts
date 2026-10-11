@@ -62,6 +62,35 @@ describe("validation", () => {
     ).toBe(true);
   });
 
+  it("rejects a node with more than one locked skill", () => {
+    const graph = linear();
+    graph.nodes[0]!.skills = ["to-spec", "to-tickets"];
+    const isLocked = (name: string) => name === "to-spec" || name === "to-tickets";
+    const errors = validateGraph(graph, undefined, isLocked).filter(
+      (p) => p.level === "error",
+    );
+    expect(
+      errors.some(
+        (p) => p.message.includes("a") && p.message.includes("to-spec") && p.message.includes("to-tickets"),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a node with at most one locked skill", () => {
+    const graph = linear();
+    graph.nodes[0]!.skills = ["to-spec", "pr"];
+    const isLocked = (name: string) => name === "to-spec";
+    expect(
+      validateGraph(graph, undefined, isLocked).filter((p) => p.level === "error"),
+    ).toEqual([]);
+  });
+
+  it("defaults to no locked skills when no resolver is given", () => {
+    const graph = linear();
+    graph.nodes[0]!.skills = ["to-spec", "to-tickets"];
+    expect(validateGraph(graph).filter((p) => p.level === "error")).toEqual([]);
+  });
+
   it("treats several unconditional edges as a fan-out, not an error", () => {
     const graph = graphSchema.parse({
       id: "fan",
@@ -706,6 +735,60 @@ describe("prompt rendering", () => {
     const state = { ...emptyRunState("x"), outputs: { version: "## Problem" } };
     expect(renderPrompt("{{version}}", state, new Set(["version"]))).toBe(
       "## Problem",
+    );
+  });
+});
+
+describe("locked skill prefix", () => {
+  const nodeWith = (skills: string[]): Graph["nodes"][number] =>
+    graphSchema.parse({
+      id: "g",
+      name: "G",
+      nodes: [{ id: "a", label: "A", prompt: "Do the thing.", skills }],
+      edges: [
+        { from: START_NODE, to: "a" },
+        { from: "a", to: END_NODE },
+      ],
+    }).nodes[0]!;
+
+  const state = emptyRunState("TASK");
+
+  it("stays byte-identical without a locked skill", () => {
+    const node = nodeWith(["pr"]);
+    const withoutArg = composeNodePrompt(node, state);
+    const withEmptySet = composeNodePrompt(node, state, undefined, new Set());
+    expect(withEmptySet).toBe(withoutArg);
+    expect(withEmptySet).toBe(
+      "Apply the skill `pr` first and work to what it says.\n\nDo the thing.",
+    );
+  });
+
+  it("prefixes the prompt with /<skill> on the first line for a locked skill", () => {
+    const node = nodeWith(["tdd"]);
+    const composed = composeNodePrompt(node, state, undefined, new Set(["tdd"]));
+    expect(composed.split("\n")[0]).toBe("/tdd ");
+    expect(composed).not.toMatch(/Apply the skill `tdd`/);
+  });
+
+  it("keeps the other skills as a name hint next to the locked prefix", () => {
+    const node = nodeWith(["tdd", "pr"]);
+    const composed = composeNodePrompt(node, state, undefined, new Set(["tdd"]));
+    expect(composed.split("\n")[0]).toBe("/tdd ");
+    expect(composed).toMatch(/Apply the skill `pr` first/);
+  });
+
+  it("does the same for the dialogue prompt", () => {
+    const node = nodeWith(["tdd"]);
+    node.kind = "dialog";
+    const composed = composeDialogPrompt(node, state, undefined, new Set(["tdd"]));
+    expect(composed.split("\n")[0]).toBe("/tdd ");
+  });
+
+  it("leaves the dialogue prompt byte-identical without a locked skill", () => {
+    const node = nodeWith(["pr"]);
+    node.kind = "dialog";
+    expect(composeDialogPrompt(node, state, undefined, new Set())).toBe(
+      composeDialogPrompt(node, state),
     );
   });
 });

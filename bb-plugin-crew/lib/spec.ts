@@ -219,6 +219,8 @@ export type Catalog = {
 /** Skill names known here (global, project and BB global skills); absent means "not checked". */
 export type SkillsCatalog = {
   names: ReadonlySet<string>;
+  /** Each skill's SKILL.md text without its frontmatter, by resolved name. */
+  bodies: ReadonlyMap<string, string>;
 };
 
 /** Graph ids graph-studio actually has; absent means "not checked". */

@@ -5,6 +5,7 @@
 // a running server.
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
@@ -29,6 +30,7 @@ import {
   orphanedWorkers,
 } from "./lib/orphans";
 import { compileGraph, GuardStop, type RuntimeHost } from "./lib/runtime";
+import { resolveSkillCatalog, type SkillCatalog } from "./lib/skill-catalog";
 import { GRAPH_STUDIO_ICON } from "./lib/icon";
 import {
   CREW_CONTRACT_VERSION,
@@ -449,6 +451,49 @@ export default function graphStudio(bb: BbPluginApi) {
     } catch {
       return null;
     }
+  }
+
+  /** The on-disk path of a project; null when it cannot be read. */
+  async function projectPath(projectId: string): Promise<string | null> {
+    try {
+      const project = await bb.sdk.projects.get({ projectId });
+      const source = project.sources.find((entry) => entry.isDefault) ?? project.sources[0];
+      return source?.path ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Locked-skill catalog (BBP-137): which skill names carry
+  // `disable-model-invocation: true`. Read at most once a minute per project,
+  // same reasoning as crew's skills cache (lib/skills.ts), since this is
+  // consulted on every save and every run.
+  const skillCatalogCache = new Map<string, { at: number; catalog: SkillCatalog }>();
+  async function skillCatalog(projectId: string | null): Promise<SkillCatalog> {
+    const key = projectId ?? "";
+    const cached = skillCatalogCache.get(key);
+    if (cached && Date.now() - cached.at < 60_000) return cached.catalog;
+    try {
+      const catalog = await resolveSkillCatalog({
+        homeDir: homedir(),
+        projectPath: projectId ? await projectPath(projectId) : null,
+      });
+      skillCatalogCache.set(key, { at: Date.now(), catalog });
+      return catalog;
+    } catch (error) {
+      bb.log.warn(`Skill catalog unreadable, locked-skill check skipped: ${error instanceof Error ? error.message : String(error)}`);
+      return new Map();
+    }
+  }
+
+  /** The names in `catalog` whose `disable-model-invocation` flag is set. */
+  function lockedSkillNames(catalog: SkillCatalog): ReadonlySet<string> {
+    return new Set([...catalog].filter(([, locked]) => locked).map(([name]) => name));
+  }
+
+  /** Whether a skill name is locked, for `validateGraph`'s resolver parameter. */
+  function lockedSkillPredicate(catalog: SkillCatalog): (name: string) => boolean {
+    return (name) => catalog.get(name) === true;
   }
 
   /**
@@ -1352,7 +1397,13 @@ export default function graphStudio(bb: BbPluginApi) {
       return;
     }
 
-    const app = compileGraph(row.graph, host, checkpointer, resolveGraph);
+    const app = compileGraph(
+      row.graph,
+      host,
+      checkpointer,
+      resolveGraph,
+      lockedSkillNames(await skillCatalog(row.projectId)),
+    );
     // From here on there are workers to ask. Started before `invoke`, stopped
     // in the `finally` below, so no run can leave a timer behind.
     watchActivity(runId);
@@ -1462,7 +1513,9 @@ export default function graphStudio(bb: BbPluginApi) {
         "A run needs a parent thread whose environment the workers inherit.",
       );
     }
-    const errors = validateGraph(graph, resolveGraph).filter(
+    const projectId = args.projectId ?? (await projectOfThread(args.threadId));
+    const isLockedSkill = lockedSkillPredicate(await skillCatalog(projectId));
+    const errors = validateGraph(graph, resolveGraph, isLockedSkill).filter(
       (problem) => problem.level === "error",
     );
     if (errors.length > 0) {
@@ -1470,10 +1523,7 @@ export default function graphStudio(bb: BbPluginApi) {
         `Graph is not runnable: ${errors.map((e) => e.message).join(" ")}`,
       );
     }
-    await assertMembersReachable(
-      graph,
-      args.projectId ?? (await projectOfThread(args.threadId)),
-    );
+    await assertMembersReachable(graph, projectId);
     const now = Date.now();
     const runId = `run_${randomUUID().slice(0, 12)}`;
     store.insertRun({
@@ -1698,15 +1748,19 @@ export default function graphStudio(bb: BbPluginApi) {
       graphs: [...store.listGraphs(), ...TEMPLATES],
       templates: TEMPLATES,
     }),
-    getGraph: ({ id }) => {
+    getGraph: async ({ id }) => {
       const graph = resolveGraph(id);
-      return { graph, problems: graph ? validateGraph(graph, resolveGraph) : [] };
+      if (!graph) return { graph: null, problems: [] };
+      const isLockedSkill = lockedSkillPredicate(await skillCatalog(null));
+      return { graph, problems: validateGraph(graph, resolveGraph, isLockedSkill) };
     },
     saveGraph: async ({ graph, threadId }) => {
-      await assertMembersReachable(graph, await projectOfThread(threadId));
+      const projectId = await projectOfThread(threadId);
+      await assertMembersReachable(graph, projectId);
       const saved = store.saveGraph(graph, Date.now());
       publish();
-      return { graph: saved, problems: validateGraph(saved, resolveGraph) };
+      const isLockedSkill = lockedSkillPredicate(await skillCatalog(projectId));
+      return { graph: saved, problems: validateGraph(saved, resolveGraph, isLockedSkill) };
     },
     deleteGraph: ({ id }) => {
       store.deleteGraph(id);
@@ -1964,7 +2018,8 @@ export default function graphStudio(bb: BbPluginApi) {
         case "show": {
           const graph = rest[0] ? resolveGraph(rest[0]) : null;
           if (!graph) return fail("Graph not found.");
-          return ok(describeGraph(graph, validateGraph(graph, resolveGraph)));
+          const isLockedSkill = lockedSkillPredicate(await skillCatalog(ctx.projectId ?? null));
+          return ok(describeGraph(graph, validateGraph(graph, resolveGraph, isLockedSkill)));
         }
         case "run": {
           const [graphId, ...task] = rest;
@@ -2139,14 +2194,15 @@ export default function graphStudio(bb: BbPluginApi) {
     description:
       "Describe one Graph Studio graph: purpose, nodes with their kind, skills and declared fields, all edges with their routing conditions, and the validator's findings. Use this to talk about what a graph does before running it.",
     parameters: z.object({ graphId: z.string() }),
-    execute: async ({ graphId }) => {
+    execute: async ({ graphId }, ctx) => {
       const graph = resolveGraph(graphId);
       if (!graph) {
         // Naming the alternatives beats "not found": the usual cause is a
         // guessed id, and the list is the answer to the next question anyway.
         return `No graph "${graphId}". Available:\n${describeLibrary(libraryGraphs())}`;
       }
-      return describeGraph(graph, validateGraph(graph, resolveGraph));
+      const isLockedSkill = lockedSkillPredicate(await skillCatalog(ctx.projectId ?? null));
+      return describeGraph(graph, validateGraph(graph, resolveGraph, isLockedSkill));
     },
   });
 
@@ -2254,7 +2310,8 @@ export default function graphStudio(bb: BbPluginApi) {
       }
       const saved = store.saveGraph(graph, Date.now());
       publish();
-      const problems = validateGraph(saved, resolveGraph);
+      const isLockedSkill = lockedSkillPredicate(await skillCatalog(ctx.projectId ?? null));
+      const problems = validateGraph(saved, resolveGraph, isLockedSkill);
       const errors = problems.filter((problem) => problem.level === "error");
       return [
         `${existing ? "Replaced" : "Saved"} ${saved.id} (${saved.nodes.length} nodes, ${saved.edges.length} edges).`,
@@ -2287,13 +2344,14 @@ export default function graphStudio(bb: BbPluginApi) {
           // the host falls back to the branding icon when it is not loaded.
           icon: GRAPH_STUDIO_ICON,
         })),
-    resolve: (itemId) => {
+    resolve: async (itemId) => {
       const graph = resolveGraph(itemId);
       if (!graph) throw new Error(`Graph Studio has no graph "${itemId}".`);
+      const isLockedSkill = lockedSkillPredicate(await skillCatalog(null));
       return {
         context: [
           `The user refers to the Graph Studio graph "${graph.id}".`,
-          describeGraph(graph, validateGraph(graph, resolveGraph)),
+          describeGraph(graph, validateGraph(graph, resolveGraph, isLockedSkill)),
           "Use graph_studio_run to run it, graph_studio_get and graph_studio_save to change it.",
         ].join("\n\n"),
       };

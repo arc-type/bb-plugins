@@ -1,0 +1,13 @@
+# Glossary
+
+**Locked skill** — a skill whose SKILL.md sets `disable-model-invocation: true`.
+The model cannot load it through the Skill tool; only the user can, by typing
+`/<skill>`. Examples: `to-spec`, `to-tickets`, `implement-spec`,
+`grill-with-docs`, `retro`.
+
+**Slash invocation** — a worker thread's *first* prompt starts with
+`/<skill> …`. Claude Code then loads the skill as a user invocation, which also
+works for locked skills. It does not work in follow-up messages.
+
+**Skill injection** — a plugin reads a skill's SKILL.md and puts its text into
+the agent's instructions instead of only naming the skill.
