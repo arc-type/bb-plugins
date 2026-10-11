@@ -7,8 +7,30 @@ import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
 import { Breadcrumb } from "./Breadcrumb";
 import { Sidebar } from "./Sidebar";
 import { SearchBox } from "./SearchBox";
+import { ColorModeToggle, type ColorMode } from "./ColorModeToggle";
 import { layoutTree } from "../lib/layout";
 import type { CanvasEdge, CanvasNode } from "../lib/types";
+
+const COLOR_MODE_KEY = "bb-canvas:colour-mode";
+
+/** Never throws: a private-browsing tab, a full quota, or an environment
+ *  with no `localStorage` at all must fall back to the default, not crash
+ *  the canvas. */
+function loadColorMode(): ColorMode {
+  try {
+    return localStorage.getItem(COLOR_MODE_KEY) === "type" ? "type" : "status";
+  } catch {
+    return "status";
+  }
+}
+
+function saveColorMode(mode: ColorMode): void {
+  try {
+    localStorage.setItem(COLOR_MODE_KEY, mode);
+  } catch {
+    // Not persisted this time; the toggle still works for the rest of the session.
+  }
+}
 
 /** What loading a node's children hands back — a thread's turns, typically. */
 export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly CanvasEdge[] };
@@ -39,8 +61,17 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [loaded, setLoaded] = useState<ReadonlyMap<string, LoadedChildren>>(new Map());
+  const [colorMode, setColorMode] = useState<ColorMode>(() => loadColorMode());
   const loading = useRef<Set<string>>(new Set());
   const shellRef = useRef<CanvasShellHandle>(null);
+
+  function toggleColorMode() {
+    setColorMode((prev) => {
+      const next = prev === "status" ? "type" : "status";
+      saveColorMode(next);
+      return next;
+    });
+  }
 
   const allNodes = useMemo(
     () => [...nodes, ...[...loaded.values()].flatMap((result) => result.nodes)],
@@ -215,7 +246,12 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
       onKeyDown={handleKeyDown}
       style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none" }}
     >
-      <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
+        <div style={{ padding: "4px 8px" }}>
+          <ColorModeToggle mode={colorMode} onToggle={toggleColorMode} />
+        </div>
+      </div>
       {searchOpen ? (
         <SearchBox
           value={searchQuery}
@@ -233,6 +269,7 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
             edges={allEdges}
             selectedId={selectedId}
             onSelect={select}
+            colorMode={colorMode}
           />
         </div>
         {selected ? <Sidebar node={selected} onClose={() => select(null)} /> : null}
