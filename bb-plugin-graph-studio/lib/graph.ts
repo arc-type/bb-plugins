@@ -1814,25 +1814,39 @@ export function fieldContract(fields: readonly GraphField[]): string {
  * What a worker thread actually receives: skills first (adopt the method),
  * then the task, then the output contract (how to answer).
  */
+/** The node's first locked skill, if any, naming the one `/<skill>` loads. */
+function lockedSkillOf(
+  node: GraphNode,
+  lockedSkills?: ReadonlySet<string>,
+): string | undefined {
+  return lockedSkills ? node.skills.find((skill) => lockedSkills.has(skill)) : undefined;
+}
+
+/** The skill-hint paragraph for the skills not already loaded via `/<skill>`. */
+function skillHint(skills: readonly string[]): string | undefined {
+  if (skills.length === 0) return undefined;
+  const list = skills.map((skill) => `\`${skill}\``).join(", ");
+  return skills.length === 1
+    ? `Apply the skill ${list} first and work to what it says.`
+    : `Apply these skills first and work to what they say: ${list}.`;
+}
+
 export function composeNodePrompt(
   node: GraphNode,
   state: RunState,
   known?: ReadonlySet<string>,
+  lockedSkills?: ReadonlySet<string>,
 ): string {
+  const locked = lockedSkillOf(node, lockedSkills);
   const parts: string[] = [];
-  if (node.skills.length > 0) {
-    const list = node.skills.map((skill) => `\`${skill}\``).join(", ");
-    parts.push(
-      node.skills.length === 1
-        ? `Apply the skill ${list} first and work to what it says.`
-        : `Apply these skills first and work to what they say: ${list}.`,
-    );
-  }
+  const hint = skillHint(node.skills.filter((skill) => skill !== locked));
+  if (hint) parts.push(hint);
   const body = renderPrompt(node.prompt, state, known);
   if (body) parts.push(body);
   const contract = fieldContract(node.fields);
   if (contract) parts.push(contract);
-  return parts.join("\n\n");
+  const composed = parts.join("\n\n");
+  return locked ? `/${locked} \n\n${composed}` : composed;
 }
 
 /** Raised when a worker's answer does not satisfy the node's field contract. */
@@ -1881,16 +1895,12 @@ export function composeDialogPrompt(
   node: GraphNode,
   state: RunState,
   known?: ReadonlySet<string>,
+  lockedSkills?: ReadonlySet<string>,
 ): string {
+  const locked = lockedSkillOf(node, lockedSkills);
   const parts: string[] = [];
-  if (node.skills.length > 0) {
-    const list = node.skills.map((skill) => `\`${skill}\``).join(", ");
-    parts.push(
-      node.skills.length === 1
-        ? `Apply the skill ${list} first and work to what it says.`
-        : `Apply these skills first and work to what they say: ${list}.`,
-    );
-  }
+  const hint = skillHint(node.skills.filter((skill) => skill !== locked));
+  if (hint) parts.push(hint);
   const body = renderPrompt(node.prompt, state, known);
   if (body) parts.push(body);
   parts.push(DIALOG_CONTRACT);
@@ -1900,7 +1910,8 @@ export function composeDialogPrompt(
       `When you report \`done: true\`, these keys additionally belong in the same JSON object:\n${contract}`,
     );
   }
-  return parts.join("\n\n");
+  const composed = parts.join("\n\n");
+  return locked ? `/${locked} \n\n${composed}` : composed;
 }
 
 export type DialogTurn = { done: boolean; question: string };
