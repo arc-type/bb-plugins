@@ -2,12 +2,13 @@
 // zoom at the pointer. No MiniMap and no keyboard here — those are the next
 // work item, built on fixture data before either plugin feeds this component
 // real data.
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
   type ColorMode,
   type Edge,
   type Node,
@@ -59,6 +60,14 @@ export type CanvasShellProps = {
   className?: string;
 };
 
+/** What a caller outside the `ReactFlowProvider` can still do to the
+ *  viewport — the `0`/`+`/`-` keys in particular, owned by `CanvasView`. */
+export type CanvasShellHandle = {
+  resetView: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+};
+
 function toFlow(
   layout: TreeLayout,
   nodes: readonly CanvasNode[],
@@ -106,12 +115,26 @@ function toFlow(
   return { flowNodes, flowEdges };
 }
 
-function CanvasShellInner({ nodes, expanded, edges = [], selectedId, onSelect, className }: CanvasShellProps) {
+const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(function CanvasShellInner(
+  { nodes, expanded, edges = [], selectedId, onSelect, className },
+  handleRef,
+) {
   const [hostRef, colorMode] = useHostColorMode();
+  const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges), [nodes, expanded, edges]);
   const { flowNodes, flowEdges } = useMemo(
     () => toFlow(layout, nodes, selectedId, onSelect),
     [layout, nodes, selectedId, onSelect],
+  );
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      resetView: () => flow.fitView(),
+      zoomIn: () => flow.zoomIn(),
+      zoomOut: () => flow.zoomOut(),
+    }),
+    [flow],
   );
 
   return (
@@ -134,14 +157,14 @@ function CanvasShellInner({ nodes, expanded, edges = [], selectedId, onSelect, c
       </ReactFlow>
     </div>
   );
-}
+});
 
-export function CanvasShell(props: CanvasShellProps) {
+export const CanvasShell = forwardRef<CanvasShellHandle, CanvasShellProps>(function CanvasShell(props, ref) {
   // Its own provider: two shells on one page (a preview and the full canvas)
   // must not share a viewport.
   return (
     <ReactFlowProvider>
-      <CanvasShellInner {...props} />
+      <CanvasShellInner {...props} ref={ref} />
     </ReactFlowProvider>
   );
-}
+});
