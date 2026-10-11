@@ -8,7 +8,7 @@
 import type { BbPluginApi, PluginAgentConfiguration, PluginAgentToolResult } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { formatChannelLine } from "./channel";
-import { AddressError, messagingRules, type Sender } from "./delivery";
+import { AddressError, messagingRules, skillsText, type Sender } from "./delivery";
 import { directoryRefusal, formatDirectory } from "./directory";
 import { formatContextShare } from "./format";
 import { formatMerge } from "./integration";
@@ -102,7 +102,7 @@ export function agentInstructions(service: CrewService, crew: CrewRow, member: M
     .join("\n");
   const rules = `${messagingRules({ address: member.address, lead: member.lead }, model.policy)}\n\n${workRules(member.lead, isIntegrator(member.config))}`;
   const inherited = (resolvedMember?.instructions ?? []).join("\n\n");
-  const skillsHint = (resolvedMember?.skills ?? []).length > 0 ? `Prefer these skills: ${resolvedMember!.skills.join(", ")}` : "";
+  const skillsHint = (resolvedMember?.skills ?? []).length > 0 ? "Skill text: crew_whoami" : "";
   const room = INSTRUCTION_LIMIT - head.length - rules.length - skillsHint.length - 80;
   let summary = "";
   if (inherited && room > 40) {
@@ -178,10 +178,16 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
       const { model, resolvedMember } = resolved(service, self.crew, self.member);
       const body = resolvedMember && model.spec ? buildInstructions(model.spec, resolvedMember) : `You are ${self.member.address}.`;
       const shift = store.currentBinding(self.member.id)?.shift ?? null;
+      const skillsCatalog = (await service.ctx.skillsCatalog?.(self.crew.projectId).catch(() => null)) ?? null;
       return bounded(
-        [`Address: ${self.member.address}${self.member.lead ? " (lead)" : ""} · shift ${shift ?? "?"}`, body, messagingRules(self.member, model.policy)].join(
-          "\n\n",
-        ),
+        [
+          `Address: ${self.member.address}${self.member.lead ? " (lead)" : ""} · shift ${shift ?? "?"}`,
+          body,
+          messagingRules(self.member, model.policy),
+          skillsText(resolvedMember?.skills ?? [], skillsCatalog),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       );
     },
   });

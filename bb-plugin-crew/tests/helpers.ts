@@ -3,13 +3,20 @@ import { createFakeTasks } from "../lib/dependencies";
 import type { GraphsRpc } from "../lib/graphs";
 import { createFakeGit } from "../lib/integration";
 import { createCrewService } from "../lib/service";
-import { inlineExecution, serializeCrew, type CrewSpecInput } from "../lib/spec";
+import { inlineExecution, serializeCrew, type CrewSpecInput, type SkillsCatalog } from "../lib/spec";
 import { createStore, migrateInPlace } from "../lib/store";
 import { createFakeThreadPort } from "../lib/thread-port";
 
 export const PROJECT = "proj_1";
 
-export function setup(options: { bbLimit?: number | null; graphsRpc?: GraphsRpc | null } = {}) {
+/** A fake skills catalog: name → SKILL.md body (without frontmatter), absent names are "unknown". */
+export function fakeSkillsCatalog(bodies: Record<string, string>): (projectId: string) => Promise<SkillsCatalog> {
+  return async () => ({ names: new Set(Object.keys(bodies)), bodies: new Map(Object.entries(bodies)) });
+}
+
+export function setup(
+  options: { bbLimit?: number | null; graphsRpc?: GraphsRpc | null; skills?: (projectId: string) => Promise<SkillsCatalog | null> } = {},
+) {
   const db = new Database(":memory:");
   migrateInPlace(db);
   // A realistic epoch, so rendered timestamps look like dates. The store ticks
@@ -28,6 +35,7 @@ export function setup(options: { bbLimit?: number | null; graphsRpc?: GraphsRpc 
     git,
     tasks,
     graphsRpc: options.graphsRpc ?? null,
+    skills: options.skills,
     bbLimit: async () => options.bbLimit ?? null,
     newId: () => `op_${++ids}`,
     newMessageId: (prefix) => `${prefix}_${++messageIds}`,

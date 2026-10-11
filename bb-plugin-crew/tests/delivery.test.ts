@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AddressError, MAX_ATTEMPTS, parseAddress, renderMessage, replyAddress } from "../lib/delivery";
+import { AddressError, MAX_ATTEMPTS, parseAddress, renderMessage, replyAddress, skillsText } from "../lib/delivery";
 import { effectiveCrossCrew, loopVerdict } from "../lib/policy";
 import { duoYaml, PROJECT, running, setup, trioYaml } from "./helpers";
 
@@ -535,5 +535,25 @@ describe("log", () => {
     expect(service.log(PROJECT, { limit: 1 }).map((m) => m.body)).toEqual(["cross"]);
     expect(service.log("proj_other")).toEqual([]);
     expect(() => service.log(PROJECT, { crew: "nope" })).toThrow('No crew "nope"');
+  });
+});
+
+describe("skillsText", () => {
+  it("renders '## Skill: <name>' plus body for a known skill; no skills means no text", () => {
+    const catalog = { names: new Set(["tdd"]), bodies: new Map([["tdd", "Red, green, refactor."]]) };
+    expect(skillsText(["tdd"], catalog)).toBe("## Skill: tdd\n\nRed, green, refactor.");
+    expect(skillsText([], catalog)).toBe("");
+    expect(skillsText([], null)).toBe("");
+  });
+
+  it("a skill missing from the catalog (or no catalog at all) keeps the name plus a warning", () => {
+    const catalog = { names: new Set(["tdd"]), bodies: new Map([["tdd", "Red, green, refactor."]]) };
+    expect(skillsText(["ghost"], catalog)).toBe("## Skill: ghost\n\n(not found in the skills catalog — only the name is known)");
+    expect(skillsText(["tdd"], null)).toBe("## Skill: tdd\n\n(not found in the skills catalog — only the name is known)");
+  });
+
+  it("joins several skills in order, each as its own section", () => {
+    const catalog = { names: new Set(["a", "b"]), bodies: new Map([["a", "A body"], ["b", "B body"]]) };
+    expect(skillsText(["a", "b"], catalog)).toBe("## Skill: a\n\nA body\n\n## Skill: b\n\nB body");
   });
 });

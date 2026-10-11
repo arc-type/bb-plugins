@@ -218,9 +218,10 @@ export function createLifecycle(deps: LifecycleDeps) {
       throw error;
     }
     // The cleared session knows nothing: the kickoff brief is its first message.
+    const skillsCatalog = (await ctx.skillsCatalog?.(crew.projectId).catch(() => null)) ?? null;
     await port.send(
       thread.id,
-      `${kickoffBrief(spec, resolved, members)}\n\nThis is shift ${shift}: your context was cleared by a reset. Work items and messages are kept (crew_work_list, crew_inbox).`,
+      `${kickoffBrief(spec, resolved, members, null, skillsCatalog)}\n\nThis is shift ${shift}: your context was cleared by a reset. Work items and messages are kept (crew_work_list, crew_inbox).`,
       "start",
     );
     return { key: member.key, address: member.address, result: "updated", threadId: thread.id, shift, detail: "context cleared, same thread" };
@@ -379,13 +380,14 @@ export function createLifecycle(deps: LifecycleDeps) {
     // No spawn, no restart: the role instruction takes effect at the next
     // session start (§4.5), so the kickoff brief travels as an ordinary message.
     const { spec, resolved, members } = resolvedMember(crew, member);
+    const skillsCatalog = (await ctx.skillsCatalog?.(crew.projectId).catch(() => null)) ?? null;
     const [kickoff] = delivery.send({
       projectId: crew.projectId,
       from: { kind: "system" },
       to: member.address,
       kind: "message",
       subject: `Kickoff brief for ${member.address} (attached, shift ${shift})`,
-      body: kickoffBrief(spec, resolved, members),
+      body: kickoffBrief(spec, resolved, members, null, skillsCatalog),
       crew: crew.name,
     });
     return { key: member.key, address: member.address, result: "updated", threadId, shift, detail: "attached", kickoff: kickoff ?? null };

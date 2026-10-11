@@ -7,7 +7,7 @@
 // `attempts` plus a look into the thread for the message id before any retry.
 import { randomBytes } from "node:crypto";
 import { loopVerdict, routeRefusal, type CrewModels, type CrewPolicy, type Party } from "./policy";
-import type { ResolvedMember } from "./spec";
+import type { ResolvedMember, SkillsCatalog } from "./spec";
 import type {
   CrewRow,
   DeliveryMode,
@@ -542,4 +542,22 @@ export function messagingRules(member: Pick<ResolvedMember, "address" | "lead">,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * The full SKILL.md text of a member's skills, for the kickoff brief and
+ * `crew_whoami` (the durable instructions only keep a short hint, see
+ * `agentInstructions`, since the bodies rarely fit INSTRUCTION_LIMIT). A name
+ * missing from the catalog keeps the hint plus a warning instead of the body.
+ */
+export function skillsText(skills: readonly string[], catalog: SkillsCatalog | null): string {
+  if (skills.length === 0) return "";
+  return skills
+    .map((name) => {
+      const body = catalog?.bodies.get(name);
+      return body !== undefined
+        ? `## Skill: ${name}\n\n${body}`
+        : `## Skill: ${name}\n\n(not found in the skills catalog — only the name is known)`;
+    })
+    .join("\n\n");
 }

@@ -4,7 +4,7 @@ import type { PluginAgentConfigurationContext } from "@get-bb/plugin-sdk";
 import { agentInstructions, configureFor, GRAPH_TOOL_NAME, identifyMember, LEAD_ADMIN_TOOL_NAMES, registerAgentTools, TOOL_NAMES, toolsFor, WORK_TOOL_NAMES, type Confirm } from "../lib/agent";
 import type { GraphRun, GraphsRpc } from "../lib/graphs";
 import { INSTRUCTION_LIMIT } from "../lib/spec";
-import { duoYaml, PROJECT, running, setup, trioYaml } from "./helpers";
+import { duoYaml, fakeSkillsCatalog, PROJECT, running, setup, trioYaml } from "./helpers";
 
 function context(threadId: string, pluginMetadata: Record<string, unknown>): PluginAgentConfigurationContext {
   return {
@@ -101,13 +101,13 @@ describe("configure", () => {
     expect(agentInstructions(service, crew, members["dev-impl"]!)).not.toContain("summary");
   });
 
-  it("member skills become a 'Prefer these skills' hint; no skills means no hint", async () => {
+  it("member skills become a short 'Skill text: crew_whoami' hint; no skills means no hint", async () => {
     const { service, port } = setup();
     const { crew, members } = await running(service, port, trioYaml({ skills: ["memory"] }));
-    expect(agentInstructions(service, crew, members["dev-impl"]!)).toContain("Prefer these skills: memory");
+    expect(agentInstructions(service, crew, members["dev-impl"]!)).toContain("Skill text: crew_whoami");
     const { service: service2, port: port2 } = setup();
     const { crew: crew2, members: members2 } = await running(service2, port2);
-    expect(agentInstructions(service2, crew2, members2["dev-impl"]!)).not.toContain("Prefer these skills");
+    expect(agentInstructions(service2, crew2, members2["dev-impl"]!)).not.toContain("Skill text: crew_whoami");
   });
 });
 
@@ -121,6 +121,16 @@ describe("crew tools", () => {
     expect(peers).toContain("- orch-lead (lead)");
     expect(peers).toContain("- dev-impl (you)");
     expect(peers).not.toContain("Other crew");
+  });
+
+  it("crew_whoami reports the full skill text; a skill missing from the catalog keeps the name plus a warning", async () => {
+    const env = setup({ skills: fakeSkillsCatalog({ memory: "Recall past threads before starting work." }) });
+    const crew = await running(env.service, env.port, trioYaml({ skills: ["memory", "ghost"] }));
+    const { bb, harness } = createFakePluginHost({ pluginId: "crew", agentSkillIds: ["crew"] });
+    registerAgentTools(bb, env.service);
+    const whoami = text(await harness.behavior.callAgentTool("crew_whoami", {}, { threadId: crew.threads["dev-impl"]! }));
+    expect(whoami).toContain("## Skill: memory\n\nRecall past threads before starting work.");
+    expect(whoami).toContain("## Skill: ghost\n\n(not found in the skills catalog — only the name is known)");
   });
 
   it("a lead sees other crews' leads under crossCrew leads; negative: a member does not", async () => {
