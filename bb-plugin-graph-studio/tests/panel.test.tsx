@@ -49,8 +49,9 @@ function panel(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Graph Studio panel", () => {
-  it("registers the nav panel and thread panel action", () => {
-    expect(app.navPanels).toHaveLength(1);
+  it("registers the nav panel, the canvas page and the thread panel action", () => {
+    expect(app.navPanels).toHaveLength(2);
+    expect(app.navPanels.map((panel) => panel.id)).toEqual(["studio", "canvas"]);
     expect(app.threadPanelActions).toHaveLength(1);
   });
 

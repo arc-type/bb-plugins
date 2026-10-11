@@ -18,6 +18,7 @@ import { liveViews, type ActivityView } from "./lib/activity";
 import { reasonCounts } from "./lib/topology";
 import { DEFAULT_POLICY } from "./lib/policy";
 import { registerAgentTools, type Confirm } from "./lib/agent";
+import { crewCanvasLayer, crewOwnsCanvasPage } from "./lib/canvas-layer";
 import { CONTRACT_VERSION } from "./lib/contract";
 import { openLayout } from "./lib/layout";
 import { runCli, CLI_COMMANDS, type CliContext } from "./lib/cli";
@@ -194,6 +195,23 @@ export type ChannelDto = z.infer<typeof channelSchema>;
 export type WorkDto = z.infer<typeof workSchema>;
 export type MergeDto = z.infer<typeof mergeSchema>;
 export type OverviewDto = z.infer<typeof overviewSchema>;
+
+const canvasStatus = z.enum(["idle", "running", "waiting", "done", "failed", "escalated"]);
+const canvasNodeSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["agents", "project", "crew", "member", "graph-run", "step", "thread", "turn", "tool-call"]),
+  label: z.string(),
+  status: canvasStatus.optional(),
+  parentId: z.string().nullable(),
+  meta: z.record(z.string(), z.unknown()).optional(),
+});
+const canvasEdgeSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  variant: z.enum(["flow", "back", "message"]),
+  label: z.string().optional(),
+  count: z.number().optional(),
+});
 
 export const rpcContract = defineRpcContract({
   listCrews: {
@@ -408,6 +426,22 @@ export const rpcContract = defineRpcContract({
       eventCursor: z.number().nullable(),
       threadId: z.string().nullable(),
     }),
+  },
+
+  /** BBP-131: crews and members as bb-canvas nodes, for graph-studio's canvas page (and crew's own). */
+  canvasLayer: {
+    input: z.object({ projectId: z.string().min(1) }),
+    output: z.object({
+      contractVersion: z.number(),
+      nodes: z.array(canvasNodeSchema),
+      edges: z.array(canvasEdgeSchema),
+      expanded: z.array(z.string()),
+    }),
+  },
+  /** Whether crew shows the canvas page itself: only while graph-studio is not active. */
+  canvasPage: {
+    input: z.object({}).default({}),
+    output: z.object({ visible: z.boolean() }),
   },
 
   /** Sidebar row icons and the Needs-you count, for every bound member thread. */
@@ -1053,6 +1087,18 @@ export default async function plugin(bb: BbPluginApi) {
       return { ...result, status: String(result.status) };
     },
     listMembers: ({ projectId, crew }) => service.contract.listMembers(projectId, crew),
+    canvasLayer: async ({ projectId }) => {
+      const { members } = await service.contract.listMembers(projectId);
+      return { contractVersion: CONTRACT_VERSION, ...crewCanvasLayer(projectId, store.listCrews(projectId), members) };
+    },
+    canvasPage: async () => {
+      try {
+        return { visible: crewOwnsCanvasPage((await bb.sdk.plugins.list()).plugins) };
+      } catch {
+        // Unsure whether graph-studio is there: showing a second page beats showing none.
+        return { visible: true };
+      }
+    },
     memberReply: ({ messageId }) => service.contract.memberReply(messageId),
     rowStatuses: () => {
       const live = new Set(store.listCrews().flatMap((crew) => store.listMembers(crew.id).map((member) => member.id)));

@@ -32,6 +32,7 @@ import { CrewFileEditor } from "./components/crew-file-editor";
 import { CREW_ICON, CrewTeam } from "./components/crew-icon";
 import { ConfirmInteraction, CREW_NAME, CrewDirectiveCard, CrewPanelHeader, MemberBadge } from "./components/crew-surfaces";
 import { MemberCard, TopologyCanvas, TopologyLegend, type MemberAction } from "./components/crew-topology";
+import { CanvasPage } from "./components/canvas-page";
 import { OverviewCanvas } from "./components/crew-overview-canvas";
 import { OverviewToolbar } from "./components/crew-overview-toolbar";
 import { DEFAULT_OVERVIEW_FILTERS, type OverviewFilters } from "./lib/overview-graph";
@@ -1669,6 +1670,15 @@ export default definePluginApp((app) => {
     component: CrewsPage,
     headerContent: HeaderContent,
     experimental_sidebarAccessory: SidebarAccessory,
+  });
+  // BBP-131: the shared canvas. The page itself decides whether to show
+  // anything — Graph Studio owns it while that plugin is active.
+  app.slots.navPanel({
+    id: "canvas",
+    title: "Activity Canvas",
+    icon: CREW_ICON,
+    path: "canvas",
+    component: CanvasPage,
   });
   app.slots.experimental_threadHeaderAction({ id: "member-badge", title: "Crew member", component: MemberBadge });
   app.slots.messageDirective({ id: "crew", component: CrewDirectiveCard });

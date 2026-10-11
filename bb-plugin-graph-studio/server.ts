@@ -31,6 +31,8 @@ import {
 import { compileGraph, GuardStop, type RuntimeHost } from "./lib/runtime";
 import { GRAPH_STUDIO_ICON } from "./lib/icon";
 import {
+  CREW_CONTRACT_VERSION,
+  CREW_PLUGIN_ID,
   createCrewClient,
   memberCorrelationId,
   memberProblems,
@@ -47,6 +49,7 @@ import { SqliteCheckpointer } from "./lib/checkpointer";
 import { MIGRATIONS, createStore, type RunRow, type RunStatus } from "./lib/store";
 import { RENAMED_TEMPLATES, TEMPLATES, searchGraphs } from "./lib/templates";
 import { whileWorkspaceBusy } from "./lib/workspace";
+import { canvasPageLayer } from "./lib/canvas-layer";
 import { ACTIVITY_EVENT_TYPES, describeActivity } from "./lib/activity";
 import {
   answerRefusal,
@@ -133,6 +136,29 @@ const runSchema = z.object({
 export type RunDto = z.infer<typeof runSchema>;
 export type NodeRunDto = z.infer<typeof nodeRunSchema>;
 
+const canvasNodeSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["agents", "project", "crew", "member", "graph-run", "step", "thread", "turn", "tool-call"]),
+  label: z.string(),
+  status: z.enum(["idle", "running", "waiting", "done", "failed", "escalated"]).optional(),
+  parentId: z.string().nullable(),
+  meta: z.record(z.string(), z.unknown()).optional(),
+});
+const canvasEdgeSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  variant: z.enum(["flow", "back", "message"]),
+  label: z.string().optional(),
+  count: z.number().optional(),
+});
+const canvasLayerSchema = z.object({
+  nodes: z.array(canvasNodeSchema),
+  edges: z.array(canvasEdgeSchema),
+  expanded: z.array(z.string()),
+});
+/** Crew's `canvasLayer` answer (bb-plugin-crew), checked like the rest of its contract. */
+const crewCanvasLayerSchema = canvasLayerSchema.extend({ contractVersion: z.number() });
+
 export const rpcContract = defineRpcContract({
   listGraphs: {
     input: z.null(),
@@ -179,6 +205,14 @@ export const rpcContract = defineRpcContract({
   getRun: {
     input: z.object({ id: z.string() }),
     output: z.object({ run: runSchema.nullable() }),
+  },
+  /**
+   * BBP-131: the canvas page's tree for one project — crew's crews and
+   * members (when crew is installed) with this plugin's runs hung into them.
+   */
+  canvasLayer: {
+    input: z.object({ projectId: z.string().min(1) }),
+    output: canvasLayerSchema.extend({ crew: z.boolean() }),
   },
   listRuns: {
     input: z.object({ threadId: z.string().nullable().default(null) }),
@@ -1697,6 +1731,33 @@ export default function graphStudio(bb: BbPluginApi) {
       return { run: toDto(runId)! };
     },
     getRun: ({ id }) => ({ run: toDto(id) }),
+    canvasLayer: async ({ projectId }) => {
+      let projectLabel = projectId;
+      try {
+        projectLabel = (await bb.sdk.projects.get({ projectId })).name ?? projectId;
+      } catch {
+        // The id is a worse label, not a reason to fail the page.
+      }
+      const runs = store.listRuns().flatMap((row) => {
+        const dto = toDto(row.id);
+        return dto && dto.projectId === projectId ? [dto] : [];
+      });
+      return canvasPageLayer({
+        projectId,
+        projectLabel,
+        runs,
+        crewLayer: async () => {
+          const { contractVersion, ...layer } = await bb.sdk.plugins.callRpc({
+            pluginId: CREW_PLUGIN_ID,
+            method: "canvasLayer",
+            input: { projectId },
+            outputSchema: crewCanvasLayerSchema,
+          });
+          if (contractVersion !== CREW_CONTRACT_VERSION) throw new Error(`crew contract ${contractVersion}`);
+          return layer;
+        },
+      });
+    },
     listRuns: ({ threadId }) => {
       const rows = threadId ? store.listRunsByThread(threadId) : store.listRuns();
       return {

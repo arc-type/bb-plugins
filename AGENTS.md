@@ -27,6 +27,13 @@ The plugins are installed from this repository as `path:` sources and run
 straight out of the working tree — after `bb plugin build` a reload is enough,
 no reinstall.
 
+`bb-canvas/` is the one exception: a shared source package (tree layout,
+cards, edges), not a plugin. There is no workspace tooling, so a plugin never
+imports it directly — `bash bb-canvas/scripts/sync.sh` copies its `lib/` and
+`components/` into `<plugin>/vendor/bb-canvas/` (checked in), and each
+plugin's `tests/vendor-drift.test.ts` fails when the copy differs. Change the
+source, run the script, commit both.
+
 ## What keeps tripping people up
 
 - `npm install` needs `--include=dev --cache "$TMPDIR/npm-cache"`. The default
