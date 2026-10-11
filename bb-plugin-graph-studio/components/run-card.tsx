@@ -24,6 +24,7 @@ import { GraphCanvas } from "./graph-canvas";
 import {
   RUN_STATUS,
   statusesFromRun,
+  liveEdges,
   travelledEdges,
   useNow,
 } from "./graph-studio-panel";
@@ -135,6 +136,7 @@ export function RunView({
   }, [run]);
   const branches = useMemo(() => fanOutProgress(run.graph, run.state), [run]);
   const travelled = useMemo(() => travelledEdges(run), [run]);
+  const live = useMemo(() => liveEdges(run), [run]);
   const activity = useMemo(() => activityByNode(run.nodeRuns), [run]);
   const durations = useMemo(() => durationByNode(run.nodeRuns), [run]);
   // The clock ticks while something is still in flight — including the
@@ -148,6 +150,7 @@ export function RunView({
         statuses={statuses}
         branches={branches}
         activeEdgeKeys={travelled}
+        liveEdgeKeys={live}
         activity={activity}
         durations={durations}
         now={now}

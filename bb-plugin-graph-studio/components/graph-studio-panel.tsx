@@ -12,6 +12,7 @@ import { KIND_LABEL, START_NODE, edgeKey, fanOutProgress, type Graph } from "../
 import { describeCost, runCommand, runTotal } from "../lib/describe";
 import { activityByNode, durationByNode } from "../lib/activity";
 import { suggestGraphs } from "../lib/suggest";
+import { now as edgesTakenNow } from "../lib/edge-state";
 import { GraphPicker } from "./graph-picker";
 import { RunTimeline } from "./run-timeline";
 import { FullscreenLayer } from "./fullscreen";
@@ -92,6 +93,11 @@ export function travelledEdges(run: RunDto | null): Set<string> {
     keys.add(edgeKey(edge));
   }
   return keys;
+}
+
+/** The edges into a running step — "taken right now" (lib/edge-state.ts). */
+export function liveEdges(run: RunDto | null): Set<string> {
+  return run ? edgesTakenNow(run) : new Set();
 }
 
 function useStudio(threadId: string | null) {
@@ -407,6 +413,7 @@ function RunView({
     return base;
   }, [run, branches]);
   const travelled = useMemo(() => travelledEdges(run), [run]);
+  const live = useMemo(() => liveEdges(run), [run]);
   const activity = useMemo(() => activityByNode(run.nodeRuns), [run]);
   const durations = useMemo(() => durationByNode(run.nodeRuns), [run]);
   const now = useNow(run.status === "running" || run.status === "stopping");
@@ -510,6 +517,7 @@ function RunView({
       selectedId={selected}
       onSelect={selectNode}
       activeEdgeKeys={travelled}
+      liveEdgeKeys={live}
       followIds={activeNodes}
       resolveGraph={resolveGraph}
       visits={run.state.visits ?? {}}
