@@ -131,10 +131,12 @@ function toFlow(
     source: placed.from,
     target: placed.to,
     type: "statusEdge",
-    data: { variant: placed.variant, path: placed.path, label: placed.label } satisfies StatusEdgeData as unknown as Record<
-      string,
-      unknown
-    >,
+    data: {
+      variant: placed.variant,
+      path: placed.path,
+      label: placed.label,
+      state: placed.state,
+    } satisfies StatusEdgeData as unknown as Record<string, unknown>,
   }));
 
   return { flowNodes, flowEdges };
