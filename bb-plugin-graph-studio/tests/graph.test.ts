@@ -62,6 +62,35 @@ describe("validation", () => {
     ).toBe(true);
   });
 
+  it("rejects a node with more than one locked skill", () => {
+    const graph = linear();
+    graph.nodes[0]!.skills = ["to-spec", "to-tickets"];
+    const isLocked = (name: string) => name === "to-spec" || name === "to-tickets";
+    const errors = validateGraph(graph, undefined, isLocked).filter(
+      (p) => p.level === "error",
+    );
+    expect(
+      errors.some(
+        (p) => p.message.includes("a") && p.message.includes("to-spec") && p.message.includes("to-tickets"),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a node with at most one locked skill", () => {
+    const graph = linear();
+    graph.nodes[0]!.skills = ["to-spec", "pr"];
+    const isLocked = (name: string) => name === "to-spec";
+    expect(
+      validateGraph(graph, undefined, isLocked).filter((p) => p.level === "error"),
+    ).toEqual([]);
+  });
+
+  it("defaults to no locked skills when no resolver is given", () => {
+    const graph = linear();
+    graph.nodes[0]!.skills = ["to-spec", "to-tickets"];
+    expect(validateGraph(graph).filter((p) => p.level === "error")).toEqual([]);
+  });
+
   it("treats several unconditional edges as a fan-out, not an error", () => {
     const graph = graphSchema.parse({
       id: "fan",

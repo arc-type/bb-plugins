@@ -484,6 +484,14 @@ export type GraphProblem = { level: "error" | "warning"; message: string };
 export type GraphResolver = (id: string) => Graph | null;
 
 /**
+ * Whether a skill name is locked (`disable-model-invocation: true`), as read
+ * by the skill catalog (`lib/skill-catalog.ts`). Passed in rather than
+ * imported for the same reason as `GraphResolver` — the catalog touches the
+ * filesystem, and `lib/graph.ts` must stay testable without it.
+ */
+export type LockedSkillResolver = (name: string) => boolean;
+
+/**
  * Every node id reachable from this graph, including those inside embedded
  * subgraphs, with the graph each came from. Returns `null` on a cycle across
  * graph boundaries, which the caller reports — following one here would not
@@ -516,6 +524,7 @@ export function reachableNodeIds(
 export function validateGraph(
   graph: Graph,
   resolve: GraphResolver = () => null,
+  isLockedSkill: LockedSkillResolver = () => false,
   /**
    * Graph ids already on the way down, so validating an embedded graph cannot
    * recurse forever when two graphs embed each other. The circle itself is
@@ -926,7 +935,10 @@ export function validateGraph(
     // The child must be runnable on its own, or the run fails somewhere deep
     // inside a graph the author was not even looking at.
     if (seen.includes(child.id)) continue;
-    const childProblems = validateGraph(child, resolve, [...seen, graph.id]).filter(
+    const childProblems = validateGraph(child, resolve, isLockedSkill, [
+      ...seen,
+      graph.id,
+    ]).filter(
       (problem) => problem.level === "error",
     );
     if (childProblems.length > 0) {
@@ -1262,6 +1274,23 @@ export function validateGraph(
       level: "warning",
       message: `"${node?.label ?? id}" is never reached from Start.`,
     });
+  }
+
+  // A locked skill (`disable-model-invocation: true`) is loaded by prefixing
+  // the worker prompt with `/<skill>`, and that only works for a single skill
+  // — the first line can invoke one slash command, not several. A node with
+  // two or more locked skills would silently load only the first; refused
+  // here rather than left for `composeNodePrompt` to pick one.
+  for (const node of graph.nodes) {
+    const locked = node.skills.filter((skill) => isLockedSkill(skill));
+    if (locked.length > 1) {
+      problems.push({
+        level: "error",
+        message: `Node "${node.id}" has more than one locked skill: ${locked
+          .map((skill) => `"${skill}"`)
+          .join(", ")}.`,
+      });
+    }
   }
 
   return problems;
