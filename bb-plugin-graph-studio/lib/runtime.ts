@@ -219,6 +219,7 @@ export function compileGraph(
   host: RuntimeHost,
   checkpointer?: BaseCheckpointSaver,
   resolve: GraphResolver = () => null,
+  lockedSkills?: ReadonlySet<string>,
 ): CompiledStateGraph<State, Partial<State>, string> {
   const builder = new StateGraph(StateAnnotation);
 
@@ -257,7 +258,7 @@ export function compileGraph(
       }
       // No checkpointer for the child: the parent's is the one that owns this
       // run, and LangGraph namespaces the child's checkpoints beneath it.
-      builder.addNode(node.id, compileGraph(child, host, undefined, resolve));
+      builder.addNode(node.id, compileGraph(child, host, undefined, resolve, lockedSkills));
       continue;
     }
 
@@ -332,7 +333,7 @@ export function compileGraph(
         try {
           if (!session) {
             const threadId = await host.spawn({
-              prompt: composeDialogPrompt(node, runState, knownNodes),
+              prompt: composeDialogPrompt(node, runState, knownNodes, lockedSkills),
               title: node.label.slice(0, 80),
               nodeId: node.id,
               skills: node.skills,
@@ -501,7 +502,7 @@ export function compileGraph(
               visit: visits,
               attempt: tries,
               address: node.member.trim(),
-              body: composeNodePrompt(node, runState, knownNodes),
+              body: composeNodePrompt(node, runState, knownNodes, lockedSkills),
             });
             threadId = sent.threadId;
             if (threadId) await host.onNodeThread(nodeRunId, threadId);
@@ -570,7 +571,7 @@ export function compileGraph(
           childThreadId = host.adoptedThread?.(nodeRunId) ?? null;
           if (childThreadId === null) {
             childThreadId = await host.spawn({
-              prompt: composeNodePrompt(node, runState, knownNodes),
+              prompt: composeNodePrompt(node, runState, knownNodes, lockedSkills),
               title: node.label.slice(0, 80),
               nodeId: node.id,
               skills: node.skills,

@@ -141,6 +141,25 @@ const linear = (): Graph =>
     ],
   });
 
+const skilled = (): Graph =>
+  graphSchema.parse({
+    id: "skilled",
+    name: "Skilled",
+    nodes: [
+      {
+        id: "a",
+        label: "A",
+        prompt: "Erst: {{input}}",
+        maxAttempts: 1,
+        skills: ["to-spec"],
+      },
+    ],
+    edges: [
+      { from: START_NODE, to: "a" },
+      { from: "a", to: END_NODE },
+    ],
+  });
+
 describe("runtime", () => {
   it("runs a linear graph and threads output into the next prompt", async () => {
     const seen: string[] = [];
@@ -159,6 +178,30 @@ describe("runtime", () => {
     expect(out.outputs).toEqual({ a: "A-RESULT", b: "B-RESULT" });
     expect(seen[0]).toBe("Erst: TASK");
     expect(seen[1]).toBe("Then: A-RESULT");
+  });
+
+  // BBP-137: a node whose skill is locked (disable-model-invocation: true)
+  // must have its worker prompt start with `/<skill>` — a slash invocation is
+  // the only way a locked skill's SKILL.md text ever reaches the worker.
+  it("prefixes the worker prompt with /<skill> for a locked skill", async () => {
+    const seen: string[] = [];
+    const { host } = fakeHost({ a: "A-RESULT" });
+    const spy: RuntimeHost = {
+      ...host,
+      async spawn(args) {
+        seen.push(args.prompt);
+        return host.spawn(args);
+      },
+    };
+    const app = compileGraph(
+      skilled(),
+      spy,
+      undefined,
+      undefined,
+      new Set(["to-spec"]),
+    );
+    await app.invoke(emptyRunState("TASK"));
+    expect(seen[0]?.startsWith("/to-spec")).toBe(true);
   });
 
   it("follows a cycle and leaves it when the condition flips", async () => {
