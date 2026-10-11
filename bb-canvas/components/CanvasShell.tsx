@@ -1,0 +1,147 @@
+// The React Flow hull around a `TreeLayout`: theme, zoom controls, pan and
+// zoom at the pointer. No MiniMap and no keyboard here — those are the next
+// work item, built on fixture data before either plugin feeds this component
+// real data.
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  ReactFlowProvider,
+  type ColorMode,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { layoutTree, type TreeLayout } from "@/lib/layout";
+import { NodeCard, type NodeCardProps } from "@/components/NodeCard";
+import { StatusEdge, type StatusEdgeData } from "@/components/StatusEdge";
+import type { CanvasEdge, CanvasNode } from "@/lib/types";
+
+/** React Flow's colour mode, read from the BB theme actually on screen —
+ *  left at its default, React Flow paints white chrome inside a dark host. */
+export function useHostColorMode(): [React.RefObject<HTMLDivElement | null>, ColorMode] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [mode, setMode] = useState<ColorMode>("system");
+  const measure = useCallback(() => {
+    if (!ref.current || typeof getComputedStyle !== "function") return;
+    const background = getComputedStyle(ref.current).backgroundColor;
+    const lightness = colorLightness(background);
+    if (lightness !== null) setMode(lightness < 0.5 ? "dark" : "light");
+  }, []);
+  useLayoutEffect(measure);
+  return [ref, mode];
+}
+
+/** Perceived lightness (0–1) of an `rgb()`/`rgba()` string, or `null` if it
+ *  cannot be read — a transparent background, for instance. */
+export function colorLightness(color: string): number | null {
+  const match = color.match(/rgba?\(([^)]+)\)/);
+  if (!match) return null;
+  const [r, g, b] = match[1]!.split(",").map((part) => Number(part.trim()));
+  if (r === undefined || g === undefined || b === undefined || [r, g, b].some(Number.isNaN)) return null;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+function CanvasNodeView({ data }: { data: NodeCardProps }) {
+  return <NodeCard {...data} />;
+}
+
+const NODE_TYPES = { canvasNode: CanvasNodeView };
+const EDGE_TYPES = { statusEdge: StatusEdge };
+
+export type CanvasShellProps = {
+  nodes: readonly CanvasNode[];
+  expanded: ReadonlySet<string>;
+  edges?: readonly CanvasEdge[];
+  selectedId?: string | null;
+  onSelect?: (nodeId: string) => void;
+  className?: string;
+};
+
+function toFlow(
+  layout: TreeLayout,
+  nodes: readonly CanvasNode[],
+  selectedId: string | null | undefined,
+  onSelect: ((id: string) => void) | undefined,
+): { flowNodes: Node[]; flowEdges: Edge[] } {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const flowNodes: Node[] = layout.positions.map((placed) => {
+    const node = byId.get(placed.id)!;
+    const data: NodeCardProps = {
+      label: node.label,
+      subtitle: node.kind,
+      status: node.status,
+      selected: node.id === selectedId,
+      onClick: onSelect ? () => onSelect(node.id) : undefined,
+    };
+    return {
+      id: placed.id,
+      type: "canvasNode",
+      position: { x: placed.x, y: placed.y },
+      // Both the style (what paints) and `width`/`height` (what React Flow
+      // treats as already measured): without the latter a node stays
+      // `visibility: hidden` until its own ResizeObserver fires, which never
+      // happens in a DOM that only stubs the observer.
+      style: { width: placed.width, height: placed.height },
+      width: placed.width,
+      height: placed.height,
+      data: data as unknown as Record<string, unknown>,
+      draggable: false,
+      selectable: false,
+    };
+  });
+
+  const flowEdges: Edge[] = layout.edges.map((placed, index) => ({
+    id: `${placed.from}->${placed.to}-${index}`,
+    source: placed.from,
+    target: placed.to,
+    type: "statusEdge",
+    data: { variant: placed.variant, path: placed.path, label: placed.label } satisfies StatusEdgeData as unknown as Record<
+      string,
+      unknown
+    >,
+  }));
+
+  return { flowNodes, flowEdges };
+}
+
+function CanvasShellInner({ nodes, expanded, edges = [], selectedId, onSelect, className }: CanvasShellProps) {
+  const [hostRef, colorMode] = useHostColorMode();
+  const layout = useMemo(() => layoutTree(nodes, expanded, edges), [nodes, expanded, edges]);
+  const { flowNodes, flowEdges } = useMemo(
+    () => toFlow(layout, nodes, selectedId, onSelect),
+    [layout, nodes, selectedId, onSelect],
+  );
+
+  return (
+    <div ref={hostRef} className={className} style={{ width: "100%", height: "100%" }}>
+      <ReactFlow
+        nodes={flowNodes}
+        edges={flowEdges}
+        nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
+        colorMode={colorMode}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        zoomOnScroll
+        panOnScroll={false}
+        fitView
+      >
+        <Background />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  );
+}
+
+export function CanvasShell(props: CanvasShellProps) {
+  // Its own provider: two shells on one page (a preview and the full canvas)
+  // must not share a viewport.
+  return (
+    <ReactFlowProvider>
+      <CanvasShellInner {...props} />
+    </ReactFlowProvider>
+  );
+}

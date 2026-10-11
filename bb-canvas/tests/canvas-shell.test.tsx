@@ -1,0 +1,47 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { CanvasShell } from "@/components/CanvasShell";
+import type { CanvasEdge, CanvasNode } from "@/lib/types";
+
+afterEach(cleanup);
+
+const nodes: CanvasNode[] = [
+  { id: "crew", kind: "crew", label: "factory-1", parentId: null },
+  { id: "m1", kind: "member", label: "orch-lead", status: "running", parentId: "crew" },
+  { id: "m2", kind: "member", label: "steps-impl", parentId: "crew" },
+];
+
+const edges: CanvasEdge[] = [{ from: "m2", to: "m1", variant: "message", label: "2" }];
+
+describe("CanvasShell", () => {
+  it("renders a card for every visible node", () => {
+    render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    expect(screen.getByRole("button", { name: "orch-lead — member" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "steps-impl — member" })).toBeTruthy();
+  });
+
+  it("hides the children of a collapsed node", () => {
+    render(<CanvasShell nodes={nodes} expanded={new Set()} edges={edges} />);
+    expect(screen.queryByRole("button", { name: "orch-lead — member" })).toBeNull();
+    expect(screen.getByRole("button", { name: "factory-1 — crew" })).toBeTruthy();
+  });
+
+  it("calls onSelect with the clicked node's id", () => {
+    const onSelect = vi.fn();
+    render(
+      <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} onSelect={onSelect} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "orch-lead — member" }));
+    expect(onSelect).toHaveBeenCalledWith("m1");
+  });
+
+  it("marks the selected node pressed", () => {
+    render(
+      <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} selectedId="m1" />,
+    );
+    expect(
+      screen.getByRole("button", { name: "orch-lead — member" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+});
