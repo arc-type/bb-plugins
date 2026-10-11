@@ -18,6 +18,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { layoutTree, type TreeLayout } from "../lib/layout";
 import { NodeCard, type NodeCardProps } from "./NodeCard";
+import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
 import type { CanvasEdge, CanvasNode } from "../lib/types";
 
@@ -87,11 +88,16 @@ function toFlow(
   onSelect: ((id: string) => void) | undefined,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
+  const childCount = new Map<string, number>();
+  for (const node of nodes) {
+    if (node.parentId !== null) childCount.set(node.parentId, (childCount.get(node.parentId) ?? 0) + 1);
+  }
   const flowNodes: Node[] = layout.positions.map((placed) => {
     const node = byId.get(placed.id)!;
     const data: NodeCardProps = {
       label: node.label,
-      subtitle: node.kind,
+      subtitle: describeNode(node.kind, childCount.get(node.id) ?? 0, node.meta),
+      icon: <KindIcon kind={node.kind} />,
       status: node.status,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
@@ -168,6 +174,14 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         zoomOnScroll
         panOnScroll={false}
         fitView
+        fitViewOptions={{ padding: 0.08 }}
+        // React Flow's default floor (0.5) is too high for a real tree: two
+        // crews with ten members each no longer fit, so the start view and
+        // `0` cut off the top instead of showing the whole tree.
+        minZoom={0.2}
+        // The canvas is a page of its own inside BB, not a demo; the corner
+        // badge would be the only non-BB text on it.
+        proOptions={{ hideAttribution: true }}
       >
         <Background />
         <Controls showInteractive={false} />

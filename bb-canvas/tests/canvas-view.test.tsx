@@ -21,48 +21,48 @@ function renderView(initialExpanded = new Set(["crew"])) {
   return container.querySelector("[data-canvas-view]") as HTMLElement;
 }
 
-function card(name: string) {
+function card(name: string | RegExp) {
   return screen.getByRole("button", { name });
 }
 
 describe("CanvasView keyboard navigation", () => {
   it("ArrowDown moves the selection to the next sibling", () => {
     const root = renderView();
-    fireEvent.click(card("orch-lead — member"));
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
     fireEvent.keyDown(root, { key: "ArrowDown" });
-    expect(card("steps-impl — member").getAttribute("aria-pressed")).toBe("true");
+    expect(card(new RegExp("^steps-impl — ")).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("ArrowUp moves the selection to the previous sibling", () => {
     const root = renderView();
-    fireEvent.click(card("steps-impl — member"));
+    fireEvent.click(card(new RegExp("^steps-impl — ")));
     fireEvent.keyDown(root, { key: "ArrowUp" });
-    expect(card("orch-lead — member").getAttribute("aria-pressed")).toBe("true");
+    expect(card(new RegExp("^orch-lead — ")).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("Enter on a collapsed card expands it, and does so only once", () => {
     const root = renderView(new Set());
-    fireEvent.click(card("factory-1 — crew"));
-    expect(screen.queryByRole("button", { name: "orch-lead — member" })).toBeNull();
+    fireEvent.click(card(new RegExp("^factory-1 — ")));
+    expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
     fireEvent.keyDown(root, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "orch-lead — member" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^orch-lead — ") })).toBeTruthy();
     // Idempotent: pressing it again on the same, now-expanded card must not throw.
     expect(() => fireEvent.keyDown(root, { key: "Enter" })).not.toThrow();
-    expect(screen.getAllByRole("button", { name: "orch-lead — member" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: new RegExp("^orch-lead — ") })).toHaveLength(1);
   });
 
   it("ArrowLeft collapses an expanded card", () => {
     const root = renderView();
-    fireEvent.click(card("factory-1 — crew"));
-    expect(screen.getByRole("button", { name: "orch-lead — member" })).toBeTruthy();
+    fireEvent.click(card(new RegExp("^factory-1 — ")));
+    expect(screen.getByRole("button", { name: new RegExp("^orch-lead — ") })).toBeTruthy();
     fireEvent.keyDown(root, { key: "ArrowLeft" });
-    expect(screen.queryByRole("button", { name: "orch-lead — member" })).toBeNull();
+    expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
   });
 
   it("J jumps to the running card", () => {
     const root = renderView();
     fireEvent.keyDown(root, { key: "j" });
-    expect(card("steps-impl — member").getAttribute("aria-pressed")).toBe("true");
+    expect(card(new RegExp("^steps-impl — ")).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("/ opens the search box", () => {
@@ -78,7 +78,7 @@ describe("CanvasView keyboard navigation", () => {
       target: { value: "steps-review" },
     });
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Search nodes" }), { key: "Enter" });
-    expect(card("steps-review — member").getAttribute("aria-pressed")).toBe("true");
+    expect(card(new RegExp("^steps-review — ")).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("search with no match shows 'no match' and does not throw", () => {
@@ -102,7 +102,7 @@ describe("CanvasView keyboard navigation", () => {
 
   it("selecting a card opens the sidebar, and Escape closes it", () => {
     const root = renderView();
-    fireEvent.click(card("orch-lead — member"));
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
     expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
     fireEvent.keyDown(root, { key: "Escape" });
     expect(screen.queryByLabelText("Details for orch-lead")).toBeNull();
@@ -110,7 +110,7 @@ describe("CanvasView keyboard navigation", () => {
 
   it("shows the breadcrumb for the selected card", () => {
     renderView();
-    fireEvent.click(card("orch-lead — member"));
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(breadcrumb).toBeTruthy();
     expect(breadcrumb.textContent).toContain("factory-1");
@@ -136,10 +136,10 @@ describe("CanvasView lazy children", () => {
       <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
     );
     const root = container.querySelector("[data-canvas-view]") as HTMLElement;
-    fireEvent.click(card("orch-lead — member"));
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
     fireEvent.keyDown(root, { key: "Enter" });
     expect(loadChildren).toHaveBeenCalledWith(expect.objectContaining({ id: "m1" }));
-    expect(await screen.findByRole("button", { name: "Turn 1 — turn" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Turn 1 — / })).toBeTruthy();
   });
 
   it("does not call the loader twice for the same node", async () => {
@@ -150,9 +150,9 @@ describe("CanvasView lazy children", () => {
       <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
     );
     const root = container.querySelector("[data-canvas-view]") as HTMLElement;
-    fireEvent.click(card("orch-lead — member"));
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
     fireEvent.keyDown(root, { key: "Enter" });
-    await screen.findByRole("button", { name: "Turn 1 — turn" });
+    await screen.findByRole("button", { name: /^Turn 1 — / });
     fireEvent.keyDown(root, { key: "Enter" });
     expect(loadChildren).toHaveBeenCalledOnce();
   });

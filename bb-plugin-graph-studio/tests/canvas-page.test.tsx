@@ -48,9 +48,9 @@ function canvasPanel(overrides: { rpc?: Record<string, unknown>; sdk?: Record<st
 describe("the canvas page", () => {
   it("renders the nodes from canvasLayer, with a thread node under the member", async () => {
     canvasPanel();
-    expect(await screen.findByRole("button", { name: "Shop — project" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "a — member" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Thread — thread" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^a — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^Thread — ") })).toBeTruthy();
   });
 
   it("loads the thread's timeline lazily, once its node is opened", async () => {
@@ -58,9 +58,9 @@ describe("the canvas page", () => {
       rows: [{ id: "r1", kind: "conversation", text: "Please fix the bug" }],
     });
     canvasPanel({ sdk: { threads: { timeline } } });
-    fireEvent.click(await screen.findByRole("button", { name: "Thread — thread" }));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "Please fix the bug — turn" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Please fix the bug — ") })).toBeTruthy();
   });
 
   it("shows a message instead of a canvas when no project is open", () => {

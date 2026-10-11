@@ -42,6 +42,24 @@ describe("layoutTree", () => {
     expect(byId.get("m3")!.y).toBe(byId.get("m2")!.y + NODE_HEIGHT + ROW_GAP);
   });
 
+  it("centres a parent on its open children and keeps subtrees apart", () => {
+    const nodes = [
+      node("project", null, { kind: "project" }),
+      node("crewA", "project", { kind: "crew" }),
+      node("a1", "crewA"),
+      node("a2", "crewA"),
+      node("a3", "crewA"),
+      node("crewB", "project", { kind: "crew" }),
+      node("b1", "crewB"),
+    ];
+    const { positions } = layoutTree(nodes, new Set(["project", "crewA", "crewB"]));
+    const byId = new Map(positions.map((placed) => [placed.id, placed]));
+    expect(byId.get("crewA")!.y).toBe(byId.get("a2")!.y);
+    expect(byId.get("crewB")!.y).toBe(byId.get("b1")!.y);
+    expect(byId.get("b1")!.y).toBe(byId.get("a3")!.y + NODE_HEIGHT + ROW_GAP);
+    expect(byId.get("project")!.y).toBe((byId.get("crewA")!.y + byId.get("crewB")!.y) / 2);
+  });
+
   it("hides the children of a node that is not expanded", () => {
     const nodes = [node("crew", null, { kind: "crew" }), node("m1", "crew")];
     const { positions } = layoutTree(nodes, new Set());

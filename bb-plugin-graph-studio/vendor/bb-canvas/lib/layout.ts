@@ -90,16 +90,40 @@ export function layoutTree(
   };
   visit(null, 0);
 
-  const rowsInColumn = new Map<number, number>();
+  // Every visible leaf takes the next free row; a parent sits centred on the
+  // rows its open subtree spans. With 20 members under one crew the crew
+  // card then sits beside the middle of its members instead of above the
+  // first one, so the fan of edges stays short and symmetric.
+  const visibleChildren = new Map<string, string[]>();
+  for (const id of order) {
+    const parentId = parentIdOf.get(id)!;
+    if (parentId === null) continue;
+    const list = visibleChildren.get(parentId) ?? [];
+    list.push(id);
+    visibleChildren.set(parentId, list);
+  }
+  const rowOf = new Map<string, number>();
+  let nextRow = 0;
+  const placeRows = (id: string): number => {
+    const kids = visibleChildren.get(id) ?? [];
+    if (kids.length === 0) {
+      rowOf.set(id, nextRow);
+      return nextRow++;
+    }
+    const rows = kids.map(placeRows);
+    const row = (rows[0] + rows[rows.length - 1]) / 2;
+    rowOf.set(id, row);
+    return row;
+  };
+  for (const id of order) if (parentIdOf.get(id) === null) placeRows(id);
+
   const placed = new Map<string, PlacedNode>();
   for (const id of order) {
     const column = columnOf.get(id)!;
-    const row = rowsInColumn.get(column) ?? 0;
-    rowsInColumn.set(column, row + 1);
     placed.set(id, {
       id,
       x: MARGIN + column * (NODE_WIDTH + COLUMN_GAP),
-      y: MARGIN + row * (NODE_HEIGHT + ROW_GAP),
+      y: MARGIN + rowOf.get(id)! * (NODE_HEIGHT + ROW_GAP),
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
       column,
@@ -120,7 +144,7 @@ export function layoutTree(
   });
 
   const maxColumn = Math.max(...[...columnOf.values()], 0);
-  const maxRow = Math.max(...[...rowsInColumn.values()], 0);
+  const maxRow = nextRow;
   const width = MARGIN * 2 + (maxColumn + 1) * NODE_WIDTH + maxColumn * COLUMN_GAP + BACK_EDGE_LANE;
   const height = MARGIN * 2 + maxRow * (NODE_HEIGHT + ROW_GAP) - (maxRow > 0 ? ROW_GAP : 0) + NODE_HEIGHT;
 

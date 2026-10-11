@@ -51,22 +51,22 @@ describe("crew's canvas page", () => {
 
   it("shows the canvas, rooted under agents → project, when Graph Studio is absent", async () => {
     canvasPanel();
-    expect(await screen.findByRole("button", { name: "Agents — agents" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Shop — project" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "a — member" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Thread — thread" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Agents — / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^a — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^Thread — ") })).toBeTruthy();
   });
 
   it("loads a thread's timeline lazily, once its node is opened", async () => {
     const timeline = async () => ({ rows: [{ id: "r1", kind: "conversation", text: "Ship it" }] });
     canvasPanel({ sdk: { projects: { get: async () => ({ name: "Shop" }) }, threads: { timeline } } });
-    fireEvent.click(await screen.findByRole("button", { name: "Thread — thread" }));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "Ship it — turn" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Ship it — ") })).toBeTruthy();
   });
 
   it("falls back to visible when the canvasPage RPC itself fails", async () => {
     canvasPanel({ rpc: { canvasPage: () => Promise.reject(new Error("no route")) } });
-    expect(await screen.findByRole("button", { name: "Agents — agents" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Agents — / })).toBeTruthy();
   });
 });

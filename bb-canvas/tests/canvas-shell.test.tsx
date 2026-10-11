@@ -17,14 +17,14 @@ const edges: CanvasEdge[] = [{ from: "m2", to: "m1", variant: "message", label: 
 describe("CanvasShell", () => {
   it("renders a card for every visible node", () => {
     render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
-    expect(screen.getByRole("button", { name: "orch-lead — member" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "steps-impl — member" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^orch-lead — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^steps-impl — ") })).toBeTruthy();
   });
 
   it("hides the children of a collapsed node", () => {
     render(<CanvasShell nodes={nodes} expanded={new Set()} edges={edges} />);
-    expect(screen.queryByRole("button", { name: "orch-lead — member" })).toBeNull();
-    expect(screen.getByRole("button", { name: "factory-1 — crew" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
+    expect(screen.getByRole("button", { name: new RegExp("^factory-1 — ") })).toBeTruthy();
   });
 
   it("calls onSelect with the clicked node's id", () => {
@@ -32,7 +32,7 @@ describe("CanvasShell", () => {
     render(
       <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} onSelect={onSelect} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "orch-lead — member" }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp("^orch-lead — ") }));
     expect(onSelect).toHaveBeenCalledWith("m1");
   });
 
@@ -41,7 +41,7 @@ describe("CanvasShell", () => {
       <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} selectedId="m1" />,
     );
     expect(
-      screen.getByRole("button", { name: "orch-lead — member" }).getAttribute("aria-pressed"),
+      screen.getByRole("button", { name: new RegExp("^orch-lead — ") }).getAttribute("aria-pressed"),
     ).toBe("true");
   });
 });
