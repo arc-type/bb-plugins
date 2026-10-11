@@ -148,7 +148,15 @@ export function ProjectRow({
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <section aria-label={project.name} data-aside-project={project.id}>
+    <section
+      aria-label={project.name}
+      data-aside-project={project.id}
+      // "after" means after the whole block, so its line sits under the last
+      // open thread, not under the header where it would read as "first child".
+      className={cn(
+        manualSort && dropWhere === "after" && "shadow-[inset_0_-1px_0_0_var(--muted-foreground)]",
+      )}
+    >
       <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <ContextMenuTrigger asChild>
           <div
@@ -161,9 +169,6 @@ export function ProjectRow({
               manualSort &&
                 dropWhere === "before" &&
                 "shadow-[inset_0_1px_0_0_var(--muted-foreground)]",
-              manualSort &&
-                dropWhere === "after" &&
-                "shadow-[inset_0_-1px_0_0_var(--muted-foreground)]",
             )}
           >
             <button
