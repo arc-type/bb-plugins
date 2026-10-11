@@ -819,6 +819,7 @@ export function Sidenav({
                       report(cause instanceof Error ? cause.message : String(cause)),
                     );
                 }}
+                manualSort={view.projectSort === "manual"}
                 onReorder={(sourceProjectId, position) => {
                   // Manual mode only: in the other modes the list shows a
                   // computed order, and a drag inside it would write something

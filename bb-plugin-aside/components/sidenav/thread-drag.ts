@@ -14,7 +14,8 @@ export type ThreadDragGroup = "list" | "pinned";
 
 export type ThreadDropTarget =
   | { kind: "card"; id: string; group: ThreadDragGroup; where: DropWhere }
-  | { kind: "section"; id: string };
+  | { kind: "section"; id: string }
+  | { kind: "project"; id: string; where: DropWhere };
 
 /** Pixels the pointer travels before a press becomes a drag. */
 const ENGAGE_DISTANCE = 4;
@@ -47,19 +48,41 @@ export function targetAt(
   return sectionId ? { kind: "section", id: sectionId } : null;
 }
 
+/** The drop target under a point while dragging a project: the whole project
+ *  block (header plus its open threads), never just the header, so the drop
+ *  lands where the line is shown even when the project is expanded. */
+export function projectTargetAt(
+  element: Element | null,
+  clientY: number,
+  draggedId: string,
+): ThreadDropTarget | null {
+  const project = element?.closest<HTMLElement>("[data-aside-project]");
+  const projectId = project?.dataset.asideProject;
+  if (!project || !projectId || projectId === draggedId) return null;
+  const bounds = project.getBoundingClientRect();
+  const share = (clientY - bounds.top) / bounds.height;
+  return { kind: "project", id: projectId, where: dropWhereAt(share) };
+}
+
 let target: ThreadDropTarget | null = null;
 let justDragged = false;
 const listeners = new Set<() => void>();
 
-function setTarget(next: ThreadDropTarget | null) {
-  if (
-    next?.kind === target?.kind &&
-    next?.id === target?.id &&
-    (next?.kind !== "card" || target?.kind !== "card" || next.group === target.group) &&
-    (next?.kind !== "card" || target?.kind !== "card" || next.where === target.where)
-  ) {
-    return;
+function sameTarget(a: ThreadDropTarget | null, b: ThreadDropTarget | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "card" && b.kind === "card") {
+    return a.id === b.id && a.group === b.group && a.where === b.where;
   }
+  if (a.kind === "project" && b.kind === "project") {
+    return a.id === b.id && a.where === b.where;
+  }
+  return a.kind === "section" && b.kind === "section" && a.id === b.id;
+}
+
+function setTarget(next: ThreadDropTarget | null) {
+  if (sameTarget(next, target)) return;
   target = next;
   for (const listener of listeners) listener();
 }
@@ -86,6 +109,13 @@ export function useSectionDropActive(sectionId: string): boolean {
   );
 }
 
+/** Where a project drag would land on this project, or `null`. */
+export function useProjectDropWhere(projectId: string): DropWhere | null {
+  return useSyncExternalStore(subscribe, () =>
+    target?.kind === "project" && target.id === projectId ? target.where : null,
+  );
+}
+
 /** A drag ends with a click; the card asks this so it does not open. */
 export function consumeDragClick(): boolean {
   return justDragged;
@@ -104,12 +134,33 @@ export function registerSectionDrop(sectionId: string, onDrop: (threadId: string
   };
 }
 
-/** Starts following the pointer after a press on a thread card. */
-export function beginThreadDrag(
+/**
+ * Project rows reorder themselves: the row the pointer lands on, not the row
+ * being dragged, knows its own neighbours and calls the host. So — exactly
+ * like a section drop — the landing row's callback is looked up by id.
+ */
+const projectDrops = new Map<string, (sourceProjectId: string, where: DropWhere) => void>();
+
+export function registerProjectDrop(
+  projectId: string,
+  onDrop: (sourceProjectId: string, where: DropWhere) => void,
+) {
+  projectDrops.set(projectId, onDrop);
+  return () => {
+    if (projectDrops.get(projectId) === onDrop) projectDrops.delete(projectId);
+  };
+}
+
+/**
+ * Shared skeleton for a pointer drag: tracks movement past the engage
+ * distance, drives the body cursor, lets the host's Escape cancel it, and
+ * swallows the click that follows a completed drag. `onMove` sets the target
+ * as the pointer moves; `onLand` reads it once the drag ends.
+ */
+function trackDrag(
   event: ReactPointerEvent<HTMLElement>,
-  threadId: string,
-  group: ThreadDragGroup,
-  onCard: (threadId: string, targetId: string, where: DropWhere) => void,
+  onMove: (moveEvent: PointerEvent) => void,
+  onLand: (landed: ThreadDropTarget | null) => void,
 ) {
   if (event.button !== 0) return;
   const startX = event.clientX;
@@ -125,9 +176,7 @@ export function beginThreadDrag(
       document.body.style.cursor = "grabbing";
       document.body.style.userSelect = "none";
     }
-    setTarget(
-      targetAt(document.elementFromPoint(moveEvent.clientX, moveEvent.clientY), moveEvent.clientY, threadId, group),
-    );
+    onMove(moveEvent);
   };
   const stop = () => {
     window.removeEventListener("pointermove", move);
@@ -146,9 +195,7 @@ export function beginThreadDrag(
   const up = () => {
     const landed = target;
     stop();
-    if (!engaged || landed === null) return;
-    if (landed.kind === "card") onCard(threadId, landed.id, landed.where);
-    else sectionDrops.get(landed.id)?.(threadId);
+    if (engaged) onLand(landed);
   };
   // The host sends Escape when its split drag takes over the gesture.
   const key = (keyEvent: KeyboardEvent) => {
@@ -159,4 +206,41 @@ export function beginThreadDrag(
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", stop);
   document.addEventListener("keydown", key, true);
+}
+
+/** Starts following the pointer after a press on a thread card. */
+export function beginThreadDrag(
+  event: ReactPointerEvent<HTMLElement>,
+  threadId: string,
+  group: ThreadDragGroup,
+  onCard: (threadId: string, targetId: string, where: DropWhere) => void,
+) {
+  trackDrag(
+    event,
+    (moveEvent) =>
+      setTarget(
+        targetAt(document.elementFromPoint(moveEvent.clientX, moveEvent.clientY), moveEvent.clientY, threadId, group),
+      ),
+    (landed) => {
+      if (landed === null) return;
+      if (landed.kind === "card") onCard(threadId, landed.id, landed.where);
+      else if (landed.kind === "section") sectionDrops.get(landed.id)?.(threadId);
+    },
+  );
+}
+
+/** Starts following the pointer after a press on a project's badge. */
+export function beginProjectDrag(event: ReactPointerEvent<HTMLElement>, projectId: string) {
+  trackDrag(
+    event,
+    (moveEvent) =>
+      setTarget(
+        projectTargetAt(document.elementFromPoint(moveEvent.clientX, moveEvent.clientY), moveEvent.clientY, projectId),
+      ),
+    (landed) => {
+      if (landed !== null && landed.kind === "project") {
+        projectDrops.get(landed.id)?.(projectId, landed.where);
+      }
+    },
+  );
 }

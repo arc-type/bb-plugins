@@ -21,9 +21,11 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 
-/** A section has no project of its own, so its drag type stays separate from
- *  `PROJECT_DRAG_TYPE` — dropping a project on a section row must not reorder
- *  sections, and dropping a section on a project row must not move a project. */
+/** A section has no project of its own, so its drag type stays its own: a
+ *  project drag (pointer events, read by `[data-aside-project]`) never matches
+ *  this `dataTransfer` type, so dropping a project on a section row cannot
+ *  reorder sections, and dropping a section on a project row cannot move a
+ *  project. */
 export const SECTION_DRAG_TYPE = "application/x-aside-section";
 
 /** The section being dragged. `getData` is empty during dragover, so this is

@@ -14,7 +14,7 @@
 // synthetic), so the sidenav keeps its position itself — see `placePersonal`.
 // Renaming still does not work there, because in the host it has no name at
 // all.
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   experimental_useSidebarThreadActions as useSidebarThreadActions,
   type PluginSidebarProject,
@@ -24,6 +24,12 @@ import { RowCount, RowTail } from "@/components/sidenav/row-slots";
 import { badgeColor, badgeForeground, badgeLetter, BADGE_PALETTE } from "@/lib/colors";
 import { stateLabel } from "@/components/sidenav/marks";
 import { TagEditor } from "@/components/sidenav/tag-editor";
+import {
+  beginProjectDrag,
+  consumeDragClick,
+  registerProjectDrop,
+  useProjectDropWhere,
+} from "@/components/sidenav/thread-drag";
 import type { ThreadState } from "@/lib/tree";
 import {
   ContextMenu,
@@ -36,8 +42,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-
-export const PROJECT_DRAG_TYPE = "application/x-aside-project";
 
 function NameInput({
   initial,
@@ -99,6 +103,7 @@ export function ProjectRow({
   onRename,
   onSetColor,
   onSetTags,
+  manualSort,
   onReorder,
   children,
 }: {
@@ -129,47 +134,37 @@ export function ProjectRow({
   onRename: (name: string) => void;
   onSetColor: (color: string | null) => void;
   onSetTags: (tags: string[]) => void;
+  /** Only in this mode does a drop write an order, so only then is the line shown. */
+  manualSort: boolean;
   onReorder: (sourceProjectId: string, position: "before" | "after") => void;
   children: ReactNode;
 }) {
   const actions = useSidebarThreadActions();
   const background = badgeColor(project.id, color);
-  const dragging = useRef(false);
-  const headerRef = useRef<HTMLDivElement>(null);
+  const dropWhere = useProjectDropWhere(project.id);
+  useEffect(() => registerProjectDrop(project.id, onReorder), [project.id, onReorder]);
   // The swatches are not menu items, so Radix does not close the menu after a
   // click. We therefore drive the open state ourselves.
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <section
-      aria-label={project.name}
-      data-aside-project={project.id}
-      onDragOver={(event: DragEvent<HTMLElement>) => {
-        if (!event.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(event: DragEvent<HTMLElement>) => {
-        const source = event.dataTransfer.getData(PROJECT_DRAG_TYPE);
-        if (!source || source === project.id) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const bounds = headerRef.current?.getBoundingClientRect();
-        onReorder(
-          source,
-          bounds !== undefined && event.clientY >= bounds.top + bounds.height / 2
-            ? "after"
-            : "before",
-        );
-      }}
-    >
+    <section aria-label={project.name} data-aside-project={project.id}>
       <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <ContextMenuTrigger asChild>
           <div
-            ref={headerRef}
             // Sticky: deep in a long project you still see whose threads you
             // are scrolling through.
-            className="group/project sticky top-0 z-20 flex h-8 select-none bg-sidebar items-center gap-2 rounded-md px-1.5 hover:bg-sidebar-accent/60"
+            className={cn(
+              "group/project sticky top-0 z-20 flex h-8 select-none bg-sidebar items-center gap-2 rounded-md px-1.5 hover:bg-sidebar-accent/60",
+              // The line only promises a position in the mode that can write
+              // one; elsewhere a drag still starts but lands nowhere.
+              manualSort &&
+                dropWhere === "before" &&
+                "shadow-[inset_0_1px_0_0_var(--muted-foreground)]",
+              manualSort &&
+                dropWhere === "after" &&
+                "shadow-[inset_0_-1px_0_0_var(--muted-foreground)]",
+            )}
           >
             <button
               type="button"
@@ -192,24 +187,14 @@ export function ProjectRow({
               className="absolute inset-0 cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
             <span
-              draggable
+              data-aside-drag-handle
               title={`${project.name} — drag to reorder projects`}
-              onDragStart={(event) => {
-                dragging.current = true;
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData(PROJECT_DRAG_TYPE, project.id);
-                // Some environments only start a drag with a standard type
-                // aboard.
-                event.dataTransfer.setData("text/plain", project.name);
-              }}
-              onDragEnd={() => {
-                window.setTimeout(() => {
-                  dragging.current = false;
-                }, 0);
+              onPointerDown={(event) => {
+                beginProjectDrag(event, project.id);
               }}
               onClick={(event) => {
                 // An aborted drag must not pass as a click.
-                if (dragging.current || event.detail > 1) return;
+                if (consumeDragClick() || event.detail > 1) return;
                 if (event.altKey) onSolo();
                 else onToggle();
               }}
