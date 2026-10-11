@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutTree, type TreeLayout } from "../lib/layout";
-import { NodeCard, type NodeCardProps } from "./NodeCard";
+import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
 import type { CanvasEdge, CanvasNode } from "../lib/types";
@@ -70,6 +70,10 @@ export type CanvasShellProps = {
   edges?: readonly CanvasEdge[];
   selectedId?: string | null;
   onSelect?: (nodeId: string) => void;
+  /** "status" (default) borders a card by its run state; "type" tints a
+   *  neutral card by `kind` instead. An error or needs-input border always
+   *  wins over either. */
+  colorMode?: NodeCardColorMode;
   className?: string;
 };
 
@@ -86,6 +90,7 @@ function toFlow(
   nodes: readonly CanvasNode[],
   selectedId: string | null | undefined,
   onSelect: ((id: string) => void) | undefined,
+  colorMode: NodeCardColorMode,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const childCount = new Map<string, number>();
@@ -99,6 +104,8 @@ function toFlow(
       subtitle: describeNode(node.kind, childCount.get(node.id) ?? 0, node.meta),
       icon: <KindIcon kind={node.kind} />,
       status: node.status,
+      kind: node.kind,
+      colorMode,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
     };
@@ -134,15 +141,15 @@ function toFlow(
 }
 
 const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(function CanvasShellInner(
-  { nodes, expanded, edges = [], selectedId, onSelect, className },
+  { nodes, expanded, edges = [], selectedId, onSelect, colorMode: cardColorMode = "status", className },
   handleRef,
 ) {
-  const [hostRef, colorMode] = useHostColorMode();
+  const [hostRef, themeMode] = useHostColorMode();
   const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges), [nodes, expanded, edges]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, selectedId, onSelect),
-    [layout, nodes, selectedId, onSelect],
+    () => toFlow(layout, nodes, selectedId, onSelect, cardColorMode),
+    [layout, nodes, selectedId, onSelect, cardColorMode],
   );
 
   useImperativeHandle(
@@ -162,7 +169,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         edges={flowEdges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
-        colorMode={colorMode}
+        colorMode={themeMode}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}

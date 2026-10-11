@@ -44,4 +44,18 @@ describe("CanvasShell", () => {
       screen.getByRole("button", { name: new RegExp("^orch-lead — ") }).getAttribute("aria-pressed"),
     ).toBe("true");
   });
+
+  it("borders a running card by status by default", () => {
+    render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const card = screen.getByRole("button", { name: new RegExp("^orch-lead — ") });
+    expect(card.className).toContain("bb-canvas-pulse");
+  });
+
+  it("tints a neutral card by kind when colorMode is 'type'", () => {
+    render(
+      <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} colorMode="type" />,
+    );
+    const card = screen.getByRole("button", { name: new RegExp("^steps-impl — ") });
+    expect(card.style.border).not.toContain("var(--border)");
+  });
 });

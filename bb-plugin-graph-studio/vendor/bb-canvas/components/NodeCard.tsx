@@ -3,28 +3,103 @@
 // field and the others do not — one shape, and the kind says itself through
 // the label and the icon slot the caller fills in.
 //
-// Status is a neutral dot in this package: colour by status is BBP-146, once
-// the view it feeds exists to judge the colours against.
+// Status always wins the border: a failed or needs-input card must never
+// blend into the background, in either colour mode (BBP-146). Type colour is
+// the quieter signal underneath it, for a reader who wants to scan "what
+// kind of thing is this" before "is it in trouble".
 import type { ReactNode } from "react";
-import type { CanvasStatus } from "../lib/types";
+import type { CanvasNodeKind, CanvasStatus } from "../lib/types";
+
+export type NodeCardColorMode = "status" | "type";
 
 export type NodeCardProps = {
   label: string;
   subtitle?: string;
   status?: CanvasStatus;
+  kind?: CanvasNodeKind;
+  /** "status" (default) leaves a neutral card outside an error/running
+   *  state; "type" tints that same neutral card by `kind` instead. */
+  colorMode?: NodeCardColorMode;
   /** A single-colour line icon, left of the label. */
   icon?: ReactNode;
   selected?: boolean;
   onClick?: () => void;
 };
 
-export function NodeCard({ label, subtitle, status, icon, selected = false, onClick }: NodeCardProps) {
+/** One fixed accent per kind — not derived from the id, unlike aside's
+ *  per-project badge colours: every card of one kind should read the same
+ *  everywhere, not get its own hash. */
+const KIND_COLOR: Record<CanvasNodeKind, string> = {
+  agents: "#64748b",
+  project: "#2563eb",
+  crew: "#7c3aed",
+  member: "#0d9488",
+  "graph-run": "#ea580c",
+  step: "#0891b2",
+  thread: "#db2777",
+  turn: "#65a30d",
+  "tool-call": "#d97706",
+};
+
+const AMBER = "#d97706";
+
+const PULSE_CLASS = "bb-canvas-pulse";
+const STYLE_ID = "bb-canvas-node-card-styles";
+
+/** Injected once, module-wide: React has no `@keyframes`, and a reader who
+ *  asked their OS for less motion must get a still (but still legible)
+ *  "running" card, not a silent downgrade to "idle". */
+function ensurePulseStyles(): void {
+  if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = `
+    @keyframes ${PULSE_CLASS} {
+      0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent); }
+      50% { box-shadow: 0 0 0 4px transparent; }
+    }
+    .${PULSE_CLASS} { animation: ${PULSE_CLASS} 1.6s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .${PULSE_CLASS} { animation: none; box-shadow: 0 0 0 2px var(--primary); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+type Border = { border: string; pulse: boolean };
+
+/** Status beats type beats neutral — an error or a running card must read
+ *  the same regardless of which colour mode the toolbar is set to. */
+function borderFor(status: CanvasStatus | undefined, kind: CanvasNodeKind | undefined, colorMode: NodeCardColorMode): Border {
+  if (status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
+  if (status === "waiting") return { border: `1.5px dashed ${AMBER}`, pulse: false };
+  if (status === "escalated") return { border: `1.5px solid ${AMBER}`, pulse: false };
+  if (status === "running") {
+    return { border: `1.5px solid var(--primary)`, pulse: true };
+  }
+  if (colorMode === "type" && kind) return { border: `1px solid ${KIND_COLOR[kind]}`, pulse: false };
+  return { border: `1px solid var(--border)`, pulse: false };
+}
+
+export function NodeCard({
+  label,
+  subtitle,
+  status,
+  kind,
+  colorMode = "status",
+  icon,
+  selected = false,
+  onClick,
+}: NodeCardProps) {
+  ensurePulseStyles();
+  const { border, pulse } = borderFor(status, kind, colorMode);
   return (
     <button
       type="button"
       aria-label={subtitle ? `${label} — ${subtitle}` : label}
       aria-pressed={selected}
       onClick={onClick}
+      className={pulse ? PULSE_CLASS : undefined}
       style={{
         display: "flex",
         alignItems: "center",
@@ -33,7 +108,9 @@ export function NodeCard({ label, subtitle, status, icon, selected = false, onCl
         height: "100%",
         padding: "6px 10px",
         borderRadius: 10,
-        border: `1px solid ${selected ? "var(--primary)" : "var(--border)"}`,
+        border,
+        outline: selected ? "2px solid var(--primary)" : "none",
+        outlineOffset: 1,
         background: "var(--card)",
         color: "var(--foreground)",
         textAlign: "left",
