@@ -1,6 +1,6 @@
 # Working in this repository
 
-Five BB plugins as standalone npm packages, deliberately **without** workspace
+Six BB plugins as standalone npm packages, deliberately **without** workspace
 tooling on top — they share no dependency.
 
 | Folder | Plugin | State |
@@ -10,6 +10,7 @@ tooling on top — they share no dependency.
 | `bb-plugin-aside` | `aside` | sidenav replacement, 176 tests |
 | `bb-plugin-listen` | `listen` | offline speech in and out, 77 tests |
 | `bb-plugin-slim-nav` | `slim-nav` | finished, resting, no tests |
+| `bb-plugin-recall` | `recall` | semantic search over threads and tasks via qmd, new, 50 tests |
 
 ## Where to work
 

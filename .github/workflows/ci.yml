@@ -19,6 +19,7 @@ jobs:
           - bb-plugin-crew
           - bb-plugin-graph-studio
           - bb-plugin-listen
+          - bb-plugin-recall
           - bb-plugin-slim-nav
     defaults:
       run:

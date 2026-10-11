@@ -3,7 +3,7 @@
 [![CI](https://github.com/sajov/bb-plugins/actions/workflows/ci.yml/badge.svg)](https://github.com/sajov/bb-plugins/actions/workflows/ci.yml)
 [![Known Vulnerabilities](https://snyk.io/test/github/sajov/bb-plugins/badge.svg)](https://snyk.io/test/github/sajov/bb-plugins)
 
-Five plugins for [BB](https://github.com/get-bb). One repository, because they
+Six plugins for [BB](https://github.com/get-bb). One repository, because they
 share a toolchain and a set of conventions — not because they belong together.
 
 | Plugin | What it does | Tests |
@@ -13,6 +13,7 @@ share a toolchain and a set of conventions — not because they belong together.
 | [Aside](bb-plugin-aside/) | A replacement for BB's thread list. Focus through order and collapsing instead of filters. | 176 |
 | [Listen](bb-plugin-listen/) | Speech in and out, fully offline with open models. Dictate in the composer, have answers read aloud. | 77 |
 | [Slim Nav](bb-plugin-slim-nav/) | Icon-only sidebar navigation with adjustable density. | — |
+| [Recall](bb-plugin-recall/) | Search earlier threads and tasks by meaning, using a local qmd index alongside BB's keyword search. | 50 |
 
 The screenshots below are captures from a running instance; the project, file
 and thread names in them are placeholders. See
@@ -97,6 +98,20 @@ keeping BB's saved order and visibility controls.
 ```sh
 bb plugin install git:https://github.com/sajov/bb-plugins.git \
   --subdirectory bb-plugin-slim-nav
+```
+
+## Recall
+
+Finds earlier threads and tasks by meaning, not only by exact words. Recall
+copies threads and tasks into a local [qmd](https://github.com/tobi/qmd) index
+and combines those results with BB's own keyword search. Open it from the
+command palette (**Recall: search everything**, Mod+S) or as a
+**Recall** tab in a thread's right panel. Agents get `recall_search` and
+`recall_get`. It needs `qmd` installed (`npm i -g @tobilu/qmd`).
+
+```sh
+bb plugin install git:https://github.com/sajov/bb-plugins.git \
+  --subdirectory bb-plugin-recall
 ```
 
 ## Install
