@@ -884,7 +884,16 @@ export function Sidenav({
                   const sectionCollapsed =
                     key !== null && view.collapsedSections.includes(key);
                   return (
-                    <div key={sectionBlock.section?.id ?? `loose-${index}`}>
+                    <div
+                      key={sectionBlock.section?.id ?? `loose-${index}`}
+                      // A rule above the threads without a section, so they do
+                      // not read as part of the (possibly collapsed) section above.
+                      className={cn(
+                        sectionBlock.section === null &&
+                          index > 0 &&
+                          "mt-1 border-t border-sidebar-border pt-1",
+                      )}
+                    >
                       {sectionBlock.section === null || key === null ? null : (
                         <SectionRow
                           id={sectionBlock.section.id}

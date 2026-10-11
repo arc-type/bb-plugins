@@ -5,6 +5,7 @@
 // The count on the right is — as everywhere — the toggle.
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { cn } from "@/lib/utils";
+import { Icon } from "@/components/ui/icon";
 import { RowCount, RowTail } from "@/components/sidenav/row-slots";
 import type { ThreadState } from "@/lib/tree";
 import {
@@ -151,11 +152,22 @@ export function SectionRow({
           data-drop={dropAt ?? undefined}
           // Thread cards drag on pointer events and find their target by this.
           data-aside-section={id}
+          aria-expanded={!collapsed}
           className={cn(
             "relative mt-1 flex cursor-grab select-none items-center gap-2 rounded-md px-2 py-0.5 hover:bg-sidebar-accent/60 active:cursor-grabbing",
             threadOver && "bg-sidebar-accent/60",
           )}
         >
+          {/* The chevron says whether the section is open; the badge alone
+              was too subtle to tell. */}
+          <Icon
+            name="ChevronRight"
+            aria-hidden
+            className={cn(
+              "size-3 shrink-0 text-muted-foreground/70 transition-transform",
+              !collapsed && "rotate-90",
+            )}
+          />
           {renaming ? (
             <input
               ref={ref}
