@@ -6,6 +6,8 @@ import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo,
 import {
   Background,
   Controls,
+  Handle,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -44,8 +46,18 @@ export function colorLightness(color: string): number | null {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
+/** A tree grows left to right, so a node's one incoming edge arrives on its
+ *  left and its outgoing edges leave from its right — without a handle on
+ *  each side, React Flow has nowhere to anchor the path and draws no edge
+ *  at all (its own connection points default to top/bottom). */
 function CanvasNodeView({ data }: { data: NodeCardProps }) {
-  return <NodeCard {...data} />;
+  return (
+    <>
+      <Handle type="target" position={Position.Left} style={{ visibility: "hidden" }} />
+      <NodeCard {...data} />
+      <Handle type="source" position={Position.Right} style={{ visibility: "hidden" }} />
+    </>
+  );
 }
 
 const NODE_TYPES = { canvasNode: CanvasNodeView };
@@ -148,6 +160,11 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
+        // React Flow's own keyboard a11y moves a focused node with the
+        // arrow keys and deletes it with Delete — exactly the keys
+        // `CanvasView` already gives a meaning to. Without this, a click on a
+        // card (which focuses its node) hands those keys to React Flow first.
+        disableKeyboardA11y
         zoomOnScroll
         panOnScroll={false}
         fitView

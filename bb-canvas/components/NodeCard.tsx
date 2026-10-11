@@ -38,6 +38,11 @@ export function NodeCard({ label, subtitle, status, icon, selected = false, onCl
         color: "var(--foreground)",
         textAlign: "left",
         cursor: "pointer",
+        // React Flow marks a non-selectable, non-draggable node's own wrapper
+        // `pointer-events: none` — an optimization that, left alone, blocks
+        // every click reaching the card inside it too, since the CSS property
+        // inherits down through descendants.
+        pointerEvents: "auto",
       }}
     >
       {icon ? (
