@@ -56,7 +56,9 @@ function SelectMark({
       checked={selection.selected.has(thread.id)}
       aria-label={`Select ${threadTitle(thread)}`}
       onClick={(event) => event.stopPropagation()}
-      onCheckedChange={(checked) => selection.onToggle(thread.id, checked === true)}
+      onCheckedChange={(checked) =>
+        selection.onToggle(thread.id, checked === true)
+      }
       className={cn("size-3.5", className)}
     />
   );
@@ -85,9 +87,17 @@ export interface CardCallbacks {
   onNewSubThread: (threadId: string) => void;
   /** Lifts a sub-thread back to the top level of its project. */
   onDetach: (threadId: string) => void;
-  onReorder: (threadId: string, targetThreadId: string, where: "before" | "after") => void;
+  onReorder: (
+    threadId: string,
+    targetThreadId: string,
+    where: "before" | "after",
+  ) => void;
   /** Reorders inside the pinned group at the top, which spans projects. */
-  onReorderPinned: (threadId: string, targetThreadId: string, where: "before" | "after") => void;
+  onReorderPinned: (
+    threadId: string,
+    targetThreadId: string,
+    where: "before" | "after",
+  ) => void;
   onDropRejected: (reason: string) => void;
 }
 
@@ -95,7 +105,10 @@ function Location({ thread }: { thread: PluginSidebarThread }) {
   const branch = thread.environment?.branchName;
   if (branch) {
     return (
-      <span className="flex min-w-0 items-center gap-1" title={`Branch: ${branch}`}>
+      <span
+        className="flex min-w-0 items-center gap-1"
+        title={`Branch: ${branch}`}
+      >
         <BranchGlyph />
         <span className="truncate font-mono">{branch}</span>
       </span>
@@ -104,7 +117,10 @@ function Location({ thread }: { thread: PluginSidebarThread }) {
   const environment = thread.environment?.name;
   if (environment) {
     return (
-      <span className="flex min-w-0 items-center gap-1" title={`Environment: ${environment}`}>
+      <span
+        className="flex min-w-0 items-center gap-1"
+        title={`Environment: ${environment}`}
+      >
         <EnvironmentGlyph />
         <span className="truncate">{environment}</span>
       </span>
@@ -220,10 +236,21 @@ export function ThreadCard({
           onPointerDown={(event) => {
             if (selection !== null) return;
             splitProps.onPointerDown?.(event);
-            beginThreadDrag(event, root.id, group, (draggedId, targetId, where) => {
-              if (group === "pinned") callbacks.onReorderPinned(draggedId, targetId, where);
-              else callbacks.onReorder(draggedId, targetId, where);
-            });
+            // Only the leading glyph is the handle; the rest of the row opens.
+            if (
+              !(event.target as HTMLElement).closest("[data-aside-drag-handle]")
+            )
+              return;
+            beginThreadDrag(
+              event,
+              root.id,
+              group,
+              (draggedId, targetId, where) => {
+                if (group === "pinned")
+                  callbacks.onReorderPinned(draggedId, targetId, where);
+                else callbacks.onReorder(draggedId, targetId, where);
+              },
+            );
           }}
           onClick={(event) => {
             // A rapid double click must not open the thread twice; renaming
@@ -239,34 +266,47 @@ export function ThreadCard({
           }}
           className={cn(
             "grid grid-cols-[14px_minmax(0,1fr)_auto] content-center items-center gap-x-2 gap-y-0.5 rounded-lg px-2",
-            compact ? "min-h-9 grid-rows-[16px] py-1" : "min-h-12 grid-rows-[16px_16px] py-1.5",
-            selection === null ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+            compact
+              ? "min-h-9 grid-rows-[16px] py-1"
+              : "min-h-12 grid-rows-[16px_16px] py-1.5",
+            "cursor-pointer",
             isActive ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/60",
             // A checked box on a 14px glyph is easy to miss while scanning a
             // long list, so the row carries the state as well.
             selection?.selected.has(root.id) && "bg-sidebar-accent",
-            dropWhere === "before" && "shadow-[inset_0_1px_0_0_var(--muted-foreground)]",
-            dropWhere === "after" && "shadow-[inset_0_-1px_0_0_var(--muted-foreground)]",
+            dropWhere === "before" &&
+              "shadow-[inset_0_1px_0_0_var(--muted-foreground)]",
+            dropWhere === "after" &&
+              "shadow-[inset_0_-1px_0_0_var(--muted-foreground)]",
           )}
         >
-          {selection === null && pinnedIn !== undefined ? (
-            // In the pinned group the project's avatar takes the harness
-            // mark's place: there the question is "whose thread is this",
-            // and the row is single-line, so the name below would never show.
+          {selection === null ? (
             <span
-              aria-hidden
-              title={pinnedIn.name}
-              className="col-start-1 row-start-1 flex size-3.5 items-center justify-center rounded-[3px] border border-black/15 text-[8px] font-semibold uppercase"
-              style={{ backgroundColor: pinnedIn.color, color: badgeForeground(pinnedIn.color) }}
+              data-aside-drag-handle
+              className="col-start-1 row-start-1 flex cursor-grab items-center active:cursor-grabbing"
             >
-              {badgeLetter(pinnedIn.name)}
+              {pinnedIn !== undefined ? (
+                // In the pinned group the project's avatar takes the harness
+                // mark's place: there the question is "whose thread is this",
+                // and the row is single-line, so the name below would never show.
+                <span
+                  aria-hidden
+                  title={pinnedIn.name}
+                  className="flex size-3.5 items-center justify-center rounded-[3px] border border-black/15 text-[8px] font-semibold uppercase"
+                  style={{
+                    backgroundColor: pinnedIn.color,
+                    color: badgeForeground(pinnedIn.color),
+                  }}
+                >
+                  {badgeLetter(pinnedIn.name)}
+                </span>
+              ) : (
+                <ProviderGlyph
+                  providerId={root.providerId}
+                  providers={providers}
+                />
+              )}
             </span>
-          ) : selection === null ? (
-            <ProviderGlyph
-              providerId={root.providerId}
-              providers={providers}
-              className="col-start-1 row-start-1"
-            />
           ) : (
             <SelectMark
               thread={root}
@@ -309,7 +349,9 @@ export function ThreadCard({
                 }}
               />
             ) : null}
-            {root.isPinned && pinnedIn === undefined ? <PinGlyph className="text-muted-foreground/70" /> : null}
+            {root.isPinned && pinnedIn === undefined ? (
+              <PinGlyph className="text-muted-foreground/70" />
+            ) : null}
           </div>
 
           <RowTail
@@ -324,7 +366,10 @@ export function ThreadCard({
               {pinnedIn === undefined ? (
                 <Location thread={root} />
               ) : (
-                <span className="flex min-w-0 items-center gap-1" title={`Project: ${pinnedIn.name}`}>
+                <span
+                  className="flex min-w-0 items-center gap-1"
+                  title={`Project: ${pinnedIn.name}`}
+                >
                   <span
                     aria-hidden
                     className="inline-block size-2 shrink-0 rounded-sm"
@@ -413,7 +458,11 @@ function ChildRow({
             className={compact ? undefined : "mt-0.5"}
           />
         ) : (
-          <SelectMark thread={thread} selection={selection} className={compact ? undefined : "mt-0.5"} />
+          <SelectMark
+            thread={thread}
+            selection={selection}
+            className={compact ? undefined : "mt-0.5"}
+          />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -421,7 +470,9 @@ function ChildRow({
               title={threadTitle(thread)}
               className={cn(
                 "min-w-0 flex-1 truncate text-xs",
-                thread.isUnread ? "font-semibold text-foreground" : "text-muted-foreground",
+                thread.isUnread
+                  ? "font-semibold text-foreground"
+                  : "text-muted-foreground",
               )}
             >
               {threadTitle(thread)}
