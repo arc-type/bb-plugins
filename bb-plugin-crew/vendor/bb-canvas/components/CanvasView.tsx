@@ -3,12 +3,12 @@
 // the detail sidebar. Works against whatever `nodes`/`edges` it is given —
 // fixtures here, RPC data once the owning plugin wires it up (WI3/WI4).
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { CanvasShell, type CanvasShellHandle } from "@/components/CanvasShell";
-import { Breadcrumb } from "@/components/Breadcrumb";
-import { Sidebar } from "@/components/Sidebar";
-import { SearchBox } from "@/components/SearchBox";
-import { layoutTree } from "@/lib/layout";
-import type { CanvasEdge, CanvasNode } from "@/lib/types";
+import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
+import { Breadcrumb } from "./Breadcrumb";
+import { Sidebar } from "./Sidebar";
+import { SearchBox } from "./SearchBox";
+import { layoutTree } from "../lib/layout";
+import type { CanvasEdge, CanvasNode } from "../lib/types";
 
 /** What loading a node's children hands back — a thread's turns, typically. */
 export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly CanvasEdge[] };

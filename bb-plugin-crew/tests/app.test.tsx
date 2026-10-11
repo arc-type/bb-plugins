@@ -114,7 +114,7 @@ async function openCrew(slot: { findByRole: (role: string, options: { name: stri
 describe("Crews panel", () => {
   it("registers the Crews nav panel with header counter, sidebar accessory and the row-status content script", async () => {
     const app = await loadPluginApp(() => import("../app"));
-    expect(app.navPanels.map((panel) => panel.title)).toEqual(["Crews"]);
+    expect(app.navPanels.map((panel) => panel.title)).toEqual(["Crews", "Activity Canvas"]);
     expect(app.navPanels[0]!.headerContent).toBeTypeOf("function");
     expect(app.navPanels[0]!.experimental_sidebarAccessory).toBeTypeOf("function");
     expect(app.contentScripts.map((script) => script.id)).toEqual(["row-status"]);
