@@ -62,14 +62,22 @@ function Trigger({
 const PROJECT_SORT_BADGE: Record<ProjectSort, string | null> = {
   manual: null,
   activity: "Activity",
+  attention: "Attention",
   name: "A–Z",
+};
+
+const THREAD_SORT_BADGE: Record<ThreadSort, string | null> = {
+  activity: null,
+  created: "Created",
+  manual: "Manual",
+  state: "State",
 };
 
 /** The trigger names the current order only when it differs from the default. */
 export function sortBadge(view: Pick<ViewState, "projectSort" | "threadSort">): string | null {
   const parts = [
     PROJECT_SORT_BADGE[view.projectSort],
-    view.threadSort === DEFAULT_VIEW.threadSort ? null : "State",
+    THREAD_SORT_BADGE[view.threadSort],
   ].filter((part): part is string => part !== null);
   return parts.length === 0 ? null : parts.join(" · ");
 }
@@ -95,6 +103,10 @@ export function SortMenu({
             <DropdownMenuShortcut>as dragged</DropdownMenuShortcut>
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="activity">Recent activity</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="attention">
+            Needs attention
+            <DropdownMenuShortcut>waiting first</DropdownMenuShortcut>
+          </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="name">Name A–Z</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
@@ -103,12 +115,22 @@ export function SortMenu({
           value={view.threadSort}
           onValueChange={(value) => onPatch({ threadSort: value as ThreadSort })}
         >
-          <DropdownMenuRadioItem value="newest">Newest first</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="activity">Recent activity</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="created">Newest created</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="manual">
+            Manual
+            <DropdownMenuShortcut>as dragged</DropdownMenuShortcut>
+          </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="state">
             By state
             <DropdownMenuShortcut>needs you first</DropdownMenuShortcut>
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
+        {view.threadOrder.length > 0 ? (
+          <DropdownMenuItem onSelect={() => onPatch({ threadOrder: [] })}>
+            Reset manual order
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled>Pinned threads always stay on top</DropdownMenuItem>
       </DropdownMenuContent>

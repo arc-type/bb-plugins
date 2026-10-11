@@ -27,9 +27,12 @@ every restriction that is standing shows up as a chip underneath it.
 - **Search** (`⌥F`) finds projects by name and picks tags: `#` narrows the offer
   under the field to tags, Enter takes the first, Backspace in an empty field
   drops the last tag chip.
-- **Sort** orders projects (Manual, Recent activity, Name A–Z) and threads
-  (Newest first, By state). The trigger names the order when it is not the
-  default.
+- **Sort** orders projects (Manual, Recent activity, Needs attention, Name
+  A–Z) and threads (Recent activity, Newest created, Manual, By state). Recent
+  activity is time: whatever was touched last, sub-threads included, comes
+  first. Dragging a thread switches to Manual, starting from the order on
+  screen; **Reset manual order** forgets it. The trigger names the order when
+  it is not the default.
 - **Display** sets the density (Comfortable, Single line), what else is shown
   (Pinned group, Condense quiet threads, Archived threads, Empty projects) and
   one behaviour: **Focus follows active thread** folds every other project when

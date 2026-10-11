@@ -180,3 +180,13 @@ describe("reading the project filter", () => {
     ]);
   });
 });
+
+describe("migrating the old thread sort", () => {
+  it("turns 'newest' with a dragged order into manual", () => {
+    expect(parseViewState({ threadSort: "newest", threadOrder: ["a"] }).threadSort).toBe("manual");
+  });
+
+  it("turns 'newest' without a dragged order into activity", () => {
+    expect(parseViewState({ threadSort: "newest" }).threadSort).toBe("activity");
+  });
+});

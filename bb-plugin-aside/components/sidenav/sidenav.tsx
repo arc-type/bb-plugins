@@ -387,9 +387,10 @@ export function Sidenav({
           return;
         }
         // "State" is a computed order; a drag inside it would write something
-        // the list then ignores.
-        if (view.threadSort !== "newest") {
-          report("To reorder by dragging: Sort → Threads → Newest first.");
+        // the list then ignores. Any other order becomes the manual one,
+        // starting from what is drawn right now.
+        if (view.threadSort === "state") {
+          report("To reorder by dragging: Sort → Threads → Manual.");
           return;
         }
         const shown =
@@ -403,7 +404,7 @@ export function Sidenav({
           targetThreadId,
           where,
         ).slice(-MAX_IDS);
-        patchView({ threadOrder });
+        patchView({ threadOrder, threadSort: "manual" });
         // Pins also keep their order in the host, so bb's own sidebar agrees.
         if (dragged.isPinned && target.isPinned) {
           const pinned = new Set(

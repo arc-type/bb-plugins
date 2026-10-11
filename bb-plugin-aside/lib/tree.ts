@@ -153,7 +153,7 @@ export interface GroupOptions {
   /** The host's sections, in their order. */
   sections: readonly { id: string; name: string }[];
   /** What the families inside a block are sorted by. */
-  threadSort: "newest" | "state";
+  threadSort: ThreadSortMode;
   /** Root thread ids in the order the user dragged them. */
   threadOrder?: readonly string[];
   /** Section ids in the order the user dragged them. */
@@ -210,18 +210,31 @@ export function groupThreads(
   });
 }
 
+export type ThreadSortMode = "activity" | "created" | "manual" | "state";
+
+/** The newest `updatedAt` in a family, children included. */
+export function familyActivity(family: Family): number {
+  return familyMembers(family).reduce(
+    (latest, member) => Math.max(latest, member.updatedAt),
+    family.root.updatedAt,
+  );
+}
+
 /**
  * Pinned threads sit on top in every mode — that is what pinning means.
  *
- * In "newest" mode a dragged order wins: the host keeps an order only for
- * pinned threads, so aside keeps its own (`threadOrder`). Threads that were
- * never dragged come first, newest on top — a thread just started must be
- * visible without scrolling past the arranged ones. "state" ignores the
- * dragged order; it is a computed sort.
+ * - "activity": the family touched last comes first, children included — a
+ *   thread showing "now" is at the top.
+ * - "created": by creation, newest on top.
+ * - "manual": the dragged order (`threadOrder`); the host keeps an order only
+ *   for pinned threads, so aside keeps its own. Threads never dragged come
+ *   first, newest on top — a thread just started must be visible without
+ *   scrolling past the arranged ones.
+ * - "state": needs-you first, then by activity.
  */
 export function sortFamilies(
   families: readonly Family[],
-  mode: "newest" | "state",
+  mode: ThreadSortMode,
   threadOrder: readonly string[] = [],
 ): Family[] {
   const pinned = families.filter((family) => family.root.isPinned);
@@ -229,22 +242,25 @@ export function sortFamilies(
   const byNewest = (left: Family, right: Family) =>
     right.root.createdAt - left.root.createdAt ||
     left.root.id.localeCompare(right.root.id);
+  const byActivity = (left: Family, right: Family) =>
+    familyActivity(right) - familyActivity(left) || byNewest(left, right);
   const rank = new Map(threadOrder.map((id, index) => [id, index]));
   const byDragged = (left: Family, right: Family) => {
     const a = rank.get(left.root.id) ?? -1;
     const b = rank.get(right.root.id) ?? -1;
     return a - b || byNewest(left, right);
   };
-  const sortedRest =
-    mode === "state"
-      ? [...rest].sort(
-          (left, right) =>
-            THREAD_STATE_RANK[familyState(left)] -
-              THREAD_STATE_RANK[familyState(right)] || byNewest(left, right),
-        )
-      : [...rest].sort(byDragged);
-  const sortedPinned = [...pinned].sort(mode === "state" ? byNewest : byDragged);
-  return sortedPinned.concat(sortedRest);
+  const byState = (left: Family, right: Family) =>
+    THREAD_STATE_RANK[familyState(left)] - THREAD_STATE_RANK[familyState(right)] ||
+    byActivity(left, right);
+  const compare = {
+    activity: byActivity,
+    created: byNewest,
+    manual: byDragged,
+    state: byState,
+  }[mode];
+  const sortedPinned = [...pinned].sort(mode === "state" ? byActivity : compare);
+  return sortedPinned.concat([...rest].sort(compare));
 }
 
 /**
@@ -357,17 +373,31 @@ export function splitQuiet(families: readonly Family[]): {
   return { loud, quiet };
 }
 
-/** Project order for the modes the user can choose. */
+/**
+ * Project order for the modes the user can choose.
+ *
+ * "activity" is time: the project touched last comes first, empty projects
+ * last. "attention" weighs what needs you (waiting, failed, working, unread)
+ * and breaks ties by activity. Every sort is stable, so equal projects keep
+ * the host's order.
+ */
 export function sortProjects(
   blocks: readonly ProjectBlock[],
-  mode: "manual" | "activity" | "name",
+  mode: "manual" | "activity" | "attention" | "name",
 ): ProjectBlock[] {
   if (mode === "name") {
     return [...blocks].sort((left, right) =>
       left.project.name.localeCompare(right.project.name),
     );
   }
-  if (mode === "activity") {
+  const activity = (block: ProjectBlock) => latestActivity(block.families) ?? -Infinity;
+  const byActivity = (left: ProjectBlock, right: ProjectBlock) => {
+    const a = activity(left);
+    const b = activity(right);
+    return a === b ? 0 : b > a ? 1 : -1;
+  };
+  if (mode === "activity") return [...blocks].sort(byActivity);
+  if (mode === "attention") {
     const score = (block: ProjectBlock) =>
       block.families.reduce((sum, family) => {
         const state = familyState(family);
@@ -377,7 +407,9 @@ export function sortProjects(
         if (state === "unread") return sum + 1;
         return sum;
       }, 0);
-    return [...blocks].sort((left, right) => score(right) - score(left));
+    return [...blocks].sort(
+      (left, right) => score(right) - score(left) || byActivity(left, right),
+    );
   }
   return [...blocks];
 }

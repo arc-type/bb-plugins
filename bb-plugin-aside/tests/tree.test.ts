@@ -72,7 +72,7 @@ function thread(
 const options = {
   archived: false,
   sections: [] as { id: string; name: string }[],
-  threadSort: "newest" as const,
+  threadSort: "activity" as const,
 };
 
 describe("a row's state", () => {
@@ -486,7 +486,7 @@ describe("dragged section order", () => {
     const [block] = groupThreads([inS1, inS2], [project("p")], {
       archived: false,
       sections,
-      threadSort: "newest",
+      threadSort: "activity",
       sectionOrder: ["s2", "s1"],
     });
     expect(block.blocks.map((entry) => entry.section?.name)).toEqual(["Wartung", "Release"]);
@@ -544,7 +544,7 @@ describe("dragged thread order", () => {
     const fresh = thread({ id: "new", projectId: "p" });
     const families = [older, middle, fresh].map((root) => ({ root, children: [] }));
     expect(
-      sortFamilies(families, "newest", ["a", "b"]).map((family) => family.root.id),
+      sortFamilies(families, "manual", ["a", "b"]).map((family) => family.root.id),
     ).toEqual(["new", "a", "b"]);
   });
 
@@ -554,7 +554,7 @@ describe("dragged thread order", () => {
     const rest = thread({ id: "r", projectId: "p" });
     const families = [pinA, pinB, rest].map((root) => ({ root, children: [] }));
     expect(
-      sortFamilies(families, "newest", ["r", "pa", "pb"]).map((family) => family.root.id),
+      sortFamilies(families, "manual", ["r", "pa", "pb"]).map((family) => family.root.id),
     ).toEqual(["pa", "pb", "r"]);
   });
 
@@ -573,7 +573,7 @@ describe("dragged thread order", () => {
     const [block] = groupThreads([first, second], [project("p")], {
       archived: false,
       sections: [],
-      threadSort: "newest",
+      threadSort: "manual",
       threadOrder: ["a", "b"],
     });
     expect(block.families.map((family) => family.root.id)).toEqual(["a", "b"]);
@@ -639,7 +639,7 @@ describe("latest activity", () => {
         thread({ id: "new", projectId: "p", updatedAt: 9_000 }),
       ],
       [project("p")],
-      { archived: false, sections: [], threadSort: "newest" },
+      { archived: false, sections: [], threadSort: "activity" },
     );
     expect(latestActivity(block.families)).toBe(9_000);
   });
@@ -653,7 +653,7 @@ describe("latest activity", () => {
         thread({ id: "kid", projectId: "p", parentThreadId: "root", updatedAt: 8_000 }),
       ],
       [project("p")],
-      { archived: false, sections: [], threadSort: "newest" },
+      { archived: false, sections: [], threadSort: "activity" },
     );
     expect(latestActivity(block.families)).toBe(8_000);
   });
@@ -664,7 +664,7 @@ describe("latest activity", () => {
 });
 
 describe("pinned group", () => {
-  const options = { archived: false, sections: [], threadSort: "newest" as const };
+  const options = { archived: false, sections: [], threadSort: "activity" as const };
 
   it("collects the pinned roots of every shown project", () => {
     const blocks = groupThreads(
@@ -772,8 +772,72 @@ describe("next attention", () => {
         thread({ id: "kid", projectId: "p1", parentThreadId: "root" }),
       ],
       [project("p1")],
-      { archived: false, sections: [], threadSort: "newest" },
+      { archived: false, sections: [], threadSort: "activity" },
     );
     expect(displayOrder(blocks).map((entry) => entry.id)).toEqual(["root", "kid"]);
+  });
+});
+
+describe("sorting by time", () => {
+  const families = () => {
+    const old = thread({ id: "old", projectId: "p", createdAt: 1, updatedAt: 900 });
+    const fresh = thread({ id: "fresh", projectId: "p", createdAt: 500, updatedAt: 500 });
+    const quiet = thread({ id: "quiet", projectId: "p", createdAt: 300, updatedAt: 300 });
+    return [old, fresh, quiet].map((root) => ({ root, children: [] as PluginSidebarThread[] }));
+  };
+
+  it("puts the family touched last on top — an old thread active now included", () => {
+    expect(sortFamilies(families(), "activity").map((family) => family.root.id)).toEqual([
+      "old",
+      "fresh",
+      "quiet",
+    ]);
+  });
+
+  it("counts a child's activity for its family", () => {
+    const list = families();
+    list[2].children.push(
+      thread({ id: "child", projectId: "p", parentThreadId: "quiet", createdAt: 301, updatedAt: 999 }),
+    );
+    expect(sortFamilies(list, "activity")[0].root.id).toBe("quiet");
+  });
+
+  it("sorts by creation in created mode", () => {
+    expect(sortFamilies(families(), "created").map((family) => family.root.id)).toEqual([
+      "fresh",
+      "quiet",
+      "old",
+    ]);
+  });
+
+  it("ignores the dragged order outside manual mode", () => {
+    expect(
+      sortFamilies(families(), "activity", ["quiet", "fresh", "old"]).map((f) => f.root.id),
+    ).toEqual(["old", "fresh", "quiet"]);
+  });
+
+  it("breaks state ties by activity", () => {
+    expect(sortFamilies(families(), "state").map((family) => family.root.id)).toEqual([
+      "old",
+      "fresh",
+      "quiet",
+    ]);
+  });
+
+  it("orders projects by their latest activity, empty ones last", () => {
+    const block = (id: string, updatedAt: number | null) => ({
+      project: project(id, id),
+      families:
+        updatedAt === null
+          ? []
+          : [{ root: thread({ id: `${id}-t`, projectId: id, updatedAt }), children: [] }],
+      blocks: [],
+    });
+    const blocks = [block("empty", null), block("a", 10), block("b", 20)];
+    expect(sortProjects(blocks, "activity").map((b) => b.project.id)).toEqual([
+      "b",
+      "a",
+      "empty",
+    ]);
   });
 });

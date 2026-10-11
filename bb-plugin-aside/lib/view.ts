@@ -6,8 +6,8 @@
 // sidenav apart.
 import { normalizeTags } from "./tags";
 
-export const PROJECT_SORTS = ["manual", "activity", "name"] as const;
-export const THREAD_SORTS = ["newest", "state"] as const;
+export const PROJECT_SORTS = ["manual", "activity", "attention", "name"] as const;
+export const THREAD_SORTS = ["activity", "created", "manual", "state"] as const;
 
 export type ProjectSort = (typeof PROJECT_SORTS)[number];
 export type ThreadSort = (typeof THREAD_SORTS)[number];
@@ -78,7 +78,7 @@ export interface ViewState {
 
 export const DEFAULT_VIEW: ViewState = {
   projectSort: "manual",
-  threadSort: "newest",
+  threadSort: "activity",
   foldQuiet: false,
   focusFollows: false,
   pinnedGroup: true,
@@ -128,6 +128,20 @@ function readIds(value: unknown): string[] {
   return ids;
 }
 
+/**
+ * Before "manual" existed, "newest" also meant the dragged order. Whoever
+ * dragged keeps that order; everyone else gets the activity sort, which is
+ * what "newest" was taken to mean.
+ */
+function readThreadSort(raw: Record<string, unknown>): ThreadSort {
+  if (raw.threadSort === "newest") {
+    return Array.isArray(raw.threadOrder) && raw.threadOrder.length > 0
+      ? "manual"
+      : "activity";
+  }
+  return readOption(raw.threadSort, THREAD_SORTS, DEFAULT_VIEW.threadSort);
+}
+
 export function parseViewState(value: unknown): ViewState {
   if (typeof value !== "object" || value === null) return { ...DEFAULT_VIEW };
   const raw = value as Record<string, unknown>;
@@ -137,7 +151,7 @@ export function parseViewState(value: unknown): ViewState {
       PROJECT_SORTS,
       DEFAULT_VIEW.projectSort,
     ),
-    threadSort: readOption(raw.threadSort, THREAD_SORTS, DEFAULT_VIEW.threadSort),
+    threadSort: readThreadSort(raw),
     foldQuiet: readBoolean(raw.foldQuiet, DEFAULT_VIEW.foldQuiet),
     // `accordion` is the stored name of the switch this one replaced.
     focusFollows: readBoolean(
