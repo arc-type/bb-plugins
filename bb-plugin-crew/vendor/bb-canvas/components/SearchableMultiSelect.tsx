@@ -1,7 +1,7 @@
 // Generic searchable popover multi-select (BBP-205), extracted out of
 // ProjectFilter so BBP-204's "Focus" dropdown can reuse it. Owns popover
-// placement, outside click and stopping key events from reaching the
-// canvas's own shortcuts.
+// placement, outside click, search and stopping key events from reaching
+// the canvas's own shortcuts.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { placePopover } from "../lib/popover";
 
@@ -30,9 +30,25 @@ export function summarizeSelection(
   return `${chosen.length} selected`;
 }
 
+function highlight(name: string, query: string) {
+  if (!query) return name;
+  const index = name.toLowerCase().indexOf(query.toLowerCase());
+  if (index === -1) return name;
+  return (
+    <>
+      {name.slice(0, index)}
+      <mark>{name.slice(index, index + query.length)}</mark>
+      {name.slice(index + query.length)}
+    </>
+  );
+}
+
 export function SearchableMultiSelect({ label, options, selected, onChange, emptyText }: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [frozenOrder, setFrozenOrder] = useState<readonly SearchableMultiSelectOption[]>(options);
   const root = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [place, setPlace] = useState<{ offset: number; width: number } | null>(null);
 
   // Measured on open: the canvas may sit in a slim panel, and the button's
@@ -43,6 +59,18 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
     const canvas = root.current.closest("[data-canvas-view]")?.getBoundingClientRect();
     const bounds = canvas && canvas.width > 0 ? canvas : { left: 0, right: window.innerWidth };
     setPlace(placePopover(anchor, bounds, POPOVER_WIDTH));
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+    // Order is frozen the moment the popover opens, so entries don't jump
+    // around as the user checks them.
+    setFrozenOrder(options);
+    searchRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -57,13 +85,28 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((other) => other !== id) : [...selected, id]);
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = (option: SearchableMultiSelectOption) => option.name.toLowerCase().includes(normalizedQuery);
+
+  const checkedBlock = frozenOrder
+    .filter((option) => selected.includes(option.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const remaining = frozenOrder.filter(
+    (option) => !selected.includes(option.id) && (normalizedQuery === "" || matches(option)),
+  );
+  const matchingIds = frozenOrder.filter(matches).map((option) => option.id);
+  const noMatches = normalizedQuery !== "" && checkedBlock.length === 0 && remaining.length === 0;
+
   return (
     <div
       ref={root}
       style={{ position: "relative" }}
       // Keys typed in the list must not reach the canvas's own shortcuts.
       onKeyDown={(event) => {
-        if (event.key === "Escape") setOpen(false);
+        if (event.key === "Escape") {
+          if (query !== "") setQuery("");
+          else setOpen(false);
+        }
         event.stopPropagation();
       }}
     >
@@ -123,6 +166,26 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
             boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
           }}
         >
+          <input
+            ref={searchRef}
+            type="search"
+            role="searchbox"
+            aria-label={`Search ${label.toLowerCase()}`}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search..."
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "4px 8px",
+              marginBottom: 4,
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              background: "var(--background, var(--card))",
+              color: "var(--foreground)",
+              fontSize: 12,
+            }}
+          />
           <button
             type="button"
             onClick={() => onChange([])}
@@ -139,15 +202,55 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
           >
             Clear selection
           </button>
+          {normalizedQuery !== "" ? (
+            <button
+              type="button"
+              onClick={() => onChange(Array.from(new Set([...selected, ...matchingIds])))}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "4px 8px",
+                border: "none",
+                background: "transparent",
+                color: "var(--muted-foreground)",
+                cursor: "pointer",
+              }}
+            >
+              Select all matches
+            </button>
+          ) : null}
           {options.length === 0 ? (
             <div style={{ padding: "4px 8px", color: "var(--muted-foreground)" }}>{emptyText}</div>
+          ) : noMatches ? (
+            <div style={{ padding: "4px 8px", color: "var(--muted-foreground)" }}>No matches</div>
           ) : (
-            options.map((option) => (
-              <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
-                <input type="checkbox" checked={selected.includes(option.id)} onChange={() => toggle(option.id)} />
-                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{option.name}</span>
-              </label>
-            ))
+            <>
+              {checkedBlock.map((option) => (
+                <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    aria-label={option.name}
+                    checked={selected.includes(option.id)}
+                    onChange={() => toggle(option.id)}
+                  />
+                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
+                </label>
+              ))}
+              {checkedBlock.length > 0 && remaining.length > 0 ? (
+                <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              ) : null}
+              {remaining.map((option) => (
+                <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    aria-label={option.name}
+                    checked={selected.includes(option.id)}
+                    onChange={() => toggle(option.id)}
+                  />
+                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
+                </label>
+              ))}
+            </>
           )}
         </div>
       ) : null}

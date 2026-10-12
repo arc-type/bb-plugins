@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
 // SearchableMultiSelect (BBP-211): generic popover multi-select extracted
-// from ProjectFilter. This ticket only covers open/check/clear selection —
-// search and keyboard navigation land in BBP-212/BBP-213.
+// from ProjectFilter. BBP-212 adds the search field; keyboard navigation
+// lands in BBP-213.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SearchableMultiSelect } from "@/components/SearchableMultiSelect";
@@ -76,5 +76,84 @@ describe("SearchableMultiSelect", () => {
     fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
     fireEvent.keyDown(screen.getByRole("group", { name: "Projects" }), { key: "Escape" });
     expect(screen.queryByRole("group", { name: "Projects" })).toBeNull();
+  });
+
+  it("focuses the search field on open", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect(screen.getByRole("searchbox")).toBe(document.activeElement);
+  });
+
+  it("filters by case-insensitive substring and marks the first match", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ET" } });
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Alpha" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Gamma" })).toBeNull();
+    const mark = screen.getByText("et", { selector: "mark" });
+    expect(mark).toBeTruthy();
+  });
+
+  it("keeps checked options pinned above the divider, alphabetically, in frozen order", () => {
+    const onChange = vi.fn();
+    render(
+      <SearchableMultiSelect
+        label="Projects"
+        options={options}
+        selected={["p3", "p1"]}
+        onChange={onChange}
+        emptyText="No projects yet."
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "xyz" } });
+    // Checked options stay visible even though they don't match the query.
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Gamma" })).toBeTruthy();
+    const labels = screen.getAllByRole("checkbox").map((checkbox) => checkbox.getAttribute("aria-label"));
+    expect(labels).toEqual(["Alpha", "Gamma"]);
+  });
+
+  it("only shows Select all matches when a query is present, and it adds the matches", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect(screen.queryByRole("button", { name: "Select all matches" })).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "a" } });
+    fireEvent.click(screen.getByRole("button", { name: "Select all matches" }));
+    expect(onChange).toHaveBeenLastCalledWith(["p1", "p2", "p3"]);
+  });
+
+  it("shows No matches without losing the current selection", () => {
+    const onChange = vi.fn();
+    render(
+      <SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByText("No matches")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("Escape clears the query first, then closes the popover on the next Escape", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "al" } });
+    fireEvent.keyDown(screen.getByRole("group", { name: "Projects" }), { key: "Escape" });
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(screen.getByRole("group", { name: "Projects" }), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Projects" })).toBeNull();
+  });
+
+  it("resets the query when closed and reopened", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "al" } });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBeTruthy();
   });
 });
