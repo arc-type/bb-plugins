@@ -69,6 +69,16 @@ describe("NodeCard status border (BBP-146)", () => {
     expect(screen.getByRole("button").className).not.toContain("bb-canvas-pulse");
   });
 
+  it.each([["done", "done"], ["idle", "idle"], ["no status", undefined]] as const)(
+    "negative (BBP-214 acceptance): %s produces a neutral border and no pulse",
+    (_label, status) => {
+      render(<NodeCard label="x" status={status} />);
+      const button = screen.getByRole("button");
+      expect(button.style.border).toBe("1px solid var(--border)");
+      expect(button.className).not.toContain("bb-canvas-pulse");
+    },
+  );
+
   it("stays neutral regardless of kind — colour means state only (BBP-219)", () => {
     render(<NodeCard label="x" kind="member" />);
     expect(screen.getByRole("button").style.border).toContain("var(--border)");

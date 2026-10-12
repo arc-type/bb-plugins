@@ -13,6 +13,7 @@ const ALL_KINDS: CanvasNodeKind[] = [
   "turn",
   "tool-call",
   "subagent",
+  "system-event",
 ];
 
 describe("tiers", () => {
@@ -33,6 +34,7 @@ describe("tiers", () => {
     expect(TIER_OF.turn).toBe("row");
     expect(TIER_OF["tool-call"]).toBe("row");
     expect(TIER_OF.subagent).toBe("row");
+    expect(TIER_OF["system-event"]).toBe("row");
   });
 
   it("gives a group a 28px header height, a card 220x52, a row 200x26", () => {
