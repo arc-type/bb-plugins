@@ -1,5 +1,7 @@
 dist/
 node_modules/
+test-results/
+playwright-report/
 
 # Concept and research live in a private vault, not in this repository.
 docs/
