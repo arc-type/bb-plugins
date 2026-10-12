@@ -52,6 +52,7 @@ const KIND_COLOR: Record<CanvasNodeKind, string> = {
   turn: "#65a30d",
   "tool-call": "#d97706",
   subagent: "#4f46e5",
+  "system-event": "#64748b",
 };
 
 const AMBER = "var(--warning)";

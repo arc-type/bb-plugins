@@ -121,6 +121,32 @@ describe("Sidebar actions", () => {
     expect(onOpenCrew).toHaveBeenCalledWith("factory-1");
   });
 
+  it("shows Open at row only when meta.threadId and meta.sourceSeq both exist, and calls onOpenAtRow with them", () => {
+    const onOpenAtRow = vi.fn();
+    const node: CanvasNode = {
+      id: "w1",
+      kind: "tool-call",
+      label: "Bash",
+      parentId: null,
+      meta: { threadId: "th1", sourceSeq: 12 },
+    };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenAtRow={onOpenAtRow} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open at row" }));
+    expect(onOpenAtRow).toHaveBeenCalledWith("th1", 12);
+  });
+
+  it("shows no Open at row button when meta.sourceSeq is absent", () => {
+    const node: CanvasNode = {
+      id: "w1",
+      kind: "tool-call",
+      label: "Bash",
+      parentId: null,
+      meta: { threadId: "th1" },
+    };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenAtRow={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Open at row" })).toBeNull();
+  });
+
   it("shows no action buttons at all when no callback is given", () => {
     const node: CanvasNode = {
       id: "r1",

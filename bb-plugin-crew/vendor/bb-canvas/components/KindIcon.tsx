@@ -14,6 +14,7 @@ const PATHS: Record<CanvasNodeKind, string> = {
   turn: "M3 8h8M8 5l3 3-3 3",
   "tool-call": "M9.5 3.5a3 3 0 0 0-3.4 4L3 10.6 5.4 13l3.1-3.1a3 3 0 0 0 4-3.4l-1.8 1.8-1.8-.5-.5-1.8z",
   subagent: "M8 2.5 3 5v6l5 2.5 5-2.5V5zM8 2.5v10M3 5l5 2.5M13 5l-5 2.5",
+  "system-event": "M8 13.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11zM8 7v3M8 5.3v.1",
 };
 
 export function KindIcon({ kind }: { kind: CanvasNodeKind }) {
@@ -35,6 +36,7 @@ export const KIND_LABEL: Record<CanvasNodeKind, string> = {
   turn: "Turn",
   "tool-call": "Tool call",
   subagent: "Subagent",
+  "system-event": "System event",
 };
 
 const CHILD_NOUN: Partial<Record<CanvasNodeKind, [string, string]>> = {
