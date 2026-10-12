@@ -31,6 +31,28 @@ describe("crewCanvasLayer", () => {
     expect(layer.nodes[1]!.status).toBeUndefined();
     expect(layer.expanded).toEqual([]);
   });
+
+  describe("links (BBP-170)", () => {
+    const trio = [
+      member({ address: "lead@trio", key: "lead", lead: true }),
+      member({ address: "dev@trio", key: "dev" }),
+    ];
+
+    it("turns a crew's declared links into message edges between its member nodes", () => {
+      const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio, {
+        trio: [{ from: "lead", to: "dev", kind: "assigns_to" }],
+      });
+      expect(layer.edges).toEqual([{ from: "member:lead@trio", to: "member:dev@trio", variant: "message", label: "assigns_to" }]);
+    });
+
+    it("negative: a link naming an unknown member, or a crew with no links entry, yields no edge", () => {
+      const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio, {
+        trio: [{ from: "lead", to: "ghost", kind: "assigns_to" }],
+      });
+      expect(layer.edges).toEqual([]);
+      expect(crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio).edges).toEqual([]);
+    });
+  });
 });
 
 describe("crewOwnsCanvasPage", () => {

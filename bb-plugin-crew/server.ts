@@ -1089,7 +1089,9 @@ export default async function plugin(bb: BbPluginApi) {
     listMembers: ({ projectId, crew }) => service.contract.listMembers(projectId, crew),
     canvasLayer: async ({ projectId }) => {
       const { members } = await service.contract.listMembers(projectId);
-      return { contractVersion: CONTRACT_VERSION, ...crewCanvasLayer(projectId, store.listCrews(projectId), members) };
+      const crews = store.listCrews(projectId);
+      const linksByCrew = Object.fromEntries(crews.map((crew) => [crew.name, store.listLinks(crew.id)]));
+      return { contractVersion: CONTRACT_VERSION, ...crewCanvasLayer(projectId, crews, members, linksByCrew) };
     },
     canvasPage: async () => {
       try {

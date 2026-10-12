@@ -28,10 +28,16 @@ const ACTIVITY_STATUS: Record<string, CanvasStatus> = {
   error: "failed",
 };
 
+/** A crew's declared links (BBP-170 WI6): drawn as message-styled edges
+ *  between the same member nodes the tree already shows, so the topology
+ *  reads on the same page instead of only in the old full-screen editor. */
+export type CrewLinks = Record<string, readonly { from: string; to: string; kind: string }[]>;
+
 export function crewCanvasLayer(
   projectId: string,
   crews: { name: string; status: CrewStatus }[],
   members: MemberInfo[],
+  linksByCrew: CrewLinks = {},
 ): CanvasLayer {
   const layer: CanvasLayer = { nodes: [], edges: [], expanded: [] };
   for (const crew of crews) {
@@ -46,7 +52,9 @@ export function crewCanvasLayer(
     });
     // A stopped crew stays folded: its members have nothing to show.
     if (crew.status !== "stopped") layer.expanded.push(id);
-    for (const member of members.filter((entry) => entry.crew === crew.name)) {
+    const crewMembers = members.filter((entry) => entry.crew === crew.name);
+    const byKey = new Map(crewMembers.map((entry) => [entry.key, entry]));
+    for (const member of crewMembers) {
       const status = ACTIVITY_STATUS[member.activity];
       layer.nodes.push({
         id: memberNodeId(member.address),
@@ -56,6 +64,15 @@ export function crewCanvasLayer(
         parentId: id,
         meta: { address: member.address, role: member.role, lead: member.lead, threadId: member.threadId, activity: member.activity },
       });
+    }
+    // Both ends must still be members of this crew: a link surviving a
+    // removed member, or naming the wrong crew's key, is dropped rather than
+    // drawn to a node that is not there.
+    for (const link of linksByCrew[crew.name] ?? []) {
+      const from = byKey.get(link.from);
+      const to = byKey.get(link.to);
+      if (!from || !to) continue;
+      layer.edges.push({ from: memberNodeId(from.address), to: memberNodeId(to.address), variant: "message", label: link.kind });
     }
   }
   return layer;
