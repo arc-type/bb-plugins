@@ -169,7 +169,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
             sourceSeqStart: String(sourceSeqStart),
             sourceSeqEnd: String(sourceSeqEnd),
           });
-          return turnDetailsToCanvas(node.id, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+          return turnDetailsToCanvas(node.id, { rows: response.rows as unknown as readonly TimelineRowLike[] }, threadId);
         }
         return { nodes: [] };
       }}

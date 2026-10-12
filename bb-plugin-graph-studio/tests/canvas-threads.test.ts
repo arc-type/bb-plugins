@@ -201,3 +201,155 @@ describe("turnDetailsToCanvas", () => {
     expect(nodes.find((node) => node.id === "row:r3")!.parentId).toBe("row:r2");
   });
 });
+
+describe("threadNodeFor labels (BBP-209)", () => {
+  const member: CanvasNode = { id: "m", kind: "member", label: "a", meta: { threadId: "t1" } };
+
+  it("labels the thread by its title and carries state and provider", () => {
+    const thread = threadNodeFor(member, { title: "Fix login bug", state: "idle", provider: "claude-code" })!;
+    expect(thread.label).toBe("Fix login bug");
+    expect(thread.meta).toEqual({ threadId: "t1", title: "Fix login bug", state: "idle", provider: "claude-code" });
+  });
+
+  it("falls back to the truncated first user message", () => {
+    const thread = threadNodeFor(member, { firstUserMessage: "y".repeat(100) })!;
+    expect(thread.label.length).toBeLessThanOrEqual(48);
+    expect(thread.label.endsWith("…")).toBe(true);
+  });
+
+  it("falls back to 'Thread' without title or message, never empty", () => {
+    expect(threadNodeFor(member, { title: "", firstUserMessage: "  " })!.label).toBe("Thread");
+  });
+});
+
+describe("work row mapping (BBP-209)", () => {
+  it("curates tool name, command, output, duration, times and a thread link", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "w1",
+          kind: "work",
+          workKind: "tool",
+          toolName: "Bash",
+          status: "completed",
+          toolArgs: { command: "npm test" },
+          output: "all green",
+          exitCode: 0,
+          startedAt: "2026-10-12T10:00:00.000Z",
+          completedAt: "2026-10-12T10:00:02.300Z",
+          sourceSeqStart: 42,
+        },
+      ],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "Bash" });
+    expect(nodes[0]!.meta).toMatchObject({
+      toolName: "Bash",
+      command: "npm test",
+      outputPreview: "all green",
+      exitCode: 0,
+      duration: "2.3s",
+      startedAt: "2026-10-12T10:00:00.000Z",
+      completedAt: "2026-10-12T10:00:02.300Z",
+      threadId: "t1",
+      sourceSeq: 42,
+    });
+    expect(nodes[0]!.status).not.toBe("failed");
+  });
+
+  it("labels by command or file name when there is no tool name", () => {
+    const a = timelineToCanvas("t1", { rows: [{ id: "a", kind: "work", workKind: "tool", toolArgs: { command: "ls -la" } }] });
+    expect(a.nodes[0]!.label).toBe("ls -la");
+    const b = timelineToCanvas("t1", { rows: [{ id: "b", kind: "work", workKind: "tool", toolArgs: { file_path: "/x/y/z.ts" } }] });
+    expect(b.nodes[0]!.label).toBe("z.ts");
+  });
+
+  it("marks a non-zero exit code as failed", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w2", kind: "work", workKind: "tool", toolName: "Bash", status: "completed", exitCode: 1 }],
+    });
+    expect(nodes[0]!.status).toBe("failed");
+    expect(nodes[0]!.meta).toMatchObject({ exitCode: 1 });
+  });
+
+  it("writes no empty fields for a bare work row", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w3", kind: "work", workKind: "tool", toolName: "Read", toolArgs: "", output: "" }],
+    });
+    const meta = nodes[0]!.meta!;
+    for (const value of Object.values(meta)) expect(value === "" || value === undefined || value === null).toBe(false);
+    for (const key of ["command", "toolArgs", "outputPreview", "duration", "startedAt", "sourceSeq"]) expect(meta).not.toHaveProperty(key);
+  });
+});
+
+describe("system row mapping (BBP-209)", () => {
+  it("gives an error its own failed system-event node", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "s1", kind: "system", systemKind: "error", title: "Provider crashed", detail: "stack…" }],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Provider crashed", status: "failed", meta: { detail: "stack…" } });
+  });
+
+  it("shows old and new parent for a parent-change operation", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "s2", kind: "system", systemKind: "operation", operationKind: "parent-change", title: "Moved", detail: "re-parented", oldParentId: "p1", newParentId: "p2" },
+      ],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Moved", meta: { detail: "re-parented", oldParent: "p1", newParent: "p2" } });
+  });
+
+  it("bundles consecutive debug/reconnect rows into one node", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "s3", kind: "system", systemKind: "debug", title: "event 1" },
+        { id: "s4", kind: "system", systemKind: "reconnect", title: "event 2" },
+        { id: "w", kind: "work", workKind: "tool", toolName: "Bash" },
+        { id: "s5", kind: "system", systemKind: "debug", title: "event 3" },
+      ],
+    });
+    expect(nodes.map((node) => node.label)).toEqual(["2 system events", "Bash", "1 system event"]);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", meta: { titles: ["event 1", "event 2"] } });
+  });
+
+  it("bundles a system row without title or detail into a valid node, never a tool-call", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "s6", kind: "system" }] });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "1 system event" });
+    expect(nodes[0]!.meta).not.toHaveProperty("titles");
+  });
+
+  it("bundles system rows inside a turn's details too", () => {
+    const { nodes } = turnDetailsToCanvas("row:turn", {
+      rows: [
+        { id: "a", kind: "system", systemKind: "debug", title: "x" },
+        { id: "b", kind: "system", systemKind: "debug", title: "y" },
+      ],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ label: "2 system events", parentId: "row:turn" });
+  });
+});
+
+describe("turn firstLine (BBP-209)", () => {
+  it("puts the first line of the user's request into the turn's meta", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "turn",
+          kind: "turn",
+          children: [
+            { id: "c0", kind: "conversation", role: "assistant", text: "hi" },
+            { id: "c1", kind: "conversation", role: "user", text: "Add dark mode\nplease" },
+          ],
+        },
+      ],
+    });
+    expect(nodes[0]).toMatchObject({ label: "Turn · 2 steps", meta: { firstLine: "Add dark mode" } });
+  });
+
+  it("omits firstLine without a user message", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "turn", kind: "turn", children: null }] });
+    expect(nodes[0]!.meta).not.toHaveProperty("firstLine");
+  });
+});
