@@ -47,6 +47,7 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [frozenOrder, setFrozenOrder] = useState<readonly SearchableMultiSelectOption[]>(options);
+  const [frozenCheckedIds, setFrozenCheckedIds] = useState<ReadonlySet<string>>(new Set());
   const root = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const itemRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -67,9 +68,10 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
       setQuery("");
       return;
     }
-    // Order is frozen the moment the popover opens, so entries don't jump
-    // around as the user checks them.
+    // Order and the checked/unchecked split are frozen the moment the popover
+    // opens, so entries don't jump across the divider as the user checks them.
     setFrozenOrder(options);
+    setFrozenCheckedIds(new Set(selected));
     searchRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -90,10 +92,10 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   const matches = (option: SearchableMultiSelectOption) => option.name.toLowerCase().includes(normalizedQuery);
 
   const checkedBlock = frozenOrder
-    .filter((option) => selected.includes(option.id))
+    .filter((option) => frozenCheckedIds.has(option.id))
     .sort((a, b) => a.name.localeCompare(b.name));
   const remaining = frozenOrder.filter(
-    (option) => !selected.includes(option.id) && (normalizedQuery === "" || matches(option)),
+    (option) => !frozenCheckedIds.has(option.id) && (normalizedQuery === "" || matches(option)),
   );
   const matchingIds = frozenOrder.filter(matches).map((option) => option.id);
   const noMatches = normalizedQuery !== "" && checkedBlock.length === 0 && remaining.length === 0;

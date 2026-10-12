@@ -208,6 +208,42 @@ describe("SearchableMultiSelect", () => {
     expect(onChange).toHaveBeenLastCalledWith(["p1"]);
   });
 
+  it("keeps the checked/unchecked block split frozen while checking or unchecking a row", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p1"]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    // Alpha (p1) is checked, pinned above the divider; Beta and Gamma remain below.
+    expect(screen.getAllByRole("checkbox").map((checkbox) => checkbox.getAttribute("aria-label"))).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gamma" }));
+    expect(onChange).toHaveBeenLastCalledWith(["p1", "p3"]);
+    // Checking Gamma must not move it above the divider: the split froze at open time.
+    rerender(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p1", "p3"]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    expect(screen.getAllByRole("checkbox").map((checkbox) => checkbox.getAttribute("aria-label"))).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
+    expect(onChange).toHaveBeenLastCalledWith(["p3"]);
+    // Unchecking Alpha must not move it down: it stays in the frozen checked block.
+    rerender(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p3"]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    expect(screen.getAllByRole("checkbox").map((checkbox) => checkbox.getAttribute("aria-label"))).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+  });
+
   it("does not let ArrowDown, Space or Enter reach the canvas's own shortcuts", () => {
     const canvasShortcut = vi.fn();
     render(
