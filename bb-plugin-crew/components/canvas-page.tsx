@@ -3,12 +3,14 @@
 // `server.ts`. Graph Studio's own copy (bb-plugin-graph-studio/components/
 // canvas-page.tsx) pulls crew's layer in through RPC and is the one page
 // visible whenever both plugins are installed.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { withRoots } from "../vendor/bb-canvas/lib/layer";
-import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import { crewNameFromFrameId } from "../lib/canvas-layer";
+import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
 import type { rpcContract } from "../server";
 
 function withThreadNodes(nodes: readonly CanvasNode[]): CanvasNode[] {
@@ -19,7 +21,7 @@ function withThreadNodes(nodes: readonly CanvasNode[]): CanvasNode[] {
   return [...nodes, ...threads];
 }
 
-type Layer = { nodes: CanvasNode[]; edges: CanvasEdge[]; expanded: Set<string> };
+type Layer = { nodes: CanvasNode[]; edges: CanvasEdge[]; expanded: Set<string>; frames: CanvasFrame[] };
 
 /** Projects to pick from when neither the host nor the URL names one. */
 function ProjectPicker() {
@@ -67,6 +69,9 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   const [visible, setVisible] = useState<boolean | null>(null);
   const [layer, setLayer] = useState<Layer | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Every crew frame is editable — there is no notion yet of a crew the
+  // current user may only view (BBP-170 WI6).
+  const editableFrameIds = useMemo(() => new Set((layer?.frames ?? []).map((frame) => frame.id)), [layer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,7 +103,12 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       ([result, projectLabel]) => {
         if (cancelled) return;
         const page = withRoots(projectId, projectLabel, { nodes: result.nodes, edges: result.edges, expanded: result.expanded });
-        setLayer({ nodes: withThreadNodes(page.nodes), edges: [...page.edges], expanded: new Set(page.expanded) });
+        setLayer({
+          nodes: withThreadNodes(page.nodes),
+          edges: [...page.edges],
+          expanded: new Set(page.expanded),
+          frames: result.frames ?? [],
+        });
         setError(null);
       },
       (cause: unknown) => {
@@ -132,6 +142,9 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     <CanvasView
       nodes={layer.nodes}
       edges={layer.edges}
+      frames={layer.frames}
+      editableFrameIds={editableFrameIds}
+      renderFrameEditor={(frameId) => <CrewFrameEditPanel projectId={projectId} crew={crewNameFromFrameId(frameId)} />}
       initialExpanded={layer.expanded}
       loadChildren={async (node) => {
         if (node.kind !== "thread") return { nodes: [] };

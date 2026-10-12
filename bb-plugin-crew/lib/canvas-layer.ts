@@ -89,6 +89,9 @@ export type CrewTopology = { frames: CanvasFrame[]; nodes: (CanvasNode & { frame
 
 export const crewFrameId = (crew: string): string => `frame:${crew}`;
 
+/** The inverse of `crewFrameId` — crew names never contain ":" (BBP-170 WI6). */
+export const crewNameFromFrameId = (frameId: string): string => frameId.slice("frame:".length);
+
 /**
  * One crew's topology as a bb-canvas frame (BBP-163): the lead and its
  * members inside one frame, in canvas-layout's row order (lead first, then

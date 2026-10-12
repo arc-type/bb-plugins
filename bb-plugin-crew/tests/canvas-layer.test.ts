@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crewCanvasLayer, crewOwnsCanvasPage, crewTopologyFrame, memberNodeId } from "../lib/canvas-layer";
+import { crewCanvasLayer, crewFrameId, crewNameFromFrameId, crewOwnsCanvasPage, crewTopologyFrame, memberNodeId } from "../lib/canvas-layer";
 import type { MemberInfo } from "../lib/contract";
 
 const member = (over: Partial<MemberInfo>): MemberInfo => ({
@@ -53,6 +53,13 @@ describe("crewCanvasLayer", () => {
       expect(layer.edges).toEqual([]);
       expect(crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio).edges).toEqual([]);
     });
+  });
+});
+
+describe("crewNameFromFrameId", () => {
+  it("inverts crewFrameId", () => {
+    expect(crewNameFromFrameId(crewFrameId("trio"))).toBe("trio");
+    expect(crewNameFromFrameId("frame:my-crew_2")).toBe("my-crew_2");
   });
 });
 

@@ -88,3 +88,49 @@ describe("crew's canvas page", () => {
     expect(slot.navigateCalls).toEqual([{ method: "toPluginPanel", path: "canvas", options: { subPath: "p2" } }]);
   });
 });
+
+describe("crew's canvas page frame/edit mode (BBP-170 WI6)", () => {
+  function frameLayerPanel() {
+    return canvasPanel({
+      rpc: {
+        canvasLayer: () => ({
+          contractVersion: 1,
+          nodes: [{ id: "member:lead@trio", kind: "member", label: "lead", parentId: "crew:trio", frameId: "frame:trio" }],
+          edges: [],
+          expanded: ["crew:trio"],
+          frames: [{ id: "frame:trio", parentId: null, label: "trio" }],
+        }),
+        getCrewFile: () => ({ yaml: 'version: "1"\nname: trio\ngroups: []\n', version: 1 }),
+      },
+    });
+  }
+
+  it("E on a member card enters edit mode and shows the CrewFrameEditPanel instead of the sidebar", async () => {
+    frameLayerPanel();
+    const card = await screen.findByRole("button", { name: new RegExp("^lead — ") });
+    fireEvent.click(card);
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "e" });
+    expect(await screen.findByLabelText("Editing trio")).toBeTruthy();
+    expect(screen.queryByLabelText("Details for lead")).toBeNull();
+  });
+
+  it("Escape leaves edit mode and brings the sidebar back", async () => {
+    frameLayerPanel();
+    const card = await screen.findByRole("button", { name: new RegExp("^lead — ") });
+    fireEvent.click(card);
+    const view = document.querySelector("[data-canvas-view]")!;
+    fireEvent.keyDown(view, { key: "e" });
+    await screen.findByLabelText("Editing trio");
+    fireEvent.keyDown(view, { key: "Escape" });
+    expect(screen.queryByLabelText("Editing trio")).toBeNull();
+    expect(screen.getByLabelText("Details for lead")).toBeTruthy();
+  });
+
+  it("negative: an older canvasLayer response with no frames field still renders, with nothing editable", async () => {
+    canvasPanel();
+    const card = await screen.findByRole("button", { name: new RegExp("^a — ") });
+    fireEvent.click(card);
+    expect(() => fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "e" })).not.toThrow();
+    expect(screen.queryByText(/^Editing /)).toBeNull();
+  });
+});
