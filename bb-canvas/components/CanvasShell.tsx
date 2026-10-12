@@ -71,12 +71,28 @@ function CanvasNodeView({ data }: { data: NodeCardProps }) {
 
 /** `width`/`height` arrive via the node's own `style`, not `data` — React
  *  Flow positions the wrapper, `Frame` just fills it. */
-function CanvasFrameView({ data, style }: { data: Pick<FrameProps, "label">; style?: { width?: number; height?: number } }) {
-  return <Frame label={data.label} x={0} y={0} width={style?.width ?? 0} height={style?.height ?? 0} />;
+function CanvasFrameView({
+  data,
+  style,
+}: {
+  data: Pick<FrameProps, "label" | "dimmed">;
+  style?: { width?: number; height?: number };
+}) {
+  return (
+    <Frame
+      label={data.label}
+      dimmed={data.dimmed}
+      x={0}
+      y={0}
+      width={style?.width ?? 0}
+      height={style?.height ?? 0}
+    />
+  );
 }
 
 const NODE_TYPES = { canvasNode: CanvasNodeView, canvasFrame: CanvasFrameView };
 const EDGE_TYPES = { statusEdge: StatusEdge };
+const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
@@ -85,6 +101,9 @@ export type CanvasShellProps = {
   frames?: readonly CanvasFrame[];
   selectedId?: string | null;
   onSelect?: (nodeId: string) => void;
+  /** Node and frame ids outside the frame being edited (BBP-166) — faded,
+   *  locked, no `onSelect`. */
+  dimmedIds?: ReadonlySet<string>;
   /** "status" (default) borders a card by its run state; "type" tints a
    *  neutral card by `kind` instead. An error or needs-input border always
    *  wins over either. */
@@ -107,6 +126,7 @@ function toFlow(
   selectedId: string | null | undefined,
   onSelect: ((id: string) => void) | undefined,
   colorMode: NodeCardColorMode,
+  dimmedIds: ReadonlySet<string>,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const byFrameId = new Map(frames.map((frame) => [frame.id, frame]));
@@ -125,6 +145,7 @@ function toFlow(
       colorMode,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
+      dimmed: dimmedIds.has(node.id),
     };
     return {
       id: placed.id,
@@ -163,7 +184,10 @@ function toFlow(
     style: { width: placed.width, height: placed.height },
     width: placed.width,
     height: placed.height,
-    data: { label: byFrameId.get(placed.id)?.label } as unknown as Record<string, unknown>,
+    data: {
+      label: byFrameId.get(placed.id)?.label,
+      dimmed: dimmedIds.has(placed.id),
+    } as unknown as Record<string, unknown>,
     draggable: false,
     selectable: false,
     // Below every card: React Flow stacks nodes in array order by default.
@@ -174,15 +198,25 @@ function toFlow(
 }
 
 const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(function CanvasShellInner(
-  { nodes, expanded, edges = [], frames = [], selectedId, onSelect, colorMode: cardColorMode = "status", className },
+  {
+    nodes,
+    expanded,
+    edges = [],
+    frames = [],
+    selectedId,
+    onSelect,
+    colorMode: cardColorMode = "status",
+    dimmedIds = EMPTY_DIMMED,
+    className,
+  },
   handleRef,
 ) {
   const [hostRef, themeMode] = useHostColorMode();
   const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode),
-    [layout, nodes, frames, selectedId, onSelect, cardColorMode],
+    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds),
+    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds],
   );
 
   useImperativeHandle(

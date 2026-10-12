@@ -8,9 +8,12 @@ export type FrameProps = {
   y: number;
   width: number;
   height: number;
+  /** Outside the frame being edited (BBP-166): faded, same as its member
+   *  cards. */
+  dimmed?: boolean;
 };
 
-export function Frame({ label, x, y, width, height }: FrameProps) {
+export function Frame({ label, x, y, width, height, dimmed = false }: FrameProps) {
   return (
     <div
       aria-hidden
@@ -25,6 +28,7 @@ export function Frame({ label, x, y, width, height }: FrameProps) {
         zIndex: 0,
         borderRadius: 12,
         border: "1px dashed var(--border)",
+        opacity: dimmed ? 0.35 : 1,
         pointerEvents: "none",
       }}
     >
