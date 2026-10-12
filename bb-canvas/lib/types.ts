@@ -62,7 +62,19 @@ export type CanvasEdge = {
   label?: string;
   count?: number;
   state?: CanvasEdgeState;
+  /** A declared relation between two nodes — a crew's link (BBP-202): drawn
+   *  only on demand, see `relationsView`. */
+  relation?: boolean;
+  /** Set by `relationsView` when a node is selected. */
+  emphasis?: CanvasEdgeEmphasis;
+  /** The single links a bundled relation edge stands for (BBP-201/203), by
+   *  node id — what the sidebar lists per kind. */
+  links?: readonly RelationLink[];
 };
+
+export type RelationLink = { from: string; to: string; kind: string };
+
+export type CanvasEdgeEmphasis = "highlight" | "dim";
 
 export type CuratedField = { label: string; value: string };
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 
@@ -104,6 +104,121 @@ describe("CanvasShell frames (BBP-165)", () => {
       <CanvasShell nodes={framedNodes} expanded={new Set(["crew"])} edges={edges} frames={frames} />,
     );
     expect(screen.getByText("crew-frame")).toBeTruthy();
+  });
+});
+
+describe("CanvasShell trackpad/scroll navigation (BBP-199)", () => {
+  function viewportTransform(container: HTMLElement): string {
+    return (container.querySelector(".react-flow__viewport") as HTMLElement).style.transform;
+  }
+
+  it("pans the viewport on a plain wheel gesture over the canvas", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewportTransform(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: 100, bubbles: true });
+    const after = viewportTransform(container);
+    expect(after).not.toBe(before);
+    // A pan changes translate, not scale.
+    expect(after.match(/scale\(([^)]+)\)/)?.[1]).toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  });
+
+  it("zooms at the pointer on Ctrl+wheel instead of panning", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewportTransform(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: -100, ctrlKey: true, bubbles: true });
+    const after = viewportTransform(container);
+    expect(after.match(/scale\(([^)]+)\)/)?.[1]).not.toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  });
+
+  it("negative: a wheel gesture over a node card without Ctrl/Cmd pans instead of zooming", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const card = screen.getByRole("button", { name: new RegExp("^orch-lead — ") });
+    const before = viewportTransform(container);
+    fireEvent.wheel(card, { deltaX: 0, deltaY: 100, bubbles: true });
+    const after = viewportTransform(container);
+    expect(after.match(/scale\(([^)]+)\)/)?.[1]).toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  });
+
+  it("negative: scrolling over an element outside the canvas pane does not move the viewport", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const outside = document.createElement("div");
+    outside.className = "nowheel";
+    container.appendChild(outside);
+    const before = viewportTransform(container);
+    fireEvent.wheel(outside, { deltaX: 0, deltaY: 100, bubbles: true });
+    expect(viewportTransform(container)).toBe(before);
+  });
+});
+
+describe("CanvasShell Ctrl/Cmd zoom at pointer, gentle step (BBP-197 Fix 3)", () => {
+  function viewport(container: HTMLElement): { x: number; y: number; scale: number } {
+    const transform = (container.querySelector(".react-flow__viewport") as HTMLElement).style.transform;
+    const translate = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/)!;
+    const scale = transform.match(/scale\(([^)]+)\)/)!;
+    return { x: Number(translate[1]), y: Number(translate[2]), scale: Number(scale[1]) };
+  }
+
+  // The library's own Ctrl+wheel pinch path multiplies the zoom step by 10
+  // only when `navigator.userAgent` contains "Mac" (its `isMacOs()` check) —
+  // the 4x-per-notch bug the Concierge measured only reproduces there.
+  const realUserAgent = navigator.userAgent;
+  beforeEach(() => {
+    Object.defineProperty(navigator, "userAgent", { value: "Macintosh", configurable: true });
+  });
+  afterEach(() => {
+    Object.defineProperty(navigator, "userAgent", { value: realUserAgent, configurable: true });
+  });
+
+  it("zooms on Cmd(Meta)+wheel, not just Ctrl+wheel", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewport(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: -100, metaKey: true, clientX: 100, clientY: 50, bubbles: true });
+    const after = viewport(container);
+    expect(after.scale).not.toBe(before.scale);
+  });
+
+  it("keeps the flow point under the pointer fixed across a Ctrl+wheel zoom", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const pointer = { clientX: 120, clientY: 80 };
+    const before = viewport(container);
+    const flowPointBefore = {
+      x: (pointer.clientX - before.x) / before.scale,
+      y: (pointer.clientY - before.y) / before.scale,
+    };
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: -100, ctrlKey: true, ...pointer, bubbles: true });
+    const after = viewport(container);
+    const flowPointAfter = {
+      x: (pointer.clientX - after.x) / after.scale,
+      y: (pointer.clientY - after.y) / after.scale,
+    };
+    expect(flowPointAfter.x).toBeCloseTo(flowPointBefore.x, 5);
+    expect(flowPointAfter.y).toBeCloseTo(flowPointBefore.y, 5);
+  });
+
+  it("negative: a single wheel notch is a gentle step, not a 4x jump", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewport(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: 100, ctrlKey: true, clientX: 100, clientY: 50, bubbles: true });
+    const after = viewport(container);
+    const ratio = after.scale / before.scale;
+    expect(ratio).toBeGreaterThan(0.7);
+    expect(ratio).toBeLessThan(1);
+  });
+
+  it("scales a tiny trackpad-pinch delta smoothly, proportional to deltaY", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewport(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: -5, ctrlKey: true, clientX: 100, clientY: 50, bubbles: true });
+    const after = viewport(container);
+    const ratio = after.scale / before.scale;
+    expect(ratio).toBeGreaterThan(1);
+    expect(ratio).toBeLessThan(1.05);
   });
 });
 
@@ -238,5 +353,28 @@ describe("CanvasShell start-view refit across async growth (BBP-196)", () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(fitViewCalls.length).toBe(callsAfterInteraction);
+  });
+
+  it("stops refitting after a Ctrl/Cmd+wheel zoom too, not just the zoomIn/zoomOut/resetView handle (BBP-197 Fix 3 x BBP-196)", async () => {
+    const { container, rerender } = render(
+      <CanvasShell nodes={baseNodes} expanded={new Set(["root", "project", "member"])} />,
+    );
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+    const pane = container.querySelector(".react-flow__pane")!;
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: -100, ctrlKey: true, clientX: 100, clientY: 50, bubbles: true });
+    const callsAfterZoom = fitViewCalls.length;
+
+    // Our own `onWheelCapture` zoom calls `flow.setViewport` directly, not a
+    // gesture React Flow's `onMoveStart` observes — the start-fit effect
+    // must still learn this counts as user interaction, or a later nodes
+    // change refits the view right back out from under the zoom.
+    rerender(
+      <CanvasShell
+        nodes={[...baseNodes, { id: "thread", kind: "thread", label: "Thread", parentId: "member" }]}
+        expanded={new Set(["root", "project", "member", "thread"])}
+      />,
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(fitViewCalls.length).toBe(callsAfterZoom);
   });
 });

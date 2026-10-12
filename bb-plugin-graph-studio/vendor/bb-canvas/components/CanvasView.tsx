@@ -16,6 +16,7 @@ import {
   withToggle,
   type ExpandedState,
 } from "../lib/expanded-state";
+import { loadRelations, outgoingRelations, relationsView, saveRelations } from "../lib/relations";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const COLOR_MODE_KEY = "bb-canvas:colour-mode";
@@ -28,6 +29,14 @@ const TOOLBAR_BUTTON = {
   fontSize: 11,
   cursor: "pointer",
 } as const;
+// Without a visible pressed state the toggle looked the same on and off —
+// the user could only tell from the canvas whether it had taken.
+const RELATIONS_OFF = { ...TOOLBAR_BUTTON, display: "flex" as const, alignItems: "center" as const, gap: 6 };
+const RELATIONS_ON = {
+  ...RELATIONS_OFF,
+  borderColor: "var(--primary)",
+  background: "color-mix(in srgb, var(--primary) 16%, var(--card))",
+};
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 /** Floor height so the canvas stays usable even with no sized ancestor
  *  (BBP-173). Tall enough to show a handful of cards, short enough to not
@@ -55,6 +64,7 @@ function saveColorMode(mode: ColorMode): void {
 
 /** What loading a node's children hands back — a thread's turns, typically. */
 export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly CanvasEdge[] };
+
 
 export type CanvasViewProps = {
   nodes: readonly CanvasNode[];
@@ -140,6 +150,7 @@ export function CanvasView({
   // the state that caused it.
   const [failedLoads, setFailedLoads] = useState<ReadonlySet<string>>(new Set());
   const [colorMode, setColorMode] = useState<ColorMode>(() => loadColorMode());
+  const [showRelations, setShowRelations] = useState(() => loadRelations(surface));
   // Only one frame editable at a time (BBP-166): entering a second frame's
   // edit mode without an `Escape` first is a no-op, not a silent switch.
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -162,6 +173,19 @@ export function CanvasView({
     () => [...edges, ...[...loaded.values()].flatMap((result) => result.edges ?? [])],
     [edges, loaded],
   );
+
+  const hasRelations = useMemo(() => allEdges.some((edge) => edge.relation), [allEdges]);
+  const shownEdges = useMemo(
+    () => (hasRelations ? relationsView(allEdges, showRelations, selectedId) : allEdges),
+    [hasRelations, allEdges, showRelations, selectedId],
+  );
+
+  function toggleRelations() {
+    setShowRelations((prev) => {
+      saveRelations(surface, !prev);
+      return !prev;
+    });
+  }
 
   const byId = useMemo(() => new Map(allNodes.map((node) => [node.id, node])), [allNodes]);
   const visible = useMemo(
@@ -204,6 +228,11 @@ export function CanvasView({
   }
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
+  // BBP-200: a poll can drop the selected node. Forgetting the id, not just
+  // hiding the sidebar, keeps it from coming back selected on a later poll.
+  useEffect(() => {
+    if (selectedId !== null && !byId.has(selectedId)) setSelectedId(null);
+  }, [byId, selectedId]);
   const selectedDetails = selected ? details.get(selected.id) : undefined;
   const sidebarNode = useMemo(
     () => (selected && selectedDetails ? { ...selected, meta: { ...selected.meta, ...selectedDetails } } : selected),
@@ -473,6 +502,32 @@ export function CanvasView({
           <button type="button" onClick={expandAll} style={TOOLBAR_BUTTON}>
             Expand all
           </button>
+          {hasRelations ? (
+            <button
+              type="button"
+              onClick={toggleRelations}
+              aria-pressed={showRelations}
+              title="Show every member's assigns_to / escalates_to links"
+              style={showRelations ? RELATIONS_ON : RELATIONS_OFF}
+            >
+              <svg
+                aria-hidden
+                width={12}
+                height={12}
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="4" cy="4" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <path d="M6 4h2.5a3.5 3.5 0 0 1 3.5 3.5V10" strokeDasharray="2 2" />
+              </svg>
+              Relations
+            </button>
+          ) : null}
           <ColorModeToggle mode={colorMode} onToggle={toggleColorMode} />
         </div>
       </div>
@@ -493,7 +548,7 @@ export function CanvasView({
             expandable={expandable}
             onToggle={toggle}
             fitRequest={fitRequest}
-            edges={allEdges}
+            edges={shownEdges}
             frames={frames}
             selectedId={selectedId}
             onSelect={select}
@@ -512,6 +567,8 @@ export function CanvasView({
                   onOpenThread={onOpenThread}
                   onOpenRun={onOpenRun}
                   onOpenCrew={onOpenCrew}
+                  relations={hasRelations ? outgoingRelations(allEdges, selected.id, byId) : undefined}
+                  onSelect={select}
                 />
               )
             : null}

@@ -1,7 +1,8 @@
 // The shared canvas page (BBP-131 WI4): one navigation tree for crews and
 // graph runs together, built on the vendored `bb-canvas` package. Graph
 // Studio owns this page whenever it is active — see `app.tsx` — and pulls
-// crew's layer in through the `canvasLayer` RPC, server-side.
+// crew's layer in through the `canvasLayer` RPC, server-side. Being the page
+// BB actually shows, it is also the one that live-reloads (BBP-197).
 import { useEffect, useMemo, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
@@ -15,6 +16,7 @@ import {
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
+import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
 import { threadNodeFor, timelineToCanvas, turnDetailsToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { useOpenRun } from "./run-card";
@@ -79,28 +81,36 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   useEffect(() => {
     if (shown === null) return;
     let cancelled = false;
+    // Only a new project set clears the page; a poll swaps the layer in
+    // place, so the view keeps its selection, cards and viewport (BBP-200).
     setLayer(null);
-    Promise.all(shown.map((projectId) => rpc.call("canvasLayer", { projectId }))).then(
-      (results) => {
-        if (cancelled) return;
-        // Each project arrives already rooted under `agents`; `mergeLayers`
-        // keeps the one `agents` node they share, so they sit side by side.
-        const page = mergeLayers(
-          ...results.map((result) => ({ nodes: result.nodes, edges: result.edges, expanded: result.expanded })),
-        );
-        setLayer({
-          nodes: withThreadNodes(page.nodes),
-          edges: [...page.edges],
-          expanded: new Set(page.expanded),
-        });
-        setError(null);
-      },
-      (cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      },
-    );
+    const load = (initial: boolean) =>
+      Promise.all(shown.map((projectId) => rpc.call("canvasLayer", { projectId }))).then(
+        (results) => {
+          if (cancelled) return;
+          // Each project arrives already rooted under `agents`; `mergeLayers`
+          // keeps the one `agents` node they share, so they sit side by side.
+          const page = mergeLayers(
+            ...results.map((result) => ({ nodes: result.nodes, edges: result.edges, expanded: result.expanded })),
+          );
+          setLayer({
+            nodes: withThreadNodes(page.nodes),
+            edges: [...page.edges],
+            expanded: new Set(page.expanded),
+          });
+          setError(null);
+        },
+        (cause: unknown) => {
+          // A failed poll keeps the last good tree on screen; only the
+          // first load has nothing better to show than the error.
+          if (!cancelled && initial) setError(cause instanceof Error ? cause.message : String(cause));
+        },
+      );
+    void load(true);
+    const stopPolling = startVisiblePoll(() => void load(false));
     return () => {
       cancelled = true;
+      stopPolling();
     };
     // `shownKey` stands in for `shown`, which is a fresh array on every filter change.
   }, [rpc, shownKey]);

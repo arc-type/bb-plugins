@@ -116,6 +116,12 @@ describe("ProjectFilter dropdown", () => {
     render(<ProjectFilter projects={projects} selected={["gone"]} onChange={() => {}} />);
     expect(screen.getByRole("button", { name: /Projects: All/ })).toBeTruthy();
   });
+
+  it("negative (BBP-199): the open popover carries the nowheel class so scrolling it does not pan the canvas", () => {
+    render(<ProjectFilter projects={projects} selected={[]} onChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect(screen.getByRole("group", { name: "Projects" }).className).toContain("nowheel");
+  });
 });
 
 describe("CanvasView toolbar slot", () => {

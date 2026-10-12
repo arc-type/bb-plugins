@@ -3,7 +3,9 @@
 // Crew's own copy of the canvas page (BBP-131 WI4): shown only when
 // `canvasPage` says Graph Studio is not active, otherwise a short note.
 import { cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { POLL_MS } from "../vendor/bb-canvas/lib/visible-poll";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 
 let app: CapturedPluginApp;
@@ -12,7 +14,10 @@ beforeAll(async () => {
   app = await loadPluginApp(() => import("../app"));
 });
 beforeEach(() => localStorage.clear());
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function canvasPanel(
   overrides: { rpc?: Record<string, unknown>; sdk?: Record<string, unknown>; projectId?: string | null; subPath?: string } = {},
@@ -310,5 +315,60 @@ describe("crew's canvas page frame/edit mode (BBP-170 WI6)", () => {
     fireEvent.click(card);
     expect(() => fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "e" })).not.toThrow();
     expect(screen.queryByText(/^Editing /)).toBeNull();
+  });
+
+  describe("live updates (BBP-200)", () => {
+    const member = (name: string) => ({ id: `member:${name}@crew`, kind: "member", label: name, parentId: "project:p1", meta: {} });
+    const layerWith = (...names: string[]) => ({ contractVersion: 1, nodes: names.map(member), edges: [], expanded: [] });
+
+    // Before the render: the page starts its interval on mount.
+    beforeEach(() => void vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
+
+    async function poll() {
+      await act(async () => {
+        vi.advanceTimersByTime(POLL_MS);
+      });
+    }
+
+    it("a new member appears on the next poll, the selection stays", async () => {
+      let names = ["a"];
+      canvasPanel({ rpc: { canvasLayer: () => layerWith(...names) } });
+      fireEvent.click(await screen.findByRole("button", { name: /^a — / }));
+      names = ["a", "b"];
+      await poll();
+      await waitFor(() => expect(screen.getByRole("button", { name: /^b — / })).toBeTruthy());
+      expect(screen.getByRole("button", { name: /^a — / }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.queryByText("Loading…")).toBeNull();
+    });
+
+    it("negative: a hidden tab makes no canvasLayer call", async () => {
+      const canvasLayer = vi.fn(() => layerWith("a"));
+      canvasPanel({ rpc: { canvasLayer } });
+      await screen.findByRole("button", { name: /^a — / });
+      const calls = canvasLayer.mock.calls.length;
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      await poll();
+      await poll();
+      expect(canvasLayer.mock.calls.length).toBe(calls);
+      visibility.mockRestore();
+    });
+
+    it("negative: a poll without changes resets nothing — selection and sidebar stay", async () => {
+      canvasPanel({ rpc: { canvasLayer: () => layerWith("a") } });
+      fireEvent.click(await screen.findByRole("button", { name: /^a — / }));
+      await poll();
+      expect(screen.getByRole("button", { name: /^a — / }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByLabelText("Details for a")).toBeTruthy();
+    });
+
+    it("negative: a failed poll keeps the last tree instead of an error", async () => {
+      let fail = false;
+      canvasPanel({ rpc: { canvasLayer: () => { if (fail) throw new Error("offline"); return layerWith("a"); } } });
+      await screen.findByRole("button", { name: /^a — / });
+      fail = true;
+      await poll();
+      expect(screen.queryByText(/Canvas not available/)).toBeNull();
+      expect(screen.getByRole("button", { name: /^a — / })).toBeTruthy();
+    });
   });
 });

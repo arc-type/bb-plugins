@@ -2,7 +2,7 @@
 // zoom at the pointer. No MiniMap and no keyboard here — those are the next
 // work item, built on fixture data before either plugin feeds this component
 // real data.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
 import {
   Background,
   Controls,
@@ -16,12 +16,63 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { layoutTree, type TreeLayout } from "../lib/layout";
+import { layoutTree, type PlacedEdge, type TreeLayout } from "../lib/layout";
 import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
 import { Frame, type FrameProps } from "./Frame";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
+import { MOTION_CSS, MOTION_MS, planMotion } from "../lib/tree-motion";
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function usePrefersReducedMotion(): boolean {
+  const query = () => typeof matchMedia === "function" && matchMedia(REDUCED_MOTION_QUERY).matches;
+  const [reduced, setReduced] = useState(query);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const media = matchMedia(REDUCED_MOTION_QUERY);
+    const update = () => setReduced(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+/** The next nodes tagged for motion (BBP-200), plus the removed ones as
+ *  ghosts that fade out and are dropped after `MOTION_MS`. The diff is taken
+ *  against the nodes on screen when the set of ids last changed — the flow
+ *  nodes are rebuilt on every render (a selection, say), and diffing against
+ *  the last render would turn a just-entered node into a kept one at once. */
+function useNodeMotion(next: Node[], reducedMotion: boolean): Node[] {
+  const key = next.map((node) => node.id).join("\n");
+  const last = useRef<Node[] | null>(null);
+  const base = useRef<{ key: string; previous: Node[] | null }>({ key, previous: null });
+  if (base.current.key !== key) base.current = { key, previous: last.current };
+  const previous = base.current.previous;
+  const plan = useMemo(() => planMotion(previous, next, reducedMotion), [previous, next, reducedMotion]);
+  const [ghosts, setGhosts] = useState<Node[]>([]);
+  useEffect(() => {
+    last.current = next;
+  });
+  useEffect(() => {
+    // The cleanup below cancelled the previous fade's timer, so its ghosts
+    // go now rather than linger.
+    setGhosts(plan.exiting);
+    if (plan.exiting.length === 0) return;
+    const timer = setTimeout(() => setGhosts([]), MOTION_MS);
+    return () => clearTimeout(timer);
+    // Only a new id set starts a fade-out; `plan` is rebuilt on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return useMemo(() => {
+    if (reducedMotion || ghosts.length === 0) return plan.nodes;
+    const present = new Set(plan.nodes.map((node) => node.id));
+    // A ghost is gone from the tree: hidden from assistive tech and queries.
+    const fading = ghosts.filter((ghost) => !present.has(ghost.id)).map((ghost) => ({ ...ghost, domAttributes: { "aria-hidden": true } }));
+    return [...plan.nodes, ...fading];
+  }, [plan, ghosts, reducedMotion]);
+}
 
 /** React Flow's colour mode, read from the BB theme actually on screen —
  *  left at its default, React Flow paints white chrome inside a dark host. */
@@ -108,6 +159,20 @@ const NODE_TYPES = { canvasNode: CanvasNodeView, canvasFrame: CanvasFrameView };
 const EDGE_TYPES = { statusEdge: StatusEdge };
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 const FIT_VIEW_OPTIONS = { padding: 0.08 };
+// React Flow's own floor (0.5) cuts off a real tree (two ten-member crews no
+// longer fit); its ceiling (2) is left as is.
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 2;
+
+/** `-deltaY` scaled the same way React Flow's own pinch handler reads a wheel
+ *  event — pixel/line/page delta modes — but without its extra ×10 factor for
+ *  Ctrl+wheel on macOS, which turns one mouse-wheel notch into a 4x zoom jump
+ *  (BBP-197 Fix 3). One formula for both a mouse-wheel notch (deltaY ~100,
+ *  a mild ~13% step) and a trackpad pinch (deltaY ~1–10, smooth). */
+function wheelZoomDelta(event: { deltaY: number; deltaMode: number }): number {
+  const modeFactor = event.deltaMode === 1 ? 0.05 : event.deltaMode === 2 ? 1 : 0.002;
+  return -event.deltaY * modeFactor;
+}
 
 /** Lower bound for the first fit only (BBP-196): with 34 projects, fitting
  *  the whole tree shrank the cards below reading size. Manual zoom still goes
@@ -158,6 +223,26 @@ export type CanvasShellHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
 };
+
+/** React Flow edges for the placed ones; relations sit below every card and
+ *  badge (BBP-202). */
+export function toFlowEdges(placedEdges: readonly PlacedEdge[]): Edge[] {
+  return placedEdges.map((placed, index) => ({
+    id: `${placed.from}->${placed.to}-${index}`,
+    source: placed.from,
+    target: placed.to,
+    type: "statusEdge",
+    data: {
+      variant: placed.variant,
+      path: placed.path,
+      label: placed.label,
+      state: placed.state,
+      relation: placed.relation,
+      emphasis: placed.emphasis,
+    } satisfies StatusEdgeData as unknown as Record<string, unknown>,
+    ...(placed.relation ? { zIndex: 0 } : {}),
+  }));
+}
 
 function toFlow(
   layout: TreeLayout,
@@ -216,18 +301,7 @@ function toFlow(
     };
   });
 
-  const flowEdges: Edge[] = layout.edges.map((placed, index) => ({
-    id: `${placed.from}->${placed.to}-${index}`,
-    source: placed.from,
-    target: placed.to,
-    type: "statusEdge",
-    data: {
-      variant: placed.variant,
-      path: placed.path,
-      label: placed.label,
-      state: placed.state,
-    } satisfies StatusEdgeData as unknown as Record<string, unknown>,
-  }));
+  const flowEdges = toFlowEdges(layout.edges);
 
   const frameNodes: Node[] = (layout.frames ?? []).map((placed) => ({
     id: placed.id,
@@ -275,6 +349,9 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
       toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads),
     [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
+
+  const reducedMotion = usePrefersReducedMotion();
+  const animatedNodes = useNodeMotion(flowNodes, reducedMotion);
 
   const startFit = useMemo(() => startFitOptions(nodes), [nodes]);
   // Once the user has taken the viewport into their own hands — panned,
@@ -327,10 +404,44 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     [flow],
   );
 
+  // Own Ctrl/Cmd+wheel zoom, at the pointer (BBP-197 Fix 3): React Flow's
+  // built-in pinch-on-wheel path only recognises Ctrl (not Cmd/Meta), and
+  // only on macOS multiplies the step by 10 for Ctrl, not for Cmd — neither
+  // of which this canvas wants. Captured above the pane, so it runs (and can
+  // stop the event) before React Flow's own wheel listener sees it; a plain
+  // wheel/trackpad-pan gesture (no Ctrl/Cmd) is untouched and still pans.
+  const onWheelCapture = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Programmatic (`flow.setViewport` below, not a gesture React Flow's
+      // own `onMoveStart` sees) — mark it by hand, or the BBP-196 start-fit
+      // effect would refit the view away from this zoom on the next change.
+      userInteracted.current = true;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const pointer = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+      const before = flow.getViewport();
+      const factor = Math.pow(2, wheelZoomDelta(event));
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, before.zoom * factor));
+      // The flow-space point under the pointer stays fixed: solve for the
+      // new viewport offset that keeps it under the same screen pixel.
+      const flowPoint = { x: (pointer.x - before.x) / before.zoom, y: (pointer.y - before.y) / before.zoom };
+      flow.setViewport({ x: pointer.x - flowPoint.x * zoom, y: pointer.y - flowPoint.y * zoom, zoom });
+    },
+    [flow],
+  );
+
   return (
-    <div ref={hostRef} className={className} style={{ width: "100%", height: "100%" }}>
+    <div
+      ref={hostRef}
+      className={className}
+      style={{ width: "100%", height: "100%" }}
+      onWheelCapture={onWheelCapture}
+    >
+      <style>{MOTION_CSS}</style>
       <ReactFlow
-        nodes={flowNodes}
+        nodes={animatedNodes}
         edges={flowEdges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
@@ -343,8 +454,11 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         // `CanvasView` already gives a meaning to. Without this, a click on a
         // card (which focuses its node) hands those keys to React Flow first.
         disableKeyboardA11y
-        zoomOnScroll
-        panOnScroll={false}
+        zoomOnScroll={false}
+        panOnScroll
+        zoomOnPinch
+        // Ctrl/Cmd+wheel zoom is handled above (`onWheelCapture`) instead.
+        zoomActivationKeyCode={null}
         // No `fitView` prop: it only fits once, against whichever nodes are
         // first in React Flow's store. The effect above re-fits explicitly,
         // on every nodes change, until the user takes over.
@@ -353,10 +467,8 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
           // calls) and set for an actual user gesture (drag, wheel, pinch).
           if (event) userInteracted.current = true;
         }}
-        // React Flow's default floor (0.5) is too high for a real tree: two
-        // crews with ten members each no longer fit, so the start view and
-        // `0` cut off the top instead of showing the whole tree.
-        minZoom={0.2}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
         // The canvas is a page of its own inside BB, not a demo; the corner
         // badge would be the only non-BB text on it.
         proOptions={{ hideAttribution: true }}
