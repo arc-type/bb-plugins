@@ -47,17 +47,18 @@ export function crewCanvasLayer(
   const layer: CrewCanvasLayer = { nodes: [], edges: [], expanded: [], frames: [] };
   for (const crew of crews) {
     const id = crewNodeId(crew.name);
+    const crewMembers = members.filter((entry) => entry.crew === crew.name);
+    const lead = crewMembers.find((entry) => entry.lead)?.key;
     layer.nodes.push({
       id,
       kind: "crew",
       label: crew.name,
       status: CREW_STATUS[crew.status],
       parentId: projectNodeId(projectId),
-      meta: { crew: crew.name, status: crew.status },
+      meta: { crew: crew.name, status: crew.status, members: crewMembers.length, ...(lead ? { lead } : {}) },
     });
     // A stopped crew stays folded: its members have nothing to show.
     if (crew.status !== "stopped") layer.expanded.push(id);
-    const crewMembers = members.filter((entry) => entry.crew === crew.name);
     // The frame and its flow/back-classified edges come from the same
     // topology math the edit mode uses (crewTopologyFrame) — one
     // classification, not two, so run view and edit view never disagree on

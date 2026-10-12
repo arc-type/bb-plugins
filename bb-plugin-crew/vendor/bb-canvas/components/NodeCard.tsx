@@ -28,6 +28,14 @@ export type NodeCardProps = {
    *  not merely unclickable — a reader must see at a glance which layer is
    *  live right now. */
   dimmed?: boolean;
+  /** A card that can open gets a chevron beside it (BBP-183); a leaf gets
+   *  none. Collapsed, the chevron also carries the child count. */
+  expander?: { expanded: boolean; childCount: number; onToggle: () => void };
+  /** A lazy load that failed (BBP-179): replaces the subtitle with a visible
+   *  "Could not load activity" instead of leaving the card looking like it
+   *  simply has nothing — the destructive border wins even over a neutral
+   *  `status`, and clicking the card (or its chevron) retries. */
+  loadFailed?: boolean;
 };
 
 /** One fixed accent per kind — not derived from the id, unlike aside's
@@ -43,9 +51,10 @@ const KIND_COLOR: Record<CanvasNodeKind, string> = {
   thread: "#db2777",
   turn: "#65a30d",
   "tool-call": "#d97706",
+  subagent: "#4f46e5",
 };
 
-const AMBER = "#d97706";
+const AMBER = "var(--warning)";
 
 const PULSE_CLASS = "bb-canvas-pulse";
 const STYLE_ID = "bb-canvas-node-card-styles";
@@ -74,8 +83,13 @@ type Border = { border: string; pulse: boolean };
 
 /** Status beats type beats neutral — an error or a running card must read
  *  the same regardless of which colour mode the toolbar is set to. */
-function borderFor(status: CanvasStatus | undefined, kind: CanvasNodeKind | undefined, colorMode: NodeCardColorMode): Border {
-  if (status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
+function borderFor(
+  status: CanvasStatus | undefined,
+  kind: CanvasNodeKind | undefined,
+  colorMode: NodeCardColorMode,
+  loadFailed: boolean,
+): Border {
+  if (loadFailed || status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
   // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
   // state that needs the human — it must not read weaker than "running".
   if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false };
@@ -97,13 +111,17 @@ export function NodeCard({
   selected = false,
   onClick,
   dimmed = false,
+  expander,
+  loadFailed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
-  const { border, pulse } = borderFor(status, kind, colorMode);
-  return (
+  const { border, pulse } = borderFor(status, kind, colorMode, loadFailed);
+  const errorText = loadFailed ? "Could not load activity" : undefined;
+  const effectiveSubtitle = errorText ?? subtitle;
+  const card = (
     <button
       type="button"
-      aria-label={subtitle ? `${label} — ${subtitle}` : label}
+      aria-label={effectiveSubtitle ? `${label} — ${effectiveSubtitle}` : label}
       aria-pressed={selected}
       aria-disabled={dimmed}
       onClick={dimmed ? undefined : onClick}
@@ -149,17 +167,37 @@ export function NodeCard({
         >
           {label}
         </span>
-        {subtitle ? (
+        {effectiveSubtitle ? (
           <span
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               fontSize: 11,
-              color: "var(--muted-foreground)",
+              color: errorText ? "var(--destructive)" : "var(--muted-foreground)",
             }}
           >
-            {subtitle}
+            {errorText ? (
+              <svg
+                aria-hidden
+                width={10}
+                height={10}
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M8 2.5 1.5 13.5h13z" />
+                <path d="M8 6.5v3.5M8 12h.01" />
+              </svg>
+            ) : null}
+            {effectiveSubtitle}
           </span>
         ) : null}
       </span>
@@ -177,5 +215,65 @@ export function NodeCard({
         />
       ) : null}
     </button>
+  );
+  if (!expander) return card;
+  // A sibling of the card, not inside it: a button in a button is invalid
+  // and would select the card on every toggle.
+  const count = !expander.expanded && expander.childCount > 0 ? expander.childCount : null;
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      {card}
+      <button
+        type="button"
+        aria-label={`${expander.expanded ? "Collapse" : "Expand"} ${label}${count !== null ? ` (${count} ${count === 1 ? "child" : "children"})` : ""}`}
+        aria-expanded={expander.expanded}
+        disabled={dimmed}
+        onClick={(event) => {
+          event.stopPropagation();
+          expander.onToggle();
+        }}
+        style={{
+          position: "absolute",
+          right: -10,
+          top: "50%",
+          transform: "translateY(-50%)",
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          height: 20,
+          minWidth: 20,
+          padding: "0 4px",
+          borderRadius: 10,
+          // Collapsed with children is the state to notice, so it gets the
+          // foreground ink; open chevrons stay quiet.
+          border: `1px solid ${count !== null ? "var(--muted-foreground)" : "var(--border)"}`,
+          background: "var(--card)",
+          color: count !== null ? "var(--foreground)" : "var(--muted-foreground)",
+          fontSize: 10,
+          fontWeight: count !== null ? 600 : 400,
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1,
+          cursor: dimmed ? "default" : "pointer",
+          opacity: dimmed ? 0.35 : 1,
+          pointerEvents: dimmed ? "none" : "auto",
+        }}
+      >
+        <svg
+          aria-hidden
+          width={10}
+          height={10}
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ transform: expander.expanded ? "rotate(90deg)" : undefined }}
+        >
+          <path d="M6 3l5 5-5 5" />
+        </svg>
+        {count !== null ? <span>{count}</span> : null}
+      </button>
+    </div>
   );
 }

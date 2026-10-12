@@ -14,7 +14,7 @@ describe("crewCanvasLayer", () => {
       member({ address: "dev@trio", key: "dev", activity: "needs-you" }),
     ]);
     expect(layer.nodes).toEqual([
-      { id: "crew:trio", kind: "crew", label: "trio", status: "running", parentId: "project:p1", meta: { crew: "trio", status: "running" } },
+      { id: "crew:trio", kind: "crew", label: "trio", status: "running", parentId: "project:p1", meta: { crew: "trio", status: "running", members: 2, lead: "lead" } },
       { id: "member:lead@trio", kind: "member", label: "lead", status: "running", parentId: "crew:trio", frameId: "frame:trio",
         meta: { address: "lead@trio", role: "Leads", lead: true, threadId: "t1", activity: "working" } },
       { id: "member:dev@trio", kind: "member", label: "dev", status: "waiting", parentId: "crew:trio", frameId: "frame:trio",
@@ -53,6 +53,13 @@ describe("crewCanvasLayer", () => {
       expect(layer.edges).toEqual([]);
       expect(crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio).edges).toEqual([]);
     });
+  });
+});
+
+describe("crewCanvasLayer sidebar fields (BBP-179 acceptance)", () => {
+  it("leaves out the lead when the crew has none, and counts zero members", () => {
+    const layer = crewCanvasLayer("p1", [{ name: "solo", status: "stopped" }], []);
+    expect(layer.nodes[0]!.meta).toEqual({ crew: "solo", status: "stopped", members: 0 });
   });
 });
 

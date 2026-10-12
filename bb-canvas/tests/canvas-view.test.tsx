@@ -40,15 +40,14 @@ describe("CanvasView keyboard navigation", () => {
     expect(card(new RegExp("^orch-lead — ")).getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("Enter on a collapsed card expands it, and does so only once", () => {
+  it("Enter toggles a card: expands it, then collapses it again (BBP-183)", () => {
     const root = renderView(new Set());
     fireEvent.click(card(new RegExp("^factory-1 — ")));
     expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
     fireEvent.keyDown(root, { key: "Enter" });
-    expect(screen.getByRole("button", { name: new RegExp("^orch-lead — ") })).toBeTruthy();
-    // Idempotent: pressing it again on the same, now-expanded card must not throw.
-    expect(() => fireEvent.keyDown(root, { key: "Enter" })).not.toThrow();
     expect(screen.getAllByRole("button", { name: new RegExp("^orch-lead — ") })).toHaveLength(1);
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
   });
 
   it("ArrowLeft collapses an expanded card", () => {
@@ -294,5 +293,107 @@ describe("CanvasView lazy children", () => {
     await screen.findByRole("button", { name: /^Turn 1 — / });
     fireEvent.keyDown(root, { key: "Enter" });
     expect(loadChildren).toHaveBeenCalledOnce();
+  });
+
+  // BBP-179 root cause: a rejected `loadChildren` used to vanish silently —
+  // the card just stayed empty, indistinguishable from a thread that
+  // genuinely has no turns. A failed load must leave a trace a developer (or
+  // the next acceptance pass) can actually find.
+  it("logs a failed load instead of leaving it silently empty", async () => {
+    const error = new Error("timeline fetch failed");
+    const loadChildren = vi.fn(async () => {
+      throw error;
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = render(
+      <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    expect(errorSpy.mock.calls[0]).toContain(error);
+    errorSpy.mockRestore();
+  });
+
+  it("shows a visible error on the card when loadChildren fails, not just a silent empty card", async () => {
+    const loadChildren = vi.fn(async () => {
+      throw new Error("timeline fetch failed");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />);
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByText("Could not load activity")).toBeTruthy();
+    vi.restoreAllMocks();
+  });
+
+  it("retries the load when the failed card is clicked again", async () => {
+    const loadChildren = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timeline fetch failed"))
+      .mockResolvedValueOnce({
+        nodes: [{ id: "m1:turn-1", kind: "turn" as const, label: "Turn 1", parentId: "m1" }],
+      });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />);
+    const root = document.querySelector("[data-canvas-view]")!;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await screen.findByText("Could not load activity");
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: /^Turn 1 — / })).toBeTruthy();
+    expect(screen.queryByText("Could not load activity")).toBeNull();
+    expect(loadChildren).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("CanvasView sidebar details (BBP-179 acceptance)", () => {
+  it("loads a selected node's details once and shows them in the sidebar", async () => {
+    const loadDetails = vi.fn(async () => ({ provider: "claude-code", turns: 7 }));
+    const threadNodes: CanvasNode[] = [{ id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "thr_1" } }];
+    render(<CanvasView nodes={threadNodes} loadDetails={loadDetails} />);
+    fireEvent.click(card(/^Thread — /));
+    expect(await screen.findByText("claude-code")).toBeTruthy();
+    expect(screen.getByText("7")).toBeTruthy();
+    expect(screen.getByText("thr_1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    fireEvent.click(card(/^Thread — /));
+    await screen.findByText("claude-code");
+    expect(loadDetails).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the sidebar working with the node's own meta when loading fails", async () => {
+    const loadDetails = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const threadNodes: CanvasNode[] = [{ id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "thr_1" } }];
+    render(<CanvasView nodes={threadNodes} loadDetails={loadDetails} />);
+    fireEvent.click(card(/^Thread — /));
+    await vi.waitFor(() => expect(loadDetails).toHaveBeenCalled());
+    expect(screen.getByText("thr_1")).toBeTruthy();
+  });
+
+  it("leaves the sidebar on the node.s own meta when the loader returns null", async () => {
+    const loadDetails = vi.fn(async () => null);
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadDetails={loadDetails} />);
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    await vi.waitFor(() => expect(loadDetails).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
+  });
+});
+
+describe("CanvasView sidebar action wiring (BBP-185)", () => {
+  it("forwards onOpenThread to the Sidebar and calls it with the selected node's threadId", () => {
+    const onOpenThread = vi.fn();
+    const threadNode: CanvasNode[] = [
+      { id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "th1" } },
+    ];
+    render(<CanvasView nodes={threadNode} initialExpanded={new Set()} onOpenThread={onOpenThread} />);
+    fireEvent.click(card(/^Thread/));
+    fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
+    expect(onOpenThread).toHaveBeenCalledWith("th1");
   });
 });

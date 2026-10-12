@@ -6,9 +6,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
-import { withRoots } from "../vendor/bb-canvas/lib/layer";
+import { ProjectFilter } from "../vendor/bb-canvas/components/ProjectFilter";
+import { mergeLayers, projectOfCrew, withRoots } from "../vendor/bb-canvas/lib/layer";
+import {
+  initialProjectFilter,
+  loadProjectFilter,
+  saveProjectFilter,
+  visibleProjectIds,
+  type ProjectOption,
+} from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
 import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
 import type { rpcContract } from "../server";
@@ -21,13 +30,20 @@ function withThreadNodes(nodes: readonly CanvasNode[]): CanvasNode[] {
   return [...nodes, ...threads];
 }
 
-type Layer = { nodes: CanvasNode[]; edges: CanvasEdge[]; expanded: Set<string>; frames: CanvasFrame[] };
+type Layer = {
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+  expanded: Set<string>;
+  frames: CanvasFrame[];
+  /** Which project each frame came from — the edit panel needs it. */
+  frameProjects: Map<string, string>;
+};
 
-/** Projects to pick from when neither the host nor the URL names one. */
-function ProjectPicker() {
+/** Every project the filter can offer. If the list cannot be read, the
+ *  project the page was opened for is still shown on its own. */
+function useProjectOptions(fallbackId: string | null): ProjectOption[] | null {
   const sdk = useSdk();
-  const navigate = useBbNavigate();
-  const [projects, setProjects] = useState<{ id: string; name: string }[] | null>(null);
+  const [projects, setProjects] = useState<ProjectOption[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     sdk.projects.list().then(
@@ -35,45 +51,44 @@ function ProjectPicker() {
         if (!cancelled) setProjects(list.map((project) => ({ id: project.id, name: project.name ?? project.id })));
       },
       () => {
-        if (!cancelled) setProjects([]);
+        if (cancelled) return;
+        if (fallbackId === null) return setProjects([]);
+        sdk.projects.get({ projectId: fallbackId }).then(
+          (project) => !cancelled && setProjects([{ id: fallbackId, name: project.name ?? fallbackId }]),
+          () => !cancelled && setProjects([{ id: fallbackId, name: fallbackId }]),
+        );
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [sdk]);
-  return (
-    <div className="flex h-full flex-col items-start gap-1 overflow-y-auto p-4 text-sm">
-      <p className="text-muted-foreground">
-        {projects === null ? "Loading projects…" : projects.length === 0 ? "No projects yet." : "Pick a project to see its canvas."}
-      </p>
-      {(projects ?? []).map((project) => (
-        <button
-          key={project.id}
-          type="button"
-          className="rounded-md px-2 py-1 hover:bg-muted"
-          onClick={() => navigate.toPluginPanel("canvas", { subPath: project.id })}
-        >
-          {project.name}
-        </button>
-      ))}
-    </div>
-  );
+  }, [sdk, fallbackId]);
+  return projects;
 }
 
 export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const sdk = useSdk();
   const ctx = useBbContext();
+  const navigate = useBbNavigate();
   // BBP-173: on the nav-panel route the host passes no projectId (measured in
   // BB), so the project also travels as the first subPath segment.
-  const projectId = ctx.projectId ?? (subPath.split("/").find((part) => part.length > 0) ?? null);
+  const urlProjectId = ctx.projectId ?? (subPath.split("/").find((part) => part.length > 0) ?? null);
+  const projects = useProjectOptions(urlProjectId);
+  const [selected, setSelected] = useState<string[]>(() => initialProjectFilter(loadProjectFilter(), urlProjectId));
+  const shown = useMemo(() => (projects === null ? null : visibleProjectIds(selected, projects)), [projects, selected]);
+  const shownKey = shown?.join("\n") ?? null;
   const [visible, setVisible] = useState<boolean | null>(null);
   const [layer, setLayer] = useState<Layer | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Every crew frame is editable — there is no notion yet of a crew the
   // current user may only view (BBP-170 WI6).
   const editableFrameIds = useMemo(() => new Set((layer?.frames ?? []).map((frame) => frame.id)), [layer]);
+
+  const choose = (ids: string[]) => {
+    setSelected(ids);
+    saveProjectFilter(ids);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -92,24 +107,39 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   }, [rpc]);
 
   useEffect(() => {
-    if (projectId === null || visible !== true) return;
+    if (shown === null || projects === null || visible !== true) return;
     let cancelled = false;
     setLayer(null);
-    Promise.all([
-      rpc.call("canvasLayer", { projectId }),
-      sdk.projects.get({ projectId }).then(
-        (project) => project.name ?? projectId,
-        () => projectId,
+    const labels = new Map(projects.map((project) => [project.id, project.name]));
+    Promise.all(
+      shown.map((projectId) =>
+        rpc.call("canvasLayer", { projectId }).then((result) => ({ projectId, result })),
       ),
-    ]).then(
-      ([result, projectLabel]) => {
+    ).then(
+      (results) => {
         if (cancelled) return;
-        const page = withRoots(projectId, projectLabel, { nodes: result.nodes, edges: result.edges, expanded: result.expanded });
+        // Each project is its own root under `agents`; `mergeLayers` keeps
+        // the one `agents` node they all share.
+        const page = mergeLayers(
+          ...results.map(({ projectId, result }) =>
+            withRoots(projectId, labels.get(projectId) ?? projectId, { nodes: result.nodes, edges: result.edges, expanded: result.expanded }),
+          ),
+        );
+        const frameProjects = new Map<string, string>();
+        const frames: CanvasFrame[] = [];
+        for (const { projectId, result } of results) {
+          for (const frame of result.frames ?? []) {
+            if (frameProjects.has(frame.id)) continue;
+            frameProjects.set(frame.id, projectId);
+            frames.push(frame);
+          }
+        }
         setLayer({
           nodes: withThreadNodes(page.nodes),
           edges: [...page.edges],
           expanded: new Set(page.expanded),
-          frames: result.frames ?? [],
+          frames,
+          frameProjects,
         });
         setError(null);
       },
@@ -120,7 +150,8 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [rpc, projectId, visible]);
+    // `shownKey` stands in for `shown`, which is a fresh array on every filter change.
+  }, [rpc, shownKey, visible]);
 
   if (visible === null) return null;
   if (!visible) {
@@ -130,8 +161,11 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       </div>
     );
   }
-  if (projectId === null) {
-    return <ProjectPicker />;
+  if (projects === null) {
+    return <div className="p-4 text-sm text-muted-foreground">Loading projects…</div>;
+  }
+  if (projects.length === 0) {
+    return <div className="p-4 text-sm text-muted-foreground">No projects yet.</div>;
   }
   if (error) {
     return <div className="p-4 text-sm text-destructive">Canvas not available: {error}</div>;
@@ -142,18 +176,44 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
 
   return (
     <CanvasView
+      // `initialExpanded` is read once at mount, so a new project set needs a fresh view.
+      key={shownKey}
       nodes={layer.nodes}
       edges={layer.edges}
       frames={layer.frames}
       editableFrameIds={editableFrameIds}
-      renderFrameEditor={(frameId) => <CrewFrameEditPanel projectId={projectId} crew={crewNameFromFrameId(frameId)} />}
+      renderFrameEditor={(frameId) => <CrewFrameEditPanel projectId={layer.frameProjects.get(frameId)!} crew={crewNameFromFrameId(frameId)} />}
       initialExpanded={layer.expanded}
+      surface="canvas"
+      // Only a thread has children to fetch; every other card without
+      // children is a leaf and gets no chevron (BBP-183).
+      canLoadChildren={(node) => node.kind === "thread" && typeof node.meta?.threadId === "string"}
       loadChildren={async (node) => {
         if (node.kind !== "thread") return { nodes: [] };
         const threadId = node.meta?.threadId;
         if (typeof threadId !== "string") return { nodes: [] };
         const response = await sdk.threads.timeline({ threadId });
         return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+      }}
+      // BBP-179: a thread's sidebar shows BB's status, provider, model, times
+      // and turn count, not just its id — loaded once, on first selection.
+      loadDetails={(node) =>
+        loadNodeDetails(
+          {
+            get: async (threadId) => (await sdk.threads.get({ threadId })) as unknown as ThreadLike,
+            model: async (threadId) => (await sdk.threads.defaultExecutionOptions({ threadId }))?.model ?? null,
+            timelineRows: async (threadId) => (await sdk.threads.timeline({ threadId })).rows as unknown as readonly { kind: string }[],
+          },
+          node,
+        )
+      }
+      toolbar={<ProjectFilter projects={projects} selected={selected} onChange={choose} />}
+      onOpenThread={(threadId) => navigate.toThread(threadId)}
+      onOpenCrew={(crew) => {
+        // BBP-49/185: the thread side panel first, as the crew surfaces do;
+        // a surface with none falls back to the nav panel.
+        const opened = navigate.openThreadPanel({ actionId: "crew", title: `Crew ${crew}`, params: { crew, projectId: projectOfCrew(layer.nodes, crew) ?? urlProjectId ?? shown?.[0] ?? null } });
+        if (!opened) navigate.toPluginPanel("crews");
       }}
       className="h-full"
     />

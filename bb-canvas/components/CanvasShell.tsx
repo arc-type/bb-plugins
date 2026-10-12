@@ -107,10 +107,17 @@ function CanvasFrameView({
 const NODE_TYPES = { canvasNode: CanvasNodeView, canvasFrame: CanvasFrameView };
 const EDGE_TYPES = { statusEdge: StatusEdge };
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
+const FIT_VIEW_OPTIONS = { padding: 0.08 };
 
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
   expanded: ReadonlySet<string>;
+  /** Cards that get a chevron (BBP-183); absent: none do. */
+  expandable?: ReadonlySet<string>;
+  onToggle?: (nodeId: string) => void;
+  /** Bump to re-fit the view to the whole tree — after Collapse all /
+   *  Expand all, whose new layout otherwise sits off screen (BBP-179). */
+  fitRequest?: number;
   edges?: readonly CanvasEdge[];
   frames?: readonly CanvasFrame[];
   selectedId?: string | null;
@@ -122,6 +129,9 @@ export type CanvasShellProps = {
    *  neutral card by `kind` instead. An error or needs-input border always
    *  wins over either. */
   colorMode?: NodeCardColorMode;
+  /** Nodes whose lazy load failed (BBP-179) — shown as a visible error on
+   *  the card instead of an empty one, and retried on the next toggle. */
+  failedLoads?: ReadonlySet<string>;
   className?: string;
 };
 
@@ -141,6 +151,10 @@ function toFlow(
   onSelect: ((id: string) => void) | undefined,
   colorMode: NodeCardColorMode,
   dimmedIds: ReadonlySet<string>,
+  expanded: ReadonlySet<string>,
+  expandable: ReadonlySet<string>,
+  onToggle: ((id: string) => void) | undefined,
+  failedLoads: ReadonlySet<string>,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const byFrameId = new Map(frames.map((frame) => [frame.id, frame]));
@@ -160,6 +174,14 @@ function toFlow(
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
       dimmed: dimmedIds.has(node.id),
+      loadFailed: failedLoads.has(node.id),
+      expander: expandable.has(node.id)
+        ? {
+            expanded: expanded.has(node.id),
+            childCount: childCount.get(node.id) ?? 0,
+            onToggle: () => onToggle?.(node.id),
+          }
+        : undefined,
     };
     return {
       id: placed.id,
@@ -215,12 +237,16 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   {
     nodes,
     expanded,
+    expandable = EMPTY_DIMMED,
+    onToggle,
+    fitRequest = 0,
     edges = [],
     frames = [],
     selectedId,
     onSelect,
     colorMode: cardColorMode = "status",
     dimmedIds = EMPTY_DIMMED,
+    failedLoads = EMPTY_DIMMED,
     className,
   },
   handleRef,
@@ -229,9 +255,18 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds),
-    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds],
+    () =>
+      toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads),
+    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
+
+  useEffect(() => {
+    if (fitRequest === 0) return;
+    // A frame later: React Flow takes the new nodes into its store in its
+    // own effect, and fitting before that fits the old tree.
+    const frame = requestAnimationFrame(() => void flow.fitView(FIT_VIEW_OPTIONS));
+    return () => cancelAnimationFrame(frame);
+  }, [fitRequest, flow]);
 
   useImperativeHandle(
     handleRef,
@@ -262,7 +297,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         zoomOnScroll
         panOnScroll={false}
         fitView
-        fitViewOptions={{ padding: 0.08 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         // React Flow's default floor (0.5) is too high for a real tree: two
         // crews with ten members each no longer fit, so the start view and
         // `0` cut off the top instead of showing the whole tree.

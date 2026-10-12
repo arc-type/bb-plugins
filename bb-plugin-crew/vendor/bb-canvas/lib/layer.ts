@@ -47,3 +47,11 @@ export function withRoots(projectId: string, projectLabel: string, layer: Canvas
     layer,
   );
 }
+
+/** The project a crew's node hangs under — with several projects on one
+ *  canvas, a crew name alone no longer says which one it belongs to. */
+export function projectOfCrew(nodes: readonly CanvasNode[], crew: string): string | null {
+  const prefix = projectNodeId("");
+  const node = nodes.find((candidate) => candidate.kind === "crew" && (candidate.meta?.crew ?? candidate.label) === crew);
+  return node?.parentId?.startsWith(prefix) ? node.parentId.slice(prefix.length) : null;
+}

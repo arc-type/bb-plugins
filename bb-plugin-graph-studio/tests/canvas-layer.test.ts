@@ -35,7 +35,7 @@ describe("graphCanvasLayer", () => {
     ], new Map());
     expect(layer.nodes).toEqual([
       { id: "graph-run:r1", kind: "graph-run", label: "Loop", status: "running", parentId: "project:p1",
-        meta: { runId: "r1", graphId: "loop", status: "running", threadId: null } },
+        meta: { runId: "r1", graphId: "loop", status: "running", threadId: null, started: "1970-01-01 00:00 UTC", steps: "1/3" } },
       { id: "step:r1:a", kind: "step", label: "Plan", status: "done", parentId: "graph-run:r1", meta: { nodeId: "a", attempts: 2 } },
       { id: "step:r1:b", kind: "step", label: "Build", status: "running", parentId: "graph-run:r1", meta: { nodeId: "b", attempts: 1 } },
       { id: "step:r1:c", kind: "step", label: "Check", parentId: "graph-run:r1", meta: { nodeId: "c", attempts: 0 } },
@@ -68,6 +68,14 @@ describe("graphCanvasLayer", () => {
     expect(graphCanvasLayer("p1", [], new Map())).toEqual({ nodes: [], edges: [], expanded: [] });
     const layer = graphCanvasLayer("p1", [run({ threadId: "stranger" })], new Map([["t1", "member:x"]]));
     expect(layer.nodes[0]!.parentId).toBe("project:p1");
+  });
+});
+
+describe("graphCanvasLayer sidebar fields (BBP-179 acceptance)", () => {
+  it("leaves out a missing start time and counts no done steps as 0", () => {
+    const layer = graphCanvasLayer("p1", [run({ createdAt: 0 })], new Map());
+    expect(layer.nodes[0]!.meta).not.toHaveProperty("started");
+    expect(layer.nodes[0]!.meta).toMatchObject({ steps: "0/3" });
   });
 });
 
