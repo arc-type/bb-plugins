@@ -378,7 +378,7 @@ describe("work row mapping: workKind file-change (BBP-206 R2b)", () => {
     expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "search.ts" });
     expect(nodes[0]!.meta).toMatchObject({
       path: "/repo/lib/search.ts",
-      kind: "update",
+      changeKind: "update",
       diffStats: "+14 -0",
       duration: "300ms",
     });
@@ -695,11 +695,11 @@ describe("BBP-206 R2b acceptance: real timeline fixtures", () => {
     expect(nodes[0]!.meta!.toolArgs).toBe(JSON.stringify({ limit: 5 }));
   });
 
-  it("workFileChangeEdit: file name on the card, path/kind/diffStats in meta, no output/exitCode", () => {
+  it("workFileChangeEdit: file name on the card, path/changeKind/diffStats in meta, no output/exitCode", () => {
     const row = fixtures.workFileChangeEdit as TimelineRowLike;
     const { nodes } = timelineToCanvas("t1", { rows: [row] });
     expect(nodes[0]!.label).toBe("search.ts");
-    expect(nodes[0]!.meta).toMatchObject({ kind: "update", diffStats: "+14 -0" });
+    expect(nodes[0]!.meta).toMatchObject({ changeKind: "update", diffStats: "+14 -0" });
     expect(nodes[0]!.meta).not.toHaveProperty("output");
     expect(nodes[0]!.meta).not.toHaveProperty("exitCode");
   });

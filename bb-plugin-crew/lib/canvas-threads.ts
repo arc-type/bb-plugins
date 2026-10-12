@@ -249,7 +249,7 @@ function fileChangeMeta(row: TimelineRowLike, threadId: string | undefined): Rec
   const diffStats = row.change?.diffStats;
   return compact({
     path: row.change?.path,
-    kind: row.change?.kind,
+    changeKind: row.change?.kind,
     diffStats: diffStats ? `+${diffStats.added} -${diffStats.removed}` : undefined,
     stdout: row.stdout || "",
     stderr: row.stderr || "",
