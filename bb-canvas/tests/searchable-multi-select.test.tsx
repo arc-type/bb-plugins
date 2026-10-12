@@ -244,6 +244,58 @@ describe("SearchableMultiSelect", () => {
     ]);
   });
 
+  it("hides Select all matches when nothing matches the query", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByText("No matches")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select all matches" })).toBeNull();
+  });
+
+  it("puts checked options that no longer match the query under a Selected heading", () => {
+    render(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p3", "p1"]} onChange={() => {}} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "et" } });
+    // Beta matches "et" and stays an ordinary match; Alpha/Gamma are checked but don't match.
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBeTruthy();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Gamma" })).toBeTruthy();
+    expect(screen.queryByText("No matches")).toBeNull();
+  });
+
+  it("shows the Selected heading, and no Select all matches, when the query matches nothing but something is checked", () => {
+    render(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p1"]} onChange={() => {}} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByText("No matches")).toBeTruthy();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select all matches" })).toBeNull();
+  });
+
+  it("Enter in the search field checks the first visible match when no row is active", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith(["p1"]);
+  });
+
+  it("Enter in the search field checks the highlighted row when one is active", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Beta" }), { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith(["p2"]);
+  });
+
   it("does not let ArrowDown, Space or Enter reach the canvas's own shortcuts", () => {
     const canvasShortcut = vi.fn();
     render(

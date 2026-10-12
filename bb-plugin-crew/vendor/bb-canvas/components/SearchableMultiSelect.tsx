@@ -94,12 +94,17 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   const checkedBlock = frozenOrder
     .filter((option) => frozenCheckedIds.has(option.id))
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Checked entries that still match the query stay pinned above the divider
+  // as before; checked entries the query no longer matches move to their own
+  // "Selected" block so they aren't mistaken for actual search matches.
+  const checkedMatching = normalizedQuery === "" ? checkedBlock : checkedBlock.filter(matches);
+  const checkedNotMatching = normalizedQuery === "" ? [] : checkedBlock.filter((option) => !matches(option));
   const remaining = frozenOrder.filter(
     (option) => !frozenCheckedIds.has(option.id) && (normalizedQuery === "" || matches(option)),
   );
   const matchingIds = frozenOrder.filter(matches).map((option) => option.id);
-  const noMatches = normalizedQuery !== "" && checkedBlock.length === 0 && remaining.length === 0;
-  const visibleOptions = [...checkedBlock, ...remaining];
+  const noMatches = normalizedQuery !== "" && checkedMatching.length === 0 && remaining.length === 0;
+  const visibleOptions = [...checkedMatching, ...remaining, ...checkedNotMatching];
   itemRefs.current = [];
 
   const moveActive = (delta: number) => {
@@ -126,6 +131,12 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
           if (active instanceof HTMLInputElement && active.type === "checkbox") {
             event.preventDefault();
             active.click();
+          } else if (event.key === "Enter" && active === searchRef.current) {
+            // Enter in the search field checks the highlighted row if arrow
+            // navigation already moved focus there; otherwise it checks the
+            // first visible match.
+            event.preventDefault();
+            itemRefs.current[0]?.click();
           }
         }
         event.stopPropagation();
@@ -223,7 +234,7 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
           >
             Clear selection
           </button>
-          {normalizedQuery !== "" ? (
+          {normalizedQuery !== "" && !noMatches ? (
             <button
               type="button"
               onClick={() => onChange(Array.from(new Set([...selected, ...matchingIds])))}
@@ -242,41 +253,65 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
           ) : null}
           {options.length === 0 ? (
             <div style={{ padding: "4px 8px", color: "var(--muted-foreground)" }}>{emptyText}</div>
-          ) : noMatches ? (
-            <div style={{ padding: "4px 8px", color: "var(--muted-foreground)" }}>No matches</div>
           ) : (
             <>
-              {checkedBlock.map((option) => (
-                <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
-                  <input
-                    ref={(el) => {
-                      itemRefs.current[visibleOptions.indexOf(option)] = el;
-                    }}
-                    type="checkbox"
-                    aria-label={option.name}
-                    checked={selected.includes(option.id)}
-                    onChange={() => toggle(option.id)}
-                  />
-                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
-                </label>
-              ))}
-              {checkedBlock.length > 0 && remaining.length > 0 ? (
-                <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+              {noMatches ? (
+                <div style={{ padding: "4px 8px", color: "var(--muted-foreground)" }}>No matches</div>
+              ) : (
+                <>
+                  {checkedMatching.map((option) => (
+                    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+                      <input
+                        ref={(el) => {
+                          itemRefs.current[visibleOptions.indexOf(option)] = el;
+                        }}
+                        type="checkbox"
+                        aria-label={option.name}
+                        checked={selected.includes(option.id)}
+                        onChange={() => toggle(option.id)}
+                      />
+                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
+                    </label>
+                  ))}
+                  {checkedMatching.length > 0 && remaining.length > 0 ? (
+                    <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                  ) : null}
+                  {remaining.map((option) => (
+                    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+                      <input
+                        ref={(el) => {
+                          itemRefs.current[visibleOptions.indexOf(option)] = el;
+                        }}
+                        type="checkbox"
+                        aria-label={option.name}
+                        checked={selected.includes(option.id)}
+                        onChange={() => toggle(option.id)}
+                      />
+                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
+                    </label>
+                  ))}
+                </>
+              )}
+              {checkedNotMatching.length > 0 ? (
+                <>
+                  <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                  <div style={{ padding: "4px 8px", color: "var(--muted-foreground)", fontWeight: 600 }}>Selected</div>
+                  {checkedNotMatching.map((option) => (
+                    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+                      <input
+                        ref={(el) => {
+                          itemRefs.current[visibleOptions.indexOf(option)] = el;
+                        }}
+                        type="checkbox"
+                        aria-label={option.name}
+                        checked={selected.includes(option.id)}
+                        onChange={() => toggle(option.id)}
+                      />
+                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{option.name}</span>
+                    </label>
+                  ))}
+                </>
               ) : null}
-              {remaining.map((option) => (
-                <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
-                  <input
-                    ref={(el) => {
-                      itemRefs.current[visibleOptions.indexOf(option)] = el;
-                    }}
-                    type="checkbox"
-                    aria-label={option.name}
-                    checked={selected.includes(option.id)}
-                    onChange={() => toggle(option.id)}
-                  />
-                  <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
-                </label>
-              ))}
             </>
           )}
         </div>
