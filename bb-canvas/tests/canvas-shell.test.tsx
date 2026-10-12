@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { CanvasShell, colorLightness } from "@/components/CanvasShell";
+import { CanvasShell, colorLightness, START_MIN_ZOOM, startFitOptions } from "@/components/CanvasShell";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "@/lib/types";
 
 afterEach(cleanup);
@@ -112,5 +112,31 @@ describe("CanvasShell host theme", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(flow().classList.contains("light")).toBe(true);
     document.documentElement.removeAttribute("lang");
+  });
+});
+
+describe("startFitOptions (BBP-196)", () => {
+  const tree: CanvasNode[] = [
+    { id: "root", kind: "agents", label: "bb", parentId: null },
+    { id: "p1", kind: "project", label: "p1", parentId: "root" },
+    { id: "p2", kind: "project", label: "p2", parentId: "root" },
+    { id: "t1", kind: "thread", label: "t1", parentId: "p1" },
+    { id: "orphan", kind: "thread", label: "orphan", parentId: "missing" },
+  ];
+
+  it("fits only the roots and their direct children", () => {
+    const ids = startFitOptions(tree).nodes.map((n) => n.id);
+    expect(ids.sort()).toEqual(["orphan", "p1", "p2", "root"]);
+  });
+
+  it("floors the zoom at a readable minimum, above the manual floor of 0.2", () => {
+    const options = startFitOptions(tree);
+    expect(options.minZoom).toBe(START_MIN_ZOOM);
+    expect(START_MIN_ZOOM).toBeGreaterThan(0.2);
+  });
+
+  it("sets no fixed zoom: a small tree still fits larger than the floor", () => {
+    const options = startFitOptions(tree) as Record<string, unknown>;
+    expect(options.maxZoom).toBeUndefined();
   });
 });

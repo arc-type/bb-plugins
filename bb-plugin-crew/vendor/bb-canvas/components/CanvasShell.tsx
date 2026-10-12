@@ -109,6 +109,22 @@ const EDGE_TYPES = { statusEdge: StatusEdge };
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 const FIT_VIEW_OPTIONS = { padding: 0.08 };
 
+/** Lower bound for the first fit only (BBP-196): with 34 projects, fitting
+ *  the whole tree shrank the cards below reading size. Manual zoom still goes
+ *  down to 0.2, and "Collapse all"/`0` still fit the whole visible tree. */
+export const START_MIN_ZOOM = 0.6;
+
+/** The first fit frames the roots and their direct children, never deeper
+ *  levels, and never zooms out past `START_MIN_ZOOM`. A floor, not a fixed
+ *  zoom: a small tree still fits as large as it would anyway. */
+export function startFitOptions(nodes: readonly CanvasNode[]) {
+  const ids = new Set(nodes.map((n) => n.id));
+  const isRoot = (n: CanvasNode) => n.parentId === null || !ids.has(n.parentId);
+  const rootIds = new Set(nodes.filter(isRoot).map((n) => n.id));
+  const firstLevel = nodes.filter((n) => isRoot(n) || rootIds.has(n.parentId as string));
+  return { ...FIT_VIEW_OPTIONS, nodes: firstLevel.map((n) => ({ id: n.id })), minZoom: START_MIN_ZOOM };
+}
+
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
   expanded: ReadonlySet<string>;
@@ -260,6 +276,9 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
 
+  // React Flow reads these only for its first fit, once the nodes are in.
+  const startFit = useMemo(() => startFitOptions(nodes), [nodes]);
+
   useEffect(() => {
     if (fitRequest === 0) return;
     // A frame later: React Flow takes the new nodes into its store in its
@@ -297,7 +316,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         zoomOnScroll
         panOnScroll={false}
         fitView
-        fitViewOptions={FIT_VIEW_OPTIONS}
+        fitViewOptions={startFit}
         // React Flow's default floor (0.5) is too high for a real tree: two
         // crews with ten members each no longer fit, so the start view and
         // `0` cut off the top instead of showing the whole tree.
