@@ -88,13 +88,12 @@ export async function enrichThreadNodes(
 
 /** The slice of a `ThreadTimelineResponse` row this mapping reads, aligned
  *  with the SDK's real `TimelineRow` union (verified against the
- *  `@get-bb/plugin-sdk` bundled zod schemas and real samples, BBP-206 R2a/b
+ *  `@get-bb/plugin-sdk` bundled zod schemas and real samples, BBP-206 R2a/b/c
  *  — see `bb-canvas/fixtures/real-timeline-rows.json`): `kind` is `"turn"`,
  *  `"conversation"`, `"work"`, or `"system"`. A `"work"` row's `workKind` is
- *  a 16-way discriminated union with *disjoint* fields per kind — this type
- *  only models the four BBP-206 covers (`command`, `tool`, `file-change`,
- *  `delegation`); every other `workKind` falls through to the generic
- *  fallback mapping untouched. */
+ *  a 16-way discriminated union with *disjoint* fields per kind; every kind
+ *  gets its own label and meta fields below (none reads just `"work"`), down
+ *  to the field names the real zod schemas use. */
 export type TimelineRowLike = {
   id: string;
   kind: string;
@@ -158,6 +157,39 @@ export type TimelineRowLike = {
     nextParentThreadId?: string;
     nextParentThreadTitle?: string;
   };
+  /** `workKind: "file-read"` / `"image-view"`: the file opened. Also read by
+   *  `"search"` for a path-scoped search (its own `path` is nullable there). */
+  path?: string | null;
+  /** `workKind: "search"` fields: a grep/glob/list call. */
+  query?: string;
+  mode?: string;
+  /** `workKind: "web-search"` fields. */
+  queries?: readonly string[];
+  /** `workKind: "web-fetch"` fields. */
+  url?: string;
+  /** `workKind: "web-fetch"` / `"image-generation"` fields. */
+  prompt?: string | null;
+  /** `workKind: "image-generation"` fields. */
+  error?: string | null;
+  /** `workKind: "plan-steps"` fields. */
+  explanation?: string | null;
+  steps?: readonly { step: string; status?: string }[];
+  /** `workKind: "extension"` fields, e.g. `"ui/confirm"`. */
+  extensionKind?: string;
+  /** `workKind: "approval"` fields: a file-edit or permission-grant gate. */
+  approvalKind?: string;
+  lifecycle?: string;
+  target?: { itemId?: string; toolName?: string | null };
+  /** `workKind: "form"` / `"question"` shared field. */
+  interactionId?: string;
+  /** `workKind: "form"` fields. */
+  rendererId?: string;
+  /** `workKind: "question"` fields. */
+  questions?: readonly { prompt: string }[];
+  /** `workKind: "workflow"` fields. */
+  workflowName?: string | null;
+  taskType?: string;
+  summary?: string | null;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -208,6 +240,11 @@ function firstUserLine(rows: readonly TimelineRowLike[] | null | undefined): str
   return line || undefined;
 }
 
+function fileName(path: string | null | undefined): string | undefined {
+  if (!path) return undefined;
+  return path.split("/").pop() || path;
+}
+
 function rowLabel(row: TimelineRowLike): string {
   if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
   if (isSubagentRow(row)) return `Agent: ${row.description ?? "(no description)"}`;
@@ -218,16 +255,22 @@ function rowLabel(row: TimelineRowLike): string {
 // The sidebar itself truncates a long value behind a "more" toggle
 // (BBP-206 review round 1) — every meta builder below stores the full
 // value, never a clipped one, so "more" always has the real thing to reveal.
+function timedMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
+  return compact({
+    duration: duration(row.startedAt, row.completedAt),
+    startedAt: formatTimestamp(row.startedAt),
+    completedAt: formatTimestamp(row.completedAt),
+    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+  });
+}
+
 function commandMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
   return compact({
     command: row.command,
     cwd: row.cwd,
     outputPreview: row.outputPreview || row.output || "",
     exitCode: row.exitCode,
-    duration: duration(row.startedAt, row.completedAt),
-    startedAt: formatTimestamp(row.startedAt),
-    completedAt: formatTimestamp(row.completedAt),
-    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+    ...timedMeta(row, threadId),
   });
 }
 
@@ -238,10 +281,7 @@ function toolMeta(row: TimelineRowLike, threadId: string | undefined): Record<st
     toolName: row.toolName,
     ...(isCommandShaped ? { command: argsString } : { toolArgs: argsString }),
     outputPreview: row.outputPreview || row.output || "",
-    duration: duration(row.startedAt, row.completedAt),
-    startedAt: formatTimestamp(row.startedAt),
-    completedAt: formatTimestamp(row.completedAt),
-    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+    ...timedMeta(row, threadId),
   });
 }
 
@@ -253,20 +293,17 @@ function fileChangeMeta(row: TimelineRowLike, threadId: string | undefined): Rec
     diffStats: diffStats ? `+${diffStats.added} -${diffStats.removed}` : undefined,
     stdout: row.stdout || "",
     stderr: row.stderr || "",
-    duration: duration(row.startedAt, row.completedAt),
-    startedAt: formatTimestamp(row.startedAt),
-    completedAt: formatTimestamp(row.completedAt),
-    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+    ...timedMeta(row, threadId),
   });
 }
 
-/** Dispatches a `"work"` row's sidebar fields by `workKind` — the four real
- *  shapes BBP-206 covers have disjoint fields (a shell command's `exitCode`
- *  does not exist on an MCP tool call, a file edit has neither); reading
- *  them through one flat object produced `[object Object]`/empty fields
- *  before (BBP-206 R2b finding 1). Any other `workKind` (11 not covered)
- *  falls through to an empty object — status/summary from the caller still
- *  show, nothing crashes or reads fields that do not exist on it. */
+/** Dispatches a `"work"` row's sidebar fields by `workKind` — every one of
+ *  the real 16 has disjoint fields (a shell command's `exitCode` does not
+ *  exist on an MCP tool call, a file edit has neither); reading them through
+ *  one flat object produced `[object Object]`/empty fields before (BBP-206
+ *  R2b finding 1). A row whose `workKind` this still doesn't recognise (the
+ *  schema evolves) falls through to an empty object — status/summary from
+ *  the caller still show, nothing crashes or reads a field that isn't there. */
 function workMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
   switch (row.workKind) {
     case "command":
@@ -275,23 +312,85 @@ function workMeta(row: TimelineRowLike, threadId: string | undefined): Record<st
       return toolMeta(row, threadId);
     case "file-change":
       return fileChangeMeta(row, threadId);
+    case "file-read":
+    case "image-view":
+      return compact({ path: row.path, ...timedMeta(row, threadId) });
+    case "search":
+      return compact({ query: row.query, mode: row.mode, path: row.path, ...timedMeta(row, threadId) });
+    case "web-search":
+      return compact({ queries: row.queries?.join(", "), ...timedMeta(row, threadId) });
+    case "web-fetch":
+      return compact({ url: row.url, prompt: row.prompt, ...timedMeta(row, threadId) });
+    case "image-generation":
+      return compact({ prompt: row.prompt, error: row.error, ...timedMeta(row, threadId) });
+    case "plan-steps":
+      return compact({
+        explanation: row.explanation,
+        steps: row.steps && row.steps.length > 0 ? row.steps.map((step) => step.step).join(", ") : undefined,
+        ...timedMeta(row, threadId),
+      });
+    case "extension":
+      return compact({ extensionKind: row.extensionKind, ...timedMeta(row, threadId) });
+    case "approval":
+      return compact({
+        approvalKind: row.approvalKind,
+        lifecycle: row.lifecycle,
+        toolName: row.target?.toolName,
+        ...timedMeta(row, threadId),
+      });
+    case "form":
+      return compact({ title: row.title, rendererId: row.rendererId, lifecycle: row.lifecycle, ...timedMeta(row, threadId) });
+    case "question":
+      return compact({
+        lifecycle: row.lifecycle,
+        questions: row.questions && row.questions.length > 0 ? row.questions.map((question) => question.prompt).join(", ") : undefined,
+        ...timedMeta(row, threadId),
+      });
+    case "workflow":
+      return compact({ workflowName: row.workflowName, taskType: row.taskType, summary: row.summary, ...timedMeta(row, threadId) });
     default:
       return {};
   }
 }
 
-/** The card label for a `"work"` row, by `workKind`. Delegation is handled
- *  by `rowLabel`'s subagent branch before this is ever reached. */
+/** The card label for a `"work"` row, by `workKind` — never just `"work"`
+ *  (BBP-206 R2 review). Delegation is handled by `rowLabel`'s subagent
+ *  branch before this is ever reached. A `workKind` this doesn't recognise
+ *  (the schema evolves) falls back to `rowLabel`'s generic tool-name-or-kind
+ *  reading — not a crash, not an empty card. */
 function workLabel(row: TimelineRowLike): string {
   switch (row.workKind) {
     case "command":
       return row.command ? truncate(row.command, 48) : row.kind;
     case "tool":
       return row.toolName ?? row.kind;
-    case "file-change": {
-      const path = row.change?.path;
-      return path ? (path.split("/").pop() ?? path) : row.kind;
-    }
+    case "file-change":
+      return fileName(row.change?.path) ?? row.kind;
+    case "file-read":
+    case "image-view":
+      return fileName(row.path) ?? row.kind;
+    case "search":
+      return row.query ? truncate(row.query, 48) : row.kind;
+    case "web-search":
+      return row.queries?.[0] ? truncate(row.queries[0], 48) : row.kind;
+    case "web-fetch":
+      return row.url ? truncate(row.url, 48) : row.kind;
+    case "image-generation":
+      return row.prompt ? truncate(row.prompt, 48) : "Image";
+    case "plan-steps":
+      return row.explanation ? truncate(row.explanation, 48) : "Plan";
+    case "extension":
+      return row.extensionKind ?? row.kind;
+    case "approval":
+      return row.approvalKind === "permission-grant"
+        ? truncate(`Permission: ${row.target?.toolName ?? "?"}`, 48)
+        : truncate(`Approve: ${row.target?.toolName ?? "edit"}`, 48);
+    case "form":
+      return row.title ?? row.kind;
+    case "question":
+      return row.questions?.[0]?.prompt ? truncate(row.questions[0].prompt, 48) : "Question";
+    case "workflow":
+      return row.workflowName || row.description || row.kind;
     default:
       return rowLabel(row);
   }

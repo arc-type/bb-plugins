@@ -402,12 +402,107 @@ describe("work row mapping: workKind file-change (BBP-206 R2b)", () => {
   });
 });
 
-describe("work row mapping: unknown workKind falls through safely (BBP-206 R2b)", () => {
-  it("does not crash and never renders a stringified object for one of the 11 uncovered workKinds", () => {
+describe("work row mapping: the other 12 workKinds (BBP-206 R2)", () => {
+  it("search: labels by the query, curates query/mode/path", () => {
     const { nodes } = timelineToCanvas("t1", {
-      rows: [{ id: "w1", kind: "work", workKind: "web-search", status: "completed", toolName: "WebSearch" }],
+      rows: [{ id: "w1", kind: "work", workKind: "search", query: "tagFilter", mode: "content", path: "components" }],
     });
-    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "WebSearch", meta: { status: "completed" } });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "tagFilter", meta: { query: "tagFilter", mode: "content", path: "components" } });
+  });
+
+  it("web-search: labels by the first query, curates all of them", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "web-search", queries: ["bb canvas timeline", "sdk timeline row"] }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "bb canvas timeline" });
+    expect(nodes[0]!.meta).toMatchObject({ queries: "bb canvas timeline, sdk timeline row" });
+  });
+
+  it("web-fetch: labels by the url, curates url and prompt", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "web-fetch", url: "https://example.com/docs", prompt: "find the API" }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "https://example.com/docs", meta: { url: "https://example.com/docs", prompt: "find the API" } });
+  });
+
+  it("file-read: labels by the file name, curates the path (the human-reported gap)", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "w1", kind: "work", workKind: "file-read", path: "/repo/AGENTS.md" }] });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "AGENTS.md", meta: { path: "/repo/AGENTS.md" } });
+  });
+
+  it("image-view: labels by the file name, curates the path", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "w1", kind: "work", workKind: "image-view", path: "/tmp/screenshot.png" }] });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "screenshot.png", meta: { path: "/tmp/screenshot.png" } });
+  });
+
+  it("image-generation: labels by the prompt, curates prompt and error", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "image-generation", prompt: "a line-art icon of a canvas node", error: null }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "a line-art icon of a canvas node", meta: { prompt: "a line-art icon of a canvas node" } });
+    expect(nodes[0]!.meta).not.toHaveProperty("error");
+  });
+
+  it("plan-steps: labels by the explanation, curates the step list", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "w1",
+          kind: "work",
+          workKind: "plan-steps",
+          explanation: "Ship the fix in three steps",
+          steps: [{ step: "Reproduce" }, { step: "Fix" }, { step: "Test" }],
+        },
+      ],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "Ship the fix in three steps" });
+    expect(nodes[0]!.meta).toMatchObject({ steps: "Reproduce, Fix, Test" });
+  });
+
+  it("extension: labels by its extensionKind", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "w1", kind: "work", workKind: "extension", extensionKind: "ui/confirm" }] });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "ui/confirm", meta: { extensionKind: "ui/confirm" } });
+  });
+
+  it("approval: labels a file-edit gate and a permission-grant gate differently", () => {
+    const edit = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "approval", approvalKind: "file-edit", lifecycle: "waiting", target: { toolName: "Edit" } }],
+    });
+    expect(edit.nodes[0]!.label).toBe("Approve: Edit");
+    const grant = timelineToCanvas("t1", {
+      rows: [{ id: "w2", kind: "work", workKind: "approval", approvalKind: "permission-grant", lifecycle: "pending", target: { toolName: "Bash" } }],
+    });
+    expect(grant.nodes[0]!.label).toBe("Permission: Bash");
+    expect(grant.nodes[0]!.meta).toMatchObject({ lifecycle: "pending", toolName: "Bash" });
+  });
+
+  it("form: labels by its title", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "form", title: "Pick a deploy target", rendererId: "deploy-picker", lifecycle: "pending" }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "Pick a deploy target", meta: { rendererId: "deploy-picker", lifecycle: "pending" } });
+  });
+
+  it("question: labels by the first question's prompt, curates all of them", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "question", lifecycle: "pending", questions: [{ prompt: "Which library?" }, { prompt: "Why?" }] }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "Which library?" });
+    expect(nodes[0]!.meta).toMatchObject({ questions: "Which library?, Why?" });
+  });
+
+  it("workflow: labels by its workflowName, falling back to description", () => {
+    const named = timelineToCanvas("t1", { rows: [{ id: "w1", kind: "work", workKind: "workflow", workflowName: "release-review", taskType: "review" }] });
+    expect(named.nodes[0]!.label).toBe("release-review");
+    const unnamed = timelineToCanvas("t1", { rows: [{ id: "w2", kind: "work", workKind: "workflow", workflowName: null, description: "Review the diff" }] });
+    expect(unnamed.nodes[0]!.label).toBe("Review the diff");
+  });
+
+  it("falls back to the generic tool-name-or-kind reading for a workKind this mapping has never seen, without crashing or stringifying an object", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "future-kind-not-yet-modeled", status: "completed", toolName: "SomeNewTool" }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "SomeNewTool", meta: { status: "completed" } });
     for (const value of Object.values(nodes[0]!.meta!)) expect(String(value)).not.toContain("[object Object]");
   });
 });
@@ -712,10 +807,12 @@ describe("BBP-206 R2b acceptance: real timeline fixtures", () => {
     expect(nodes.some((node) => node.parentId === subagent.id)).toBe(true);
   });
 
-  it("workFileRead: no crash, no toolArgs/command/exitCode field that isn't in the schema", () => {
+  it("workFileRead: labels by the file name, curates the path, no toolArgs/command/exitCode field that isn't in the schema", () => {
     const row = fixtures.workFileRead as TimelineRowLike;
     const { nodes } = timelineToCanvas("t1", { rows: [row] });
     expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("AGENTS.md");
+    expect(nodes[0]!.meta).toMatchObject({ path: (fixtures.workFileRead as Record<string, string>).path });
     for (const key of ["toolArgs", "command", "exitCode"]) expect(nodes[0]!.meta).not.toHaveProperty(key);
   });
 
