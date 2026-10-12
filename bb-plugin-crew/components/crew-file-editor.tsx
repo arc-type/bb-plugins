@@ -17,6 +17,7 @@ import {
 import type { rpcContract } from "../server";
 import { formatPlan, type PlanLine, type ProblemLine } from "../lib/format";
 import { PERMISSIONS, validateCrew } from "../lib/spec";
+import { CrewFrameEditor } from "./crew-frame-editor";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +107,7 @@ export function setYamlValue(text: string, path: (string | number)[], value: str
 export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectId: string; initialYaml: string; onApplied?: () => void }) {
   const rpc = useRpc<typeof rpcContract>();
   const [text, setText] = useState(initialYaml);
+  const [mode, setMode] = useState<"canvas" | "yaml">("yaml");
   const [view, setView] = useState<"yaml" | "form">("yaml");
   const [confirmFull, setConfirmFull] = useState(false);
   const [plan, setPlan] = useState<{ items: PlanLine[]; problems: ProblemLine[] } | null>(null);
@@ -153,6 +155,33 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
   return (
     <div className="flex flex-col gap-3" aria-label="Crew file editor">
       <div className="flex items-center gap-3">
+        <div className="inline-flex overflow-hidden rounded-md border border-border" role="tablist" aria-label="Crew file tab">
+          {(["canvas", "yaml"] as const).map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              role="tab"
+              aria-selected={mode === entry}
+              className={cn("px-2.5 py-1 text-xs", mode === entry ? "bg-muted text-foreground" : "text-muted-foreground")}
+              onClick={() => setMode(entry)}
+            >
+              {entry === "canvas" ? "Canvas" : "YAML"}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-muted-foreground">Two views of the same file.</span>
+      </div>
+      {mode === "canvas" ? (
+        <CrewFrameEditor
+          yaml={text}
+          onChange={(next) => {
+            setText(next);
+            setApplied(null);
+          }}
+        />
+      ) : (
+        <>
+      <div className="flex items-center gap-3">
         <div className="inline-flex overflow-hidden rounded-md border border-border" role="tablist" aria-label="Editor view">
           {(["yaml", "form"] as const).map((entry) => (
             <button
@@ -163,7 +192,7 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
               className={cn("px-2.5 py-1 text-xs", view === entry ? "bg-muted text-foreground" : "text-muted-foreground")}
               onClick={() => setView(entry)}
             >
-              {entry === "yaml" ? "YAML" : "Form"}
+              {entry === "yaml" ? "Text" : "Form"}
             </button>
           ))}
         </div>
@@ -259,6 +288,8 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
           ) : null}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

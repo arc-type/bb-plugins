@@ -34,6 +34,21 @@ export type CrewFrameEditorProps = {
 
 export function CrewFrameEditor({ yaml, onChange, ExecutionPicker = DefaultPicker }: CrewFrameEditorProps) {
   const model = editorModel(yaml);
+  if (!model) return <p>The crew file does not parse.</p>;
+  return <CrewFrameEditorView yaml={yaml} model={model} onChange={onChange} ExecutionPicker={ExecutionPicker} />;
+}
+
+function CrewFrameEditorView({
+  yaml,
+  model,
+  onChange,
+  ExecutionPicker,
+}: {
+  yaml: string;
+  model: NonNullable<ReturnType<typeof editorModel>>;
+  onChange: (yaml: string) => void;
+  ExecutionPicker: ComponentType<ExecutionPickerProps>;
+}) {
   const validation = validateCrew(yaml);
   const errors = validation.problems.filter((problem) => problem.level === "error");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
