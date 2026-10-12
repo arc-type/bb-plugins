@@ -100,6 +100,12 @@ export type CanvasViewProps = {
   /** Persists expand/collapse under `bb-canvas:expanded:<surface>` (BBP-183).
    *  Absent: nothing is stored, `initialExpanded` applies on every mount. */
   surface?: string;
+  /** Identifies the current node/edge set — a new project filter selection,
+   *  say. A change resets expansion, selection, loaded children and the edit
+   *  mode back to a fresh view (BBP-215), without remounting `CanvasView`
+   *  itself: a caller-supplied `toolbar` (the project filter) keeps its own
+   *  open/search state across the change instead of being torn down with it. */
+  resetKey?: string | null;
   /** Page-owned controls shown in the toolbar beside the colour toggle —
    *  the project filter, say (BBP-181). */
   toolbar?: ReactNode;
@@ -126,6 +132,7 @@ export function CanvasView({
   canLoadChildren,
   loadDetails,
   surface,
+  resetKey,
   toolbar,
   onOpenThread,
   onOpenRun,
@@ -156,6 +163,26 @@ export function CanvasView({
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
   const loading = useRef<Set<string>>(new Set());
   const shellRef = useRef<CanvasShellHandle>(null);
+  const lastResetKey = useRef(resetKey);
+
+  // A changed `resetKey` is a new node/edge set (e.g. the project filter),
+  // and gets the same fresh view a remount used to give it — but by
+  // resetting this state in place, `toolbar` is never unmounted with it.
+  // Skipped on the first render: the initial `useState` calls above already
+  // computed the right starting values for the initial `resetKey`.
+  useEffect(() => {
+    if (lastResetKey.current === resetKey) return;
+    lastResetKey.current = resetKey;
+    setExpanded(restoreExpanded(initialExpanded ?? [], surface === undefined ? null : loadExpandedState(surface)));
+    setSelectedId(null);
+    setDetails(new Map());
+    detailsRequested.current = new Set();
+    setLoaded(new Map());
+    setFailedLoads(new Set());
+    setEditingFrameId(null);
+    setFitRequest((count) => count + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
 
   function toggleColorMode() {
     setColorMode((prev) => {
