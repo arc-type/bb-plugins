@@ -124,6 +124,62 @@ describe("the canvas page", () => {
     expect(screen.queryByRole("button", { name: new RegExp("^Read") })).toBeNull();
   });
 
+  // BBP-196 Teil A: the real SDK never nests a turn row's steps under
+  // `children` (that field is always `null`) — they are fetched lazily via
+  // `timelineTurnSummaryDetails`, the same lazy mechanism threads already use.
+  it("lazily loads a turn's steps via timelineTurnSummaryDetails, once the turn node is opened", async () => {
+    const timeline = () => ({
+      rows: [
+        {
+          id: "turn-1",
+          kind: "turn",
+          turnId: "turn-1",
+          status: "completed",
+          summaryCount: 1,
+          sourceSeqStart: 10,
+          sourceSeqEnd: 20,
+          completedAt: 1700000000000,
+          children: null,
+        },
+      ],
+    });
+    const calls: unknown[] = [];
+    const timelineTurnSummaryDetails = async (args: unknown) => {
+      calls.push(args);
+      return { rows: [{ id: "tool-1", kind: "work", workKind: "tool", toolName: "Bash", status: "completed" }] };
+    };
+    canvasPanel({ sdk: { threads: { timeline, timelineTurnSummaryDetails } } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    const turnCard = await screen.findByRole("button", { name: new RegExp("^Turn · 1 step") });
+    fireEvent.click(turnCard);
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: new RegExp("^Bash") })).toBeTruthy();
+    expect(calls).toEqual([{ threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" }]);
+  });
+
+  // Negative case: a turn without steps gets no chevron, so it never calls
+  // `timelineTurnSummaryDetails` and reacts to Enter the way a leaf does.
+  it("gives a turn with no steps no chevron, so Enter does nothing", async () => {
+    const timeline = () => ({
+      rows: [
+        { id: "turn-1", kind: "turn", turnId: "turn-1", status: "completed", summaryCount: 0, sourceSeqStart: 10, sourceSeqEnd: 10, children: null },
+      ],
+    });
+    let detailsCalled = false;
+    const timelineTurnSummaryDetails = async () => {
+      detailsCalled = true;
+      return { rows: [] };
+    };
+    canvasPanel({ sdk: { threads: { timeline, timelineTurnSummaryDetails } } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    const turnCard = await screen.findByRole("button", { name: new RegExp("^Turn · 0 steps") });
+    fireEvent.click(turnCard);
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(detailsCalled).toBe(false);
+  });
+
   // BBP-173, measured in BB: on the nav-panel route `/plugins/<id>/canvas`
   // the host's context carries no projectId, even when opened from a project.
   it("takes the project from the subPath when the host context has none", async () => {

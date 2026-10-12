@@ -15,7 +15,7 @@ import {
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
-import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import { threadNodeFor, timelineToCanvas, turnDetailsToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { useOpenRun } from "./run-card";
 import type { rpcContract } from "../server";
@@ -129,15 +129,39 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       edges={layer.edges}
       initialExpanded={layer.expanded}
       surface="canvas"
-      // Only a thread has children to fetch; every other card without
-      // children is a leaf and gets no chevron (BBP-183).
-      canLoadChildren={(node) => node.kind === "thread" && typeof node.meta?.threadId === "string"}
+      // A thread always has children to fetch; a turn only if it has steps
+      // (`summaryCount > 0`) — every other card without children is a leaf
+      // and gets no chevron (BBP-183).
+      canLoadChildren={(node) =>
+        (node.kind === "thread" && typeof node.meta?.threadId === "string") ||
+        (node.kind === "turn" && typeof node.meta?.summaryCount === "number" && node.meta.summaryCount > 0)
+      }
       loadChildren={async (node) => {
-        if (node.kind !== "thread") return { nodes: [] };
-        const threadId = node.meta?.threadId;
-        if (typeof threadId !== "string") return { nodes: [] };
-        const response = await sdk.threads.timeline({ threadId });
-        return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+        if (node.kind === "thread") {
+          const threadId = node.meta?.threadId;
+          if (typeof threadId !== "string") return { nodes: [] };
+          const response = await sdk.threads.timeline({ threadId });
+          return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+        }
+        if (node.kind === "turn") {
+          const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};
+          if (
+            typeof threadId !== "string" ||
+            typeof turnId !== "string" ||
+            typeof sourceSeqStart !== "number" ||
+            typeof sourceSeqEnd !== "number"
+          ) {
+            return { nodes: [] };
+          }
+          const response = await sdk.threads.timelineTurnSummaryDetails({
+            threadId,
+            turnId,
+            sourceSeqStart: String(sourceSeqStart),
+            sourceSeqEnd: String(sourceSeqEnd),
+          });
+          return turnDetailsToCanvas(node.id, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+        }
+        return { nodes: [] };
       }}
       // BBP-179: a thread's sidebar shows BB's status, provider, model, times
       // and turn count, not just its id — loaded once, on first selection.
