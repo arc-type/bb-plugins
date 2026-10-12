@@ -10,7 +10,7 @@ import { EMPTY_LAYER, mergeLayers, projectNodeId, withRoots, type CanvasLayer } 
 import type { CanvasEdge, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
 import { formatTimestamp } from "../vendor/bb-canvas/lib/format";
 import { END_NODE, START_NODE, type Graph } from "./graph";
-import { now, taken } from "./edge-state";
+import { now } from "./edge-state";
 import { layoutGraph } from "./layout";
 
 type RunStatus = "running" | "stopping" | "waiting-human" | "done" | "failed" | "stopped";
@@ -123,17 +123,15 @@ function addRun(layer: CanvasLayer, run: CanvasRun, parentId: string): void {
 
   // Only loops are declared: the tree already draws run → step, and forward
   // edges between steps are graph-studio's own detail view.
-  // Their state comes from the same derivation the legacy canvas uses, so a
-  // skipped attempt never makes a loop "taken" here either.
+  // A finished loop stays neutral (BBP-214 stage 1: "taken" removed) — only
+  // one currently running its second attempt lights up as "now".
   const pseudo = new Set([START_NODE, END_NODE]);
-  const takenKeys = taken(run);
   const nowKeys = now(run);
   for (const edge of layoutGraph(run.graph).edges) {
     if (!edge.isBack || pseudo.has(edge.from) || pseudo.has(edge.to)) continue;
     const back: CanvasEdge = { from: stepNodeId(run.id, edge.from), to: stepNodeId(run.id, edge.to), variant: "back" };
     if (edge.label) back.label = edge.label;
     if (nowKeys.has(edge.key)) back.state = "now";
-    else if (takenKeys.has(edge.key)) back.state = "taken";
     layer.edges.push(back);
   }
 }

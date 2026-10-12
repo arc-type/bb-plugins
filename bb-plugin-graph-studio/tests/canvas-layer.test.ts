@@ -127,12 +127,12 @@ describe("back-edge state (BBP-146 AC 7)", () => {
       { nodeId: "a", attempt: 2, status: target },
     ] })], new Map()).edges;
 
-  it("is now while the loop's target runs its second attempt, taken once it finished", () => {
+  it("is 'now' only while the loop's target runs its second attempt", () => {
     expect(loop("running")).toEqual([{ from: "step:r1:c", to: "step:r1:a", variant: "back", label: "retry", state: "now" }]);
-    expect(loop("done")).toEqual([{ from: "step:r1:c", to: "step:r1:a", variant: "back", label: "retry", state: "taken" }]);
   });
 
-  it("negative: a first attempt only, or a skipped second one, leaves the back edge without state", () => {
+  it("negative: a finished loop, a first attempt only, or a skipped second one, leaves the back edge without state (BBP-214 stage 1: 'taken' removed)", () => {
+    expect(loop("done")[0]).not.toHaveProperty("state");
     expect(loop("skipped")[0]).not.toHaveProperty("state");
     const first = graphCanvasLayer("p1", [run({ nodeRuns: [{ nodeId: "a", attempt: 1, status: "running" }] })], new Map()).edges;
     expect(first[0]).not.toHaveProperty("state");
