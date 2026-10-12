@@ -67,7 +67,12 @@ export type CanvasEdge = {
   relation?: boolean;
   /** Set by `relationsView` when a node is selected. */
   emphasis?: CanvasEdgeEmphasis;
+  /** The single links a bundled relation edge stands for (BBP-201/203), by
+   *  node id — what the sidebar lists per kind. */
+  links?: readonly RelationLink[];
 };
+
+export type RelationLink = { from: string; to: string; kind: string };
 
 export type CanvasEdgeEmphasis = "highlight" | "dim";
 

@@ -16,7 +16,7 @@ import {
   withToggle,
   type ExpandedState,
 } from "../lib/expanded-state";
-import { loadRelations, relationsView, saveRelations } from "../lib/relations";
+import { loadRelations, outgoingRelations, relationsView, saveRelations } from "../lib/relations";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const COLOR_MODE_KEY = "bb-canvas:colour-mode";
@@ -537,6 +537,8 @@ export function CanvasView({
                   onOpenThread={onOpenThread}
                   onOpenRun={onOpenRun}
                   onOpenCrew={onOpenCrew}
+                  relations={hasRelations ? outgoingRelations(allEdges, selected.id, byId) : undefined}
+                  onSelect={select}
                 />
               )
             : null}

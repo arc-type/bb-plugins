@@ -2,7 +2,7 @@
 // BBP-202: the "Relations" toggle in CanvasView's toolbar. jsdom draws no
 // React Flow edges, so the shell is stubbed to report the edges it gets.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { forwardRef } from "react";
 import type { CanvasEdge, CanvasNode } from "@/lib/types";
 
@@ -23,7 +23,7 @@ const nodes: CanvasNode[] = [
   { id: "a", kind: "member", label: "lead", parentId: "crew" },
   { id: "b", kind: "member", label: "dev", parentId: "crew" },
 ];
-const ab: CanvasEdge = { from: "a", to: "b", variant: "flow", label: "assigns_to", relation: true };
+const ab: CanvasEdge = { from: "a", to: "b", variant: "flow", label: "assigns_to", relation: true, links: [{ from: "a", to: "b", kind: "assigns_to" }] };
 const message: CanvasEdge = { from: "b", to: "a", variant: "message", label: "2" };
 
 const view = (surface = "s", edges = [ab, message]) =>
@@ -62,5 +62,15 @@ describe("Relations toggle", () => {
   it("negative: no toggle when there are no relation edges", () => {
     view("s", [message]);
     expect(screen.queryByRole("button", { name: "Relations" })).toBeNull();
+  });
+
+  it("the sidebar's relation list selects the target node (BBP-203)", () => {
+    view();
+    const root = document.querySelector("[data-canvas-view]")!;
+    fireEvent.keyDown(root, { key: "ArrowDown" });
+    fireEvent.keyDown(root, { key: "ArrowRight" });
+    const list = screen.getByRole("region", { name: "Relations" });
+    fireEvent.click(within(list).getByRole("button", { name: "dev" }));
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("dev");
   });
 });

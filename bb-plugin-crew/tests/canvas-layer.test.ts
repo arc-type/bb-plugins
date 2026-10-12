@@ -21,7 +21,7 @@ describe("crewCanvasLayer", () => {
         meta: { address: "dev@trio", role: "", lead: false, threadId: null, activity: "needs-you" } },
     ]);
     expect(layer.expanded).toEqual(["crew:trio"]);
-    expect(layer.edges).toEqual([]);
+    expect(withoutLinks(layer.edges)).toEqual([]);
     expect(layer.frames).toEqual([{ id: "frame:trio", parentId: null, label: "trio" }]);
     expect(memberNodeId("dev@trio")).toBe("member:dev@trio");
   });
@@ -43,14 +43,14 @@ describe("crewCanvasLayer", () => {
       const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio, {
         trio: [{ from: "lead", to: "dev", kind: "assigns_to" }],
       });
-      expect(layer.edges).toEqual([{ from: "member:lead@trio", to: "member:dev@trio", variant: "flow", label: "assigns_to", relation: true }]);
+      expect(withoutLinks(layer.edges)).toEqual([{ from: "member:lead@trio", to: "member:dev@trio", variant: "flow", label: "assigns_to", relation: true }]);
     });
 
     it("negative: a link naming an unknown member, or a crew with no links entry, yields no edge", () => {
       const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio, {
         trio: [{ from: "lead", to: "ghost", kind: "assigns_to" }],
       });
-      expect(layer.edges).toEqual([]);
+      expect(withoutLinks(layer.edges)).toEqual([]);
       expect(crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio).edges).toEqual([]);
     });
   });
@@ -110,6 +110,9 @@ describe("canvasLayer / canvasPage RPC", () => {
   });
 });
 
+/** The edges as before BBP-203; `links` gets its own test. */
+const withoutLinks = (edges: readonly { links?: unknown }[]) => edges.map(({ links: _links, ...edge }) => edge);
+
 describe("crewTopologyFrame", () => {
   // Shaped like a crew.yaml: lead in group "orch", two devs in "dev", links between them.
   const members = [
@@ -134,7 +137,7 @@ describe("crewTopologyFrame", () => {
 
   it("turns links into edges, the shape from pathBetween picking flow or back", () => {
     const topo = crewTopologyFrame("trio", members, links);
-    expect(topo.edges).toEqual([
+    expect(withoutLinks(topo.edges)).toEqual([
       { from: "member:lead@trio", to: "member:dev-a@trio", variant: "flow", label: "assigns_to", relation: true },
       { from: "member:dev-a@trio", to: "member:dev-b@trio", variant: "flow", label: "works_with", relation: true },
       { from: "member:dev-b@trio", to: "member:lead@trio", variant: "back", label: "escalates_to", relation: true },
@@ -146,8 +149,22 @@ describe("crewTopologyFrame", () => {
       { from: "lead", to: "ghost", kind: "assigns_to" },
       { from: "lead", to: "lead", kind: "works_with" },
     ]);
-    expect(topo.edges).toEqual([]);
+    expect(withoutLinks(topo.edges)).toEqual([]);
     expect(crewTopologyFrame("empty", [], [])).toEqual({ frames: [{ id: "frame:empty", parentId: null, label: "empty" }], nodes: [], edges: [] });
+  });
+
+  it("a bundled edge keeps its single links by node id for the sidebar (BBP-203)", () => {
+    const topo = crewTopologyFrame("trio", members, [
+      { from: "lead", to: "dev-a", kind: "assigns_to" },
+      { from: "dev-a", to: "lead", kind: "escalates_to" },
+      { from: "lead", to: "ghost", kind: "assigns_to" },
+    ]);
+    expect(topo.edges.map((edge) => edge.links)).toEqual([
+      [
+        { from: "member:lead@trio", to: "member:dev-a@trio", kind: "assigns_to" },
+        { from: "member:dev-a@trio", to: "member:lead@trio", kind: "escalates_to" },
+      ],
+    ]);
   });
 
   describe("bundles links per node pair (BBP-201)", () => {
@@ -158,7 +175,7 @@ describe("crewTopologyFrame", () => {
 
     it("one link stays one edge with its kind as label", () => {
       const topo = crewTopologyFrame("t", pair, [{ from: "lead", to: "dev", kind: "assigns_to" }]);
-      expect(topo.edges).toEqual([{ from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to", relation: true }]);
+      expect(withoutLinks(topo.edges)).toEqual([{ from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to", relation: true }]);
     });
 
     it("two opposite links become one edge in the first link's direction, label forward ⇄ back", () => {
@@ -166,7 +183,7 @@ describe("crewTopologyFrame", () => {
         { from: "lead", to: "dev", kind: "assigns_to" },
         { from: "dev", to: "lead", kind: "escalates_to" },
       ]);
-      expect(topo.edges).toEqual([{ from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to ⇄ escalates_to", relation: true }]);
+      expect(withoutLinks(topo.edges)).toEqual([{ from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to ⇄ escalates_to", relation: true }]);
     });
 
     it("several links in the same direction join with commas, duplicates once", () => {
@@ -176,7 +193,7 @@ describe("crewTopologyFrame", () => {
         { from: "lead", to: "dev", kind: "assigns_to" },
         { from: "dev", to: "lead", kind: "escalates_to" },
       ]);
-      expect(topo.edges).toEqual([
+      expect(withoutLinks(topo.edges)).toEqual([
         { from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to, works_with ⇄ escalates_to", relation: true },
       ]);
     });

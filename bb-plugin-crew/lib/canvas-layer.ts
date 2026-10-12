@@ -6,7 +6,7 @@
 // pulls this layer in; crew shows it itself only while graph-studio is not.
 import type { CanvasLayer } from "../vendor/bb-canvas/lib/layer";
 import { projectNodeId } from "../vendor/bb-canvas/lib/layer";
-import type { CanvasEdge, CanvasFrame, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode, CanvasStatus, RelationLink } from "../vendor/bb-canvas/lib/types";
 import { crewLayers, pathBetween, placeLayers, type CrewMemberRef } from "./canvas-layout";
 import type { MemberInfo } from "./contract";
 import type { CrewStatus } from "./store";
@@ -126,23 +126,23 @@ export function crewTopologyFrame(
   });
   // One edge per node pair (BBP-201): the first link sets the direction,
   // links the other way join the label after "⇄".
-  const pairs = new Map<string, { from: string; to: string; forward: Set<string>; back: Set<string> }>();
+  const pairs = new Map<string, { from: string; to: string; forward: Set<string>; back: Set<string>; links: RelationLink[] }>();
   for (const link of links) {
     if (link.from === link.to || !boxes.has(link.from) || !boxes.has(link.to)) continue;
-    const pair = pairs.get(`${link.to}\n${link.from}`);
-    if (pair) pair.back.add(link.kind);
-    else {
-      const key = `${link.from}\n${link.to}`;
-      const own = pairs.get(key) ?? { from: link.from, to: link.to, forward: new Set<string>(), back: new Set<string>() };
-      own.forward.add(link.kind);
-      pairs.set(key, own);
-    }
+    const reverse = pairs.get(`${link.to}\n${link.from}`);
+    const pair = reverse ?? pairs.get(`${link.from}\n${link.to}`) ?? { from: link.from, to: link.to, forward: new Set<string>(), back: new Set<string>(), links: [] };
+    const kinds = reverse ? pair.back : pair.forward;
+    if (kinds.has(link.kind)) continue;
+    kinds.add(link.kind);
+    pair.links.push({ from: nodeId(link.from), to: nodeId(link.to), kind: link.kind });
+    if (!reverse) pairs.set(`${link.from}\n${link.to}`, pair);
   }
   const edges: CanvasEdge[] = [...pairs.values()].map((pair) => ({
     from: nodeId(pair.from),
     to: nodeId(pair.to),
     variant: pathBetween(boxes.get(pair.from)!, boxes.get(pair.to)!).shape === "back" ? "back" : "flow",
     relation: true,
+    links: pair.links,
     label: [[...pair.forward].join(", "), [...pair.back].join(", ")].filter(Boolean).join(" ⇄ "),
   }));
   return { frames: [{ id: frameId, parentId: null, label: crew }], nodes, edges };
