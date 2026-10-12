@@ -113,7 +113,7 @@ describe("the canvas page", () => {
     fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
     fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Bash — ") }));
-    fireEvent.click(screen.getByRole("button", { name: "Open at row" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in thread" }));
     expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "t1" });
   });
 

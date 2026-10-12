@@ -152,7 +152,7 @@ describe("Sidebar actions", () => {
     expect(onOpenCrew).toHaveBeenCalledWith("factory-1");
   });
 
-  it("shows Open at row only when meta.threadId and meta.sourceSeq both exist, and calls onOpenAtRow with them", () => {
+  it("shows Open in thread only when meta.threadId and meta.sourceSeq both exist, and calls onOpenAtRow with them", () => {
     const onOpenAtRow = vi.fn();
     const node: CanvasNode = {
       id: "w1",
@@ -162,11 +162,11 @@ describe("Sidebar actions", () => {
       meta: { threadId: "th1", sourceSeq: 12 },
     };
     render(<Sidebar node={node} onClose={vi.fn()} onOpenAtRow={onOpenAtRow} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open at row" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in thread" }));
     expect(onOpenAtRow).toHaveBeenCalledWith("th1", 12);
   });
 
-  it("shows no Open at row button when meta.sourceSeq is absent", () => {
+  it("shows no Open in thread button when meta.sourceSeq is absent", () => {
     const node: CanvasNode = {
       id: "w1",
       kind: "tool-call",
@@ -175,7 +175,21 @@ describe("Sidebar actions", () => {
       meta: { threadId: "th1" },
     };
     render(<Sidebar node={node} onClose={vi.fn()} onOpenAtRow={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "Open at row" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in thread" })).toBeNull();
+  });
+
+  it("shows only Open in thread, not also Open thread, when the node has a row position", () => {
+    const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { threadId: "th1", sourceSeq: 12 } };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenThread={vi.fn()} onOpenAtRow={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Open in thread" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open thread" })).toBeNull();
+  });
+
+  it("renders a non-zero exit code in the destructive colour and a command as code", () => {
+    const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { command: "npm test", exitCode: 1 } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.getByText("1").closest("dd")?.getAttribute("style")).toContain("var(--destructive)");
+    expect(screen.getByText("npm test").closest("code")).not.toBeNull();
   });
 
   it("shows no action buttons at all when no callback is given", () => {

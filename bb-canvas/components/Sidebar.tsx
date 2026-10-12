@@ -151,17 +151,55 @@ function FieldValue({ value }: { value: string }) {
   );
 }
 
+// Machine text (a shell command, tool input, raw output) reads as code, not
+// prose: monospace on a quiet well, whitespace kept (BBP-206 design).
+const CODE_FIELDS = new Set(["Command", "Input", "Output", "Detail"]);
+
+const CODE_STYLE = {
+  display: "block",
+  margin: 0,
+  padding: "6px 8px",
+  borderRadius: 6,
+  background: "var(--muted)",
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  fontSize: 11,
+  lineHeight: 1.45,
+  whiteSpace: "pre-wrap",
+} as const;
+
+/** A non-zero exit code is the one value on a tool call that says "this
+ *  failed"; it carries the destructive colour, not the body colour. */
+function isFailedExit(field: { label: string; value: string }): boolean {
+  return field.label === "Exit code" && field.value !== "0";
+}
+
 function FieldList({ fields }: { fields: { label: string; value: string }[] }) {
   return (
-    <dl style={{ margin: 0, fontSize: 12, display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 12px", lineHeight: 1.4 }}>
-      {fields.map((field) => (
-        <div key={field.label} style={{ display: "contents" }}>
-          <dt style={{ color: "var(--muted-foreground)" }}>{field.label}</dt>
-          <dd style={{ margin: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>
-            <FieldValue value={field.value} />
-          </dd>
-        </div>
-      ))}
+    <dl style={{ margin: 0, fontSize: 12, display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: "6px 12px", lineHeight: 1.4 }}>
+      {fields.map((field) => {
+        const code = CODE_FIELDS.has(field.label);
+        return (
+          <div key={field.label} style={{ display: "contents" }}>
+            <dt style={{ color: "var(--muted-foreground)", paddingTop: code ? 6 : 0 }}>{field.label}</dt>
+            <dd
+              style={{
+                margin: 0,
+                overflowWrap: "anywhere",
+                whiteSpace: "pre-line",
+                ...(isFailedExit(field) ? { color: "var(--destructive)", fontWeight: 600 } : {}),
+              }}
+            >
+              {code ? (
+                <code style={CODE_STYLE}>
+                  <FieldValue value={field.value} />
+                </code>
+              ) : (
+                <FieldValue value={field.value} />
+              )}
+            </dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
@@ -175,8 +213,9 @@ export type SidebarProps = {
   onOpenRun?: (runId: string) => void;
   /** Shown as "Open crew" only when `meta.crew` is a string. */
   onOpenCrew?: (crew: string) => void;
-  /** Shown as "Open at row" only when `meta.threadId` is a string and
-   *  `meta.sourceSeq` is a number — jumps to that exact timeline position. */
+  /** Shown as "Open in thread" only when `meta.threadId` is a string and
+   *  `meta.sourceSeq` is a number; it then replaces "Open thread", which
+   *  would open the same thread a second way. */
   onOpenAtRow?: (threadId: string, seq: number) => void;
   /** The node's own relations by kind (BBP-203); a target's name selects it
    *  through `onSelect`. Empty or absent: no section. */
@@ -196,12 +235,12 @@ function numberMeta(node: CanvasNode, key: string): number | undefined {
 
 export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect }: SidebarProps) {
   const { curated, details } = curateMeta(node.kind, node.meta);
-  const threadId = onOpenThread ? stringMeta(node, "threadId") : undefined;
   const runId = onOpenRun ? stringMeta(node, "runId") : undefined;
   const crew = onOpenCrew ? stringMeta(node, "crew") : undefined;
   const atRowThreadId = onOpenAtRow ? stringMeta(node, "threadId") : undefined;
   const atRowSeq = onOpenAtRow ? numberMeta(node, "sourceSeq") : undefined;
   const atRow = atRowThreadId !== undefined && atRowSeq !== undefined ? { threadId: atRowThreadId, seq: atRowSeq } : undefined;
+  const threadId = onOpenThread && atRow === undefined ? stringMeta(node, "threadId") : undefined;
   const hasActions = threadId !== undefined || runId !== undefined || crew !== undefined || atRow !== undefined;
   const [width, setWidth] = useState(loadWidth);
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -382,7 +421,7 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, on
           ) : null}
           {atRow !== undefined ? (
             <button type="button" onClick={() => onOpenAtRow?.(atRow.threadId, atRow.seq)} className="bb-canvas-action" style={ACTION_STYLE}>
-              Open at row
+              Open in thread
             </button>
           ) : null}
         </div>

@@ -94,7 +94,7 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   // pill is the status of whatever the thread hangs under, not the thread.
   thread: ["title", "state", "provider", "model", "turns", "created", "updated", "threadId"],
   turn: ["rowId", "firstLine"],
-  "tool-call": ["toolName", "command", "outputPreview", "exitCode", "duration", "startedAt", "completedAt"],
+  "tool-call": ["toolName", "command", "toolArgs", "outputPreview", "exitCode", "duration", "startedAt", "completedAt"],
   subagent: ["status", "summary"],
   "system-event": ["detail", "oldParent", "newParent"],
 };
@@ -126,6 +126,7 @@ const FIELD_LABELS: Record<string, string> = {
   firstLine: "First line",
   toolName: "Tool",
   command: "Command",
+  toolArgs: "Input",
   outputPreview: "Output",
   exitCode: "Exit code",
   duration: "Duration",

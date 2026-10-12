@@ -404,7 +404,7 @@ describe("CanvasView sidebar action wiring (BBP-185)", () => {
     ];
     render(<CanvasView nodes={toolCallNode} initialExpanded={new Set()} onOpenAtRow={onOpenAtRow} />);
     fireEvent.click(card(/^Bash/));
-    fireEvent.click(screen.getByRole("button", { name: "Open at row" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in thread" }));
     expect(onOpenAtRow).toHaveBeenCalledWith("th1", 12);
   });
 });
