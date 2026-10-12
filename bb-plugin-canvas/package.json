@@ -1,0 +1,20 @@
+{
+  "name": "bb-plugin-canvas-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "BBP-174 spike 2: canvas.notify prototype with caller verification on @get-bb/plugin-sdk >= 0.6.15. Not a shippable plugin.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "^0.6.15",
+    "better-sqlite3": ">=12",
+    "cron-parser": "^5.5.0",
+    "hono": "^4.11.9",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1",
+    "zod": "^4.3.6"
+  }
+}
