@@ -33,6 +33,11 @@ describe("done gate (gates.done)", () => {
     const last = store.listTransitions(item.id).at(-1)!;
     expect(last).toMatchObject({ fromState: "claimed", toState: "done" });
     expect(last.note).toContain("Gate green: npm test, npm run lint");
+    const post = store.listChannel(crew.id).at(-1)!;
+    expect(post.body).toContain("npm test");
+    expect(post.body).toContain("npm run lint");
+    expect(post.body).toMatch(/exit 0/);
+    expect(post.body).toMatch(/\d+ms/);
   });
 
   it("red: the first failing command blocks, the item stays claimed, state_since is unchanged, and the member sees command/exit/output", async () => {
@@ -54,6 +59,10 @@ describe("done gate (gates.done)", () => {
     expect(last.note).toContain("npm test");
     expect(last.note).toContain("exit 1");
     expect(last.note).toContain("1 failing test");
+    const post = store.listChannel(crew.id).at(-1)!;
+    expect(post.body).toContain("npm test");
+    expect(post.body).toMatch(/exit 1/);
+    expect(post.body).toMatch(/\d+ms/);
   });
 
   it("126/127 (command could not run) counts as red too", async () => {

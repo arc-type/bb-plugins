@@ -59,6 +59,11 @@ export function createQueue(deps: QueueDeps) {
     return models(crew).members.find((entry) => entry.key === member.key)?.gates ?? [];
   }
 
+  /** A gate run (red or green) is visible in the crew channel feed (BBP-177), command/exit/duration included. */
+  function postGateRun(crew: CrewRow, author: string, body: string): void {
+    store.insertChannel({ id: `cm_${randomBytes(4).toString("hex")}`, crewId: crew.id, author, topic: "gate", body });
+  }
+
   function memberByKey(crew: CrewRow, key: string): MemberRow {
     const member = store.listMembers(crew.id).find((entry) => entry.key === key || entry.address === key);
     if (!member) throw new AddressError(`No member "${key}" in crew ${crew.name}.`);
@@ -176,10 +181,17 @@ export function createQueue(deps: QueueDeps) {
         const failed = outcome.steps.at(-1)!;
         const transitionNote = `Gate red: ${failed.command}\nexit ${failed.code} (${failed.kind}), ${failed.durationMs}ms\n${failed.output}`;
         store.transitionWork(id, { state: "claimed", keepStateSince: true }, actorName(actor), transitionNote);
+        postGateRun(crew, actorName(actor), transitionNote);
         throw new AddressError(`gate failed: ${failed.command} (exit ${failed.code})\n${failed.output}`);
       }
-      const summary = `Gate green: ${outcome.steps.map((step) => step.command).join(", ")}`;
-      return store.transitionWork(id, { state: "done", closureNote: note || null }, actorName(actor), [note, summary].filter(Boolean).join("\n"));
+      const summary = `Gate green: ${outcome.steps.map((step) => `${step.command} (exit ${step.code}, ${step.durationMs}ms)`).join(", ")}`;
+      postGateRun(crew, actorName(actor), summary);
+      return store.transitionWork(
+        id,
+        { state: "done", closureNote: note || null },
+        actorName(actor),
+        [note, `Gate green: ${outcome.steps.map((step) => step.command).join(", ")}`].filter(Boolean).join("\n"),
+      );
     },
 
     fail(crew: CrewRow, actor: Actor, id: string, reason: string): WorkItemRow {
