@@ -142,6 +142,8 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
       aria-label={`Details for ${node.label}`}
       style={{
         position: "relative",
+        // border-box: the clamped value is the width on screen, padding and border included.
+        boxSizing: "border-box",
         width,
         flexShrink: 0,
         borderLeft: "1px solid var(--border)",
