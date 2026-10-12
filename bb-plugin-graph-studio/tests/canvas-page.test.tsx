@@ -170,6 +170,38 @@ describe("the canvas page", () => {
     expect(screen.queryByRole("button", { name: new RegExp("^Read") })).toBeNull();
   });
 
+  // BBP-206 R3: enrichTurnNodes used to run only in the page-level poll
+  // effect, over `layer.nodes` — but a turn node never lives there, only in
+  // CanvasView's own `loaded` state once its thread is expanded, so the
+  // first line never had anything to enrich and the card stayed
+  // "Turn · n steps" forever. Fixed by enriching inside loadChildren, right
+  // when the thread's own expansion creates the turn node — no user action
+  // on the turn itself required.
+  it("a turn's card shows its first line as soon as its thread is expanded, with no turn-level interaction (BBP-206 R3)", async () => {
+    const timeline = () => ({
+      rows: [
+        {
+          id: "turn-1",
+          kind: "turn",
+          turnId: "turn-1",
+          status: "completed",
+          summaryCount: 1,
+          sourceSeqStart: 10,
+          sourceSeqEnd: 20,
+          children: null,
+        },
+      ],
+    });
+    const timelineTurnSummaryDetails = async () => ({
+      rows: [{ id: "c1", kind: "conversation", role: "user", text: "Fix the login bug" }],
+    });
+    canvasPanel({ sdk: { threads: { timeline, timelineTurnSummaryDetails } } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: new RegExp("^Fix the login bug · 1 step") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^Turn · 1 step") })).toBeNull();
+  });
+
   // BBP-196 Teil A: the real SDK never nests a turn row's steps under
   // `children` (that field is always `null`) — they are fetched lazily via
   // `timelineTurnSummaryDetails`, the same lazy mechanism threads already use.
@@ -201,7 +233,14 @@ describe("the canvas page", () => {
     fireEvent.click(turnCard);
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
     expect(await screen.findByRole("button", { name: new RegExp("^Bash") })).toBeTruthy();
-    expect(calls).toEqual([{ threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" }]);
+    // Twice with the same coordinates: once eagerly when the thread's own
+    // loadChildren creates this turn node (BBP-206 R3's enrichTurnNodes call,
+    // looking for a firstLine — this fixture's steps have none, so the label
+    // stays "Turn · 1 step"), and once when the user actually opens it.
+    expect(calls).toEqual([
+      { threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" },
+      { threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" },
+    ]);
   });
 
   // Negative case: a turn without steps gets no chevron, so it never calls

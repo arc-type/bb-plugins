@@ -3,7 +3,7 @@
 // Studio owns this page whenever it is active — see `app.tsx` — and pulls
 // crew's layer in through the `canvasLayer` RPC, server-side. Being the page
 // BB actually shows, it is also the one that live-reloads (BBP-197).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { ProjectFilter } from "../vendor/bb-canvas/components/ProjectFilter";
@@ -72,6 +72,25 @@ function turnFirstLinePort(sdk: ReturnType<typeof useSdk>): TurnFirstLinePort {
   };
 }
 
+/** Carries a thread node's own enrichment (title/state/provider) over from
+ *  the previous poll's result onto this poll's freshly built node of the
+ *  same id — a poll rebuilds every node from scratch, so without this every
+ *  thread is re-fetched every 5s (`POLL_MS`) forever, rather than once.
+ *  `enrichThreadNodes`'s own already-enriched check (state/provider present)
+ *  would skip the re-fetch regardless, but carrying the result over here
+ *  means the title is on screen immediately, not just after this poll's
+ *  fetch resolves. (A turn's first line has no page-level equivalent of this
+ *  — see `loadChildren`'s own `enrichTurnNodes` call instead.) */
+function carryOverEnrichment(freshNodes: readonly CanvasNode[], previous: readonly CanvasNode[]): CanvasNode[] {
+  const previousById = new Map(previous.map((node) => [node.id, node]));
+  return freshNodes.map((node) => {
+    if (node.kind !== "thread") return node;
+    const known = previousById.get(node.id);
+    if (!known || (known.meta?.state === undefined && known.meta?.provider === undefined)) return node;
+    return { ...node, label: known.label, meta: { ...node.meta, ...known.meta } };
+  });
+}
+
 /** Every project the filter can offer. If the list cannot be read, the
  *  project the page was opened for is still shown on its own — its label
  *  comes from the server's layer either way. */
@@ -112,6 +131,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  // The last fully-known node list, kept outside state so `load` can read it
+  // synchronously on the very next poll without becoming an effect
+  // dependency (BBP-206 R3) — see `carryOverEnrichment`.
+  const enrichedNodesRef = useRef<readonly CanvasNode[]>([]);
 
   const choose = (ids: string[]) => {
     setSelected(ids);
@@ -124,6 +147,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     // Only a new project set clears the page; a poll swaps the layer in
     // place, so the view keeps its selection, cards and viewport (BBP-200).
     setLayer(null);
+    enrichedNodesRef.current = [];
     const load = (initial: boolean) =>
       Promise.all(shown.map((projectId) => rpc.call("canvasLayer", { projectId }))).then(
         (results) => {
@@ -133,22 +157,21 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
           const page = mergeLayers(
             ...results.map((result) => ({ nodes: result.nodes, edges: result.edges, expanded: result.expanded })),
           );
-          const nodes = withThreadNodes(page.nodes);
+          const nodes = carryOverEnrichment(withThreadNodes(page.nodes), enrichedNodesRef.current);
+          enrichedNodesRef.current = nodes;
           setLayer({
             nodes,
             edges: [...page.edges],
             expanded: new Set(page.expanded),
           });
           setError(null);
-          // Sequential, not parallel: both resolve against the same `nodes`
-          // snapshot and each replaces the whole array in `setLayer` — run in
-          // parallel, whichever settles last would silently undo the other's
-          // enrichment.
-          void enrichThreadNodes(page.nodes, nodes, threadTitlePort(sdk))
-            .then((afterThreads) => enrichTurnNodes(afterThreads, turnFirstLinePort(sdk)))
-            .then((afterTurns) => {
-              if (!cancelled) setLayer((prev) => (prev ? { ...prev, nodes: afterTurns } : prev));
-            });
+          // Thread title/state/provider only — a turn's first line is
+          // enriched in `loadChildren` instead, the moment its node exists
+          // (BBP-206 R3); this page-level pass never sees turn nodes at all.
+          void enrichThreadNodes(page.nodes, nodes, threadTitlePort(sdk)).then((afterThreads) => {
+            enrichedNodesRef.current = afterThreads;
+            if (!cancelled) setLayer((prev) => (prev ? { ...prev, nodes: afterThreads } : prev));
+          });
         },
         (cause: unknown) => {
           // A failed poll keeps the last good tree on screen; only the
@@ -201,7 +224,14 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
           const threadId = node.meta?.threadId;
           if (typeof threadId !== "string") return { nodes: [] };
           const response = await sdk.threads.timeline({ threadId });
-          return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+          const result = timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+          // A turn row never carries its own first line on this page (BBP-206
+          // R3: turn `children` is always null here); enrich it the moment
+          // its node is created. A page-level poll pass can't do this — turn
+          // nodes live only in CanvasView's own `loaded` state once expanded,
+          // never in `layer.nodes`, so it would never find any to enrich.
+          const nodes = await enrichTurnNodes(result.nodes, turnFirstLinePort(sdk));
+          return { ...result, nodes };
         }
         if (node.kind === "turn") {
           const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};

@@ -66,7 +66,15 @@ export async function enrichThreadNodes(
       const threadId = parent.meta?.threadId;
       if (typeof threadId !== "string" || threadId === "") return;
       const id = threadNodeId(threadId);
-      if (!byId.has(id)) return;
+      const existing = byId.get(id);
+      if (!existing) return;
+      // Already enriched (a poll rebuilds every node from scratch, but a
+      // caller that carries enrichment over between polls hands back the
+      // same node) — state/provider are always set once a thread has been
+      // read successfully, even when it has no title of its own (BBP-206 R3:
+      // re-fetching every thread on every 5s poll starved `enrichTurnNodes`
+      // of time to ever finish before the next poll reset the tree).
+      if (existing.meta?.state !== undefined || existing.meta?.provider !== undefined) return;
       try {
         const thread = await port.get(threadId);
         const title = thread.title || thread.titleFallback || undefined;
@@ -423,11 +431,11 @@ function rowNodes(row: TimelineRowLike, parentId: string, threadId?: string): Ca
   return [node, ...children];
 }
 
-/** An error, or an operation that says what happened, stands on its own;
- *  `reasoning` always bundles even though it always has a `detail` (BBP-206
- *  R2b finding 6 — a reasoning-heavy turn produced dozens of single-row
- *  "Thought" nodes before this exclusion). Every other minor system row is
- *  noise worth one bundled node. */
+/** An error, or an operation that says what happened, stands on its own.
+ *  `reasoning` rows never reach here — `mapRows` pulls every one of them out
+ *  into `thoughtsNode` first — but the check stays as a defensive no-op in
+ *  case that ever changes. Every other minor system row is noise worth one
+ *  bundled node. */
 function isOwnSystemEvent(row: TimelineRowLike): boolean {
   if (row.systemKind === "error") return true;
   if (row.systemKind !== "operation") return false;
@@ -459,7 +467,12 @@ function systemEventNode(row: TimelineRowLike, parentId: string): CanvasNode {
   };
 }
 
+/** A bundle that collapses to exactly one row still shows that row's own
+ *  title as its label (BBP-206 R3) — a lone "1 system event" node hides its
+ *  only content behind the collapsed Details block for no reason; only a
+ *  genuinely titleless row falls back to the generic count label. */
 function bundledSystemNode(rows: readonly TimelineRowLike[], parentId: string): CanvasNode {
+  if (rows.length === 1 && rows[0]!.title) return systemEventNode(rows[0]!, parentId);
   const titles = rows.map((row) => row.title).filter((title): title is string => !!title);
   return {
     id: `row:${rows[0]!.id}`,
@@ -470,15 +483,43 @@ function bundledSystemNode(rows: readonly TimelineRowLike[], parentId: string): 
   };
 }
 
-/** Maps sibling rows, bundling each run of consecutive minor system rows. */
+/** A reasoning ("thought") row — `operationKind: "reasoning"`. In a real
+ *  turn these interleave with tool calls rather than running consecutively,
+ *  so run-based bundling left each one standing alone: 85 separate
+ *  "1 system event" nodes per turn in practice (BBP-206 R3). Every thought
+ *  in one sibling list (one turn, or the thread-level list) is pulled out
+ *  and bundled together regardless of where it sits among the others. */
+function isReasoningRow(row: TimelineRowLike): boolean {
+  return row.kind === "system" && row.systemKind === "operation" && row.operationKind === "reasoning";
+}
+
+function thoughtsNode(rows: readonly TimelineRowLike[], parentId: string): CanvasNode {
+  const starts = rows.map((row) => row.startedAt).filter((value): value is number => typeof value === "number");
+  const ends = rows.map((row) => row.completedAt).filter((value): value is number => typeof value === "number");
+  const span = starts.length > 0 && ends.length > 0 ? duration(Math.min(...starts), Math.max(...ends)) : undefined;
+  const thoughts = rows.map((row) => row.detail || row.title).filter((text): text is string => !!text);
+  return {
+    id: `row:${rows[0]!.id}`,
+    kind: "system-event",
+    label: `${rows.length} ${rows.length === 1 ? "thought" : "thoughts"}${span ? ` · ${span}` : ""}`,
+    parentId,
+    meta: compact({ rowId: rows[0]!.id, ...(thoughts.length > 0 ? { titles: thoughts } : {}) }),
+  };
+}
+
+/** Maps sibling rows: every thought (see `isReasoningRow`) in the list
+ *  bundles into one node regardless of position, then each remaining run of
+ *  consecutive minor system rows bundles as before. */
 function mapRows(rows: readonly TimelineRowLike[], parentId: string, threadId?: string): CanvasNode[] {
-  const nodes: CanvasNode[] = [];
+  const thoughts = rows.filter(isReasoningRow);
+  const rest = thoughts.length > 0 ? rows.filter((row) => !isReasoningRow(row)) : rows;
+  const nodes: CanvasNode[] = thoughts.length > 0 ? [thoughtsNode(thoughts, parentId)] : [];
   let bundle: TimelineRowLike[] = [];
   const flush = () => {
     if (bundle.length > 0) nodes.push(bundledSystemNode(bundle, parentId));
     bundle = [];
   };
-  for (const row of rows) {
+  for (const row of rest) {
     if (row.kind === "system" && !isOwnSystemEvent(row)) {
       bundle.push(row);
       continue;

@@ -576,7 +576,7 @@ describe("system row mapping (BBP-206 R2b)", () => {
     expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Context cleared", meta: { detail: "Earlier chat is hidden…" } });
   });
 
-  it("bundles consecutive debug/reconnect rows into one node", () => {
+  it("bundles consecutive debug/reconnect rows into one node, but a lone titled row after shows its own title (BBP-206 R3)", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
         { id: "s3", kind: "system", systemKind: "debug", title: "event 1" },
@@ -585,7 +585,7 @@ describe("system row mapping (BBP-206 R2b)", () => {
         { id: "s5", kind: "system", systemKind: "debug", title: "event 3" },
       ],
     });
-    expect(nodes.map((node) => node.label)).toEqual(["2 system events", "Bash", "1 system event"]);
+    expect(nodes.map((node) => node.label)).toEqual(["2 system events", "Bash", "event 3"]);
     expect(nodes[0]).toMatchObject({ kind: "system-event", meta: { titles: ["event 1", "event 2"] } });
   });
 
@@ -607,7 +607,15 @@ describe("system row mapping (BBP-206 R2b)", () => {
     expect(nodes[0]).toMatchObject({ label: "2 system events", parentId: "row:turn" });
   });
 
-  it("bundles a reasoning-heavy turn's operation rows into one node, even though each has its own detail (BBP-206 R2b finding 6)", () => {
+  it("never emits a hidden lone '1 system event' — a single titled row shows its own title and detail instead (BBP-206 R3)", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "s7", kind: "system", systemKind: "debug", title: "Reconnected", detail: "Session resumed after a brief drop" }],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Reconnected", meta: { detail: "Session resumed after a brief drop" } });
+  });
+
+  it("bundles every thought in a turn into one node, however they're interleaved with other rows (BBP-206 R3)", () => {
     const reasoningRows: TimelineRowLike[] = Array.from({ length: 5 }, (_, i) => ({
       id: `reason-${i}`,
       kind: "system",
@@ -616,10 +624,36 @@ describe("system row mapping (BBP-206 R2b)", () => {
       title: `Thought for ${i + 10}s`,
       detail: `Some real reasoning text number ${i}…`,
     }));
-    const { nodes } = timelineToCanvas("t1", { rows: reasoningRows });
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "5 system events" });
-    expect(nodes[0]!.meta!.titles).toEqual(["Thought for 10s", "Thought for 11s", "Thought for 12s", "Thought for 13s", "Thought for 14s"]);
+    // Interleaved with tool calls, as reasoning rows really occur — this is
+    // exactly the real-BB shape that used to produce 85 separate "1 system
+    // event" nodes, one per thought, because bundling only ran on
+    // consecutive rows.
+    const rows: TimelineRowLike[] = reasoningRows.flatMap((row, i) => [
+      row,
+      { id: `tool-${i}`, kind: "work", workKind: "tool", toolName: "Read" },
+    ]);
+    const { nodes } = timelineToCanvas("t1", { rows });
+    const thoughtNode = nodes.find((node) => node.id === "row:reason-0")!;
+    expect(thoughtNode).toMatchObject({ kind: "system-event", label: "5 thoughts" });
+    expect(thoughtNode.meta!.titles).toEqual([
+      "Some real reasoning text number 0…",
+      "Some real reasoning text number 1…",
+      "Some real reasoning text number 2…",
+      "Some real reasoning text number 3…",
+      "Some real reasoning text number 4…",
+    ]);
+    expect(nodes.filter((node) => node.kind === "tool-call")).toHaveLength(5);
+    expect(nodes).toHaveLength(6);
+  });
+
+  it("shows the thoughts node's duration as the span from the earliest start to the latest end", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "r1", kind: "system", systemKind: "operation", operationKind: "reasoning", title: "Thought for 10s", detail: "a", startedAt: 1000, completedAt: 11000 },
+        { id: "r2", kind: "system", systemKind: "operation", operationKind: "reasoning", title: "Thought for 30s", detail: "b", startedAt: 11000, completedAt: 41000 },
+      ],
+    });
+    expect(nodes[0]!.label).toBe("2 thoughts · 40.0s");
   });
 
   it("still stands alone for a non-reasoning operation with detail set, between bundled rows", () => {
@@ -630,7 +664,7 @@ describe("system row mapping (BBP-206 R2b)", () => {
         { id: "c", kind: "system", systemKind: "debug", title: "y" },
       ],
     });
-    expect(nodes.map((node) => node.label)).toEqual(["1 system event", "Rate limit warning", "1 system event"]);
+    expect(nodes.map((node) => node.label)).toEqual(["x", "Rate limit warning", "y"]);
   });
 });
 
@@ -692,6 +726,20 @@ describe("enrichThreadNodes (BBP-210)", () => {
     };
     const [node] = await enrichThreadNodes([parent], [placeholder], port);
     expect(node).toEqual(placeholder);
+  });
+
+  it("skips a thread that's already enriched (carried over from an earlier poll), even with no title of its own (BBP-206 R3)", async () => {
+    const alreadyEnriched: CanvasNode = {
+      ...threadNodeFor(parent)!,
+      label: "Please add dark mode",
+      meta: { threadId: "t1", state: "idle", provider: "claude-code" },
+    };
+    const get = vi.fn(async (): Promise<ThreadLike> => {
+      throw new Error("should not be called again");
+    });
+    const [node] = await enrichThreadNodes([parent], [alreadyEnriched], { get, firstUserMessage: async () => undefined });
+    expect(node).toEqual(alreadyEnriched);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("leaves every non-thread node untouched, in its original position", async () => {
