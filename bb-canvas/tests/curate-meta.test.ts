@@ -26,12 +26,11 @@ describe("curateMeta", () => {
   });
 
   it("puts every field absent from the kind's curation into details", () => {
-    const { curated, details } = curateMeta("crew", { crew: "factory-1", status: "running", mystery: "x" });
+    const { curated, details, debug } = curateMeta("crew", { crew: "factory-1", status: "running", mystery: "x" });
     expect(curated).toEqual([{ label: "Crew", value: "factory-1" }]);
-    expect(details).toEqual([
-      { label: "Status", value: "running" },
-      { label: "Mystery", value: "x" },
-    ]);
+    expect(details).toEqual([{ label: "Mystery", value: "x" }]);
+    // A raw status is technical: the card's pill already shows it.
+    expect(debug).toEqual([{ label: "Status", value: "running" }]);
   });
 
   it("skips a curated field whose value is null, undefined, or missing", () => {

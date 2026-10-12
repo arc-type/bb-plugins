@@ -53,9 +53,16 @@ describe("timelineToCanvas", () => {
         kind: "turn",
         label: "Please fix the bug",
         parentId: threadNodeId("t1"),
-        meta: { rowId: "r1", kind: "conversation" },
+        meta: { rowId: "r1", kind: "conversation", text: "Please fix the bug" },
       },
     ]);
+  });
+
+  it("keeps a message row's sender and text, so its sidebar has content", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "r1", kind: "conversation", role: "user", text: "Please fix the bug" }],
+    });
+    expect(nodes[0]!.meta).toMatchObject({ from: "User", text: "Please fix the bug" });
   });
 
   it("turns a work row into a tool-call node, labelled by its kind", () => {
@@ -328,7 +335,7 @@ describe("work row mapping: workKind tool (BBP-206 R2b)", () => {
     expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "crew_inbox" });
     expect(nodes[0]!.meta).toMatchObject({
       toolName: "crew_inbox",
-      toolArgs: JSON.stringify({ limit: 5 }),
+      toolArgs: JSON.stringify({ limit: 5 }, null, 2),
       outputPreview: "2026-10-06T16:25Z msg_… human → concierge-lead@concierge",
       duration: "200ms",
       threadId: "t1",
@@ -787,7 +794,7 @@ describe("BBP-206 R2b acceptance: real timeline fixtures", () => {
     const { nodes } = timelineToCanvas("t1", { rows: [row] });
     expect(nodes[0]!.label).toBe("crew_inbox");
     expect(nodes[0]!.meta).not.toHaveProperty("exitCode");
-    expect(nodes[0]!.meta!.toolArgs).toBe(JSON.stringify({ limit: 5 }));
+    expect(nodes[0]!.meta!.toolArgs).toBe(JSON.stringify({ limit: 5 }, null, 2));
   });
 
   it("workFileChangeEdit: file name on the card, path/changeKind/diffStats in meta, no output/exitCode", () => {

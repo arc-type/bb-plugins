@@ -2,7 +2,7 @@
 // and — lazily, once that thread node is opened — its turns and tool calls
 // from the SDK timeline. Pure mapping, so it is testable without the SDK.
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
-import { formatTimestamp } from "../vendor/bb-canvas/lib/format";
+import { formatTimeRange } from "../vendor/bb-canvas/lib/format";
 import type { ThreadLike } from "./canvas-details";
 
 export const threadNodeId = (threadId: string): string => `thread:${threadId}`;
@@ -219,7 +219,8 @@ function argsText(args: unknown): string {
   if (typeof args === "object" && typeof (args as { command?: unknown }).command === "string") {
     return (args as { command: string }).command;
   }
-  return JSON.stringify(args) ?? "";
+  // Indented: the sidebar shows it as code, one argument per line.
+  return JSON.stringify(args, null, 2) ?? "";
 }
 
 /** `"400ms"` under a second, else `"2.3s"` — computed from real Unix-ms
@@ -258,8 +259,7 @@ function rowLabel(row: TimelineRowLike): string {
 function timedMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
   return compact({
     duration: duration(row.startedAt, row.completedAt),
-    startedAt: formatTimestamp(row.startedAt),
-    completedAt: formatTimestamp(row.completedAt),
+    ...formatTimeRange(row.startedAt, row.completedAt),
     ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
   });
 }
@@ -412,6 +412,9 @@ function rowNodes(row: TimelineRowLike, parentId: string, threadId?: string): Ca
       rowId: row.id,
       kind: row.kind,
       ...(row.status ? { status: row.status } : {}),
+      ...(isWork && row.workKind ? { workKind: row.workKind } : {}),
+      // A message row's own text, so its sidebar is not just ids (BBP-206 design).
+      ...(row.kind === "conversation" ? compact({ from: row.role === "user" ? "User" : row.role === "assistant" ? "Agent" : row.role, text: row.text }) : {}),
       ...(row.output && isSubagentRow(row) ? { summary: row.output } : {}),
       ...(isWork ? workMeta(row, threadId) : {}),
     },

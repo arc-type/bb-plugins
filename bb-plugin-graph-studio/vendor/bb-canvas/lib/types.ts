@@ -93,7 +93,7 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   // `state` is the thread's own BB status, loaded on selection; the node-level
   // pill is the status of whatever the thread hangs under, not the thread.
   thread: ["title", "state", "provider", "model", "turns", "created", "updated"],
-  turn: ["firstLine"],
+  turn: ["from", "firstLine", "summaryCount", "text"],
   "tool-call": [
     "toolName",
     "command",
@@ -102,7 +102,25 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
     "changeKind",
     "diffStats",
     "cwd",
+    // The less common workKinds' own content (search, web, plan, approval,
+    // form, question, workflow): what the call was about, not a hidden detail.
+    "query",
+    "mode",
+    "queries",
+    "url",
+    "prompt",
+    "explanation",
+    "steps",
+    "approvalKind",
+    "extensionKind",
+    "title",
+    "questions",
+    "workflowName",
+    "taskType",
+    "summary",
+    "lifecycle",
     "outputPreview",
+    "error",
     "stdout",
     "stderr",
     "exitCode",
@@ -163,6 +181,23 @@ const FIELD_LABELS: Record<string, string> = {
   seq: "Seq",
   turnId: "Turn",
   kind: "Row kind",
+  workKind: "Work kind",
+  from: "From",
+  text: "Message",
+  summaryCount: "Steps",
+  query: "Query",
+  mode: "Mode",
+  queries: "Queries",
+  url: "URL",
+  prompt: "Prompt",
+  error: "Error",
+  explanation: "Plan",
+  approvalKind: "Approval",
+  extensionKind: "Extension",
+  questions: "Questions",
+  workflowName: "Workflow",
+  taskType: "Task type",
+  lifecycle: "State",
 };
 
 /** Ids and sequence numbers the mapping needs but a reader does not: shown
@@ -177,6 +212,10 @@ const TECHNICAL_KEYS: ReadonlySet<string> = new Set([
   "seq",
   "threadId",
   "turnId",
+  "workKind",
+  // A step's raw provider status ("completed", "error") — the card's status
+  // pill already says it; a kind that means it (subagent) curates it.
+  "status",
 ]);
 
 function fieldLabel(key: string): string {

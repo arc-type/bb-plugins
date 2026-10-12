@@ -48,11 +48,56 @@ const CHILD_NOUN: Partial<Record<CanvasNodeKind, [string, string]>> = {
 /** The card's second line: what the node is, plus the one number or fact
  *  that tells it apart from its siblings ("Crew · 9 members", "Member ·
  *  claude-opus-5-5"). Everything else lives in the sidebar. */
+/** What a tool call did, by its row's `workKind` — "Tool call" for every
+ *  step said nothing (BBP-206 acceptance in BB). */
+const WORK_LABEL: Record<string, string> = {
+  command: "Command",
+  tool: "Tool",
+  "file-read": "Read",
+  "image-view": "View image",
+  search: "Search",
+  "web-search": "Web search",
+  "web-fetch": "Fetch",
+  "image-generation": "Generate image",
+  "plan-steps": "Plan",
+  extension: "Extension",
+  approval: "Approval",
+  form: "Form",
+  question: "Question",
+  workflow: "Workflow",
+};
+
+const CHANGE_LABEL: Record<string, string> = { create: "New file", delete: "Delete file" };
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function describeToolCall(meta?: Record<string, unknown>): string {
+  const workKind = str(meta?.workKind);
+  const what =
+    workKind === "file-change"
+      ? CHANGE_LABEL[str(meta?.changeKind) ?? ""] ?? "Edit"
+      : (workKind && WORK_LABEL[workKind]) ?? KIND_LABEL["tool-call"];
+  const exitCode = meta?.exitCode;
+  const facts = [
+    what,
+    str(meta?.diffStats),
+    typeof exitCode === "number" && exitCode !== 0 ? `exit ${exitCode}` : undefined,
+    str(meta?.duration),
+  ];
+  return facts.filter((fact): fact is string => fact !== undefined).join(" · ");
+}
+
 export function describeNode(kind: CanvasNodeKind, childCount: number, meta?: Record<string, unknown>): string {
   if (kind === "thread") {
     const facts = [meta?.state, meta?.provider].filter((value): value is string => typeof value === "string" && value !== "");
     return facts.length > 0 ? facts.join(" · ") : KIND_LABEL.thread;
   }
+  if (kind === "tool-call") return describeToolCall(meta);
+  // A message row is a turn's request or its reply, not another turn.
+  if (kind === "turn" && meta?.from === "User") return "Request";
+  if (kind === "turn" && meta?.from === "Agent") return "Reply";
   const parts = [KIND_LABEL[kind]];
   // An enriched turn's label is its first line, so the step count moves here.
   const steps = meta?.summaryCount;

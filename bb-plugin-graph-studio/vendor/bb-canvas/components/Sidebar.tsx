@@ -153,7 +153,7 @@ function FieldValue({ value }: { value: string }) {
 
 // Machine text (a shell command, tool input, raw output) reads as code, not
 // prose: monospace on a quiet well, whitespace kept (BBP-206 design).
-const CODE_FIELDS = new Set(["Command", "Input", "Output", "Detail"]);
+const CODE_FIELDS = new Set(["Command", "Input", "Output", "Detail", "Stdout", "Stderr", "Query"]);
 
 const CODE_STYLE = {
   display: "block",
@@ -167,10 +167,10 @@ const CODE_STYLE = {
   whiteSpace: "pre-wrap",
 } as const;
 
-/** A non-zero exit code is the one value on a tool call that says "this
- *  failed"; it carries the destructive colour, not the body colour. */
+/** The values on a tool call that say "this failed" — a non-zero exit code,
+ *  an error, stderr — carry the destructive colour, not the body colour. */
 function isFailedExit(field: { label: string; value: string }): boolean {
-  return field.label === "Exit code" && field.value !== "0";
+  return (field.label === "Exit code" && field.value !== "0") || field.label === "Error" || field.label === "Stderr";
 }
 
 function FieldList({ fields }: { fields: { label: string; value: string }[] }) {
