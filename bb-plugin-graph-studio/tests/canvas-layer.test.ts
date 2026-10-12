@@ -109,3 +109,32 @@ describe("canvasPageLayer", () => {
     expect(page.nodes.find((node) => node.id === "graph-run:r1")!.parentId).toBe("project:p1");
   });
 });
+
+describe("back-edge state (BBP-146 AC 7)", () => {
+  const loop = (target: "running" | "done" | "skipped") =>
+    graphCanvasLayer("p1", [run({ status: "running", nodeRuns: [
+      { nodeId: "a", attempt: 1, status: "done" },
+      { nodeId: "b", attempt: 1, status: "done" },
+      { nodeId: "c", attempt: 1, status: "done" },
+      { nodeId: "a", attempt: 2, status: target },
+    ] })], new Map()).edges;
+
+  it("is now while the loop's target runs its second attempt, taken once it finished", () => {
+    expect(loop("running")).toEqual([{ from: "step:r1:c", to: "step:r1:a", variant: "back", label: "retry", state: "now" }]);
+    expect(loop("done")).toEqual([{ from: "step:r1:c", to: "step:r1:a", variant: "back", label: "retry", state: "taken" }]);
+  });
+
+  it("negative: a first attempt only, or a skipped second one, leaves the back edge without state", () => {
+    expect(loop("skipped")[0]).not.toHaveProperty("state");
+    const first = graphCanvasLayer("p1", [run({ nodeRuns: [{ nodeId: "a", attempt: 1, status: "running" }] })], new Map()).edges;
+    expect(first[0]).not.toHaveProperty("state");
+  });
+});
+
+it("negative: a step retried in place (no attempt at the loop's source) does not mark the back edge", () => {
+  const edges = graphCanvasLayer("p1", [run({ nodeRuns: [
+    { nodeId: "a", attempt: 1, status: "failed" },
+    { nodeId: "a", attempt: 2, status: "running" },
+  ] })], new Map()).edges;
+  expect(edges[0]).not.toHaveProperty("state");
+});

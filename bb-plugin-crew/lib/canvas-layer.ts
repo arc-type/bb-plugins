@@ -6,7 +6,8 @@
 // pulls this layer in; crew shows it itself only while graph-studio is not.
 import type { CanvasLayer } from "../vendor/bb-canvas/lib/layer";
 import { projectNodeId } from "../vendor/bb-canvas/lib/layer";
-import type { CanvasStatus } from "../vendor/bb-canvas/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
+import { crewLayers, pathBetween, placeLayers, type CrewMemberRef } from "./canvas-layout";
 import type { MemberInfo } from "./contract";
 import type { CrewStatus } from "./store";
 
@@ -27,12 +28,23 @@ const ACTIVITY_STATUS: Record<string, CanvasStatus> = {
   error: "failed",
 };
 
+/** A crew's declared links (BBP-170): the same ones `crewTopologyFrame`
+ *  classifies into flow/back edges, keyed by crew name. */
+export type CrewLinks = Record<string, readonly { from: string; to: string; kind: string }[]>;
+
+export type CrewCanvasLayer = CanvasLayer & {
+  /** One frame per crew (BBP-170 WI6), drawn around its member nodes on the
+   *  same project→crew→member tree — not a separate page. */
+  frames: CanvasFrame[];
+};
+
 export function crewCanvasLayer(
   projectId: string,
   crews: { name: string; status: CrewStatus }[],
   members: MemberInfo[],
-): CanvasLayer {
-  const layer: CanvasLayer = { nodes: [], edges: [], expanded: [] };
+  linksByCrew: CrewLinks = {},
+): CrewCanvasLayer {
+  const layer: CrewCanvasLayer = { nodes: [], edges: [], expanded: [], frames: [] };
   for (const crew of crews) {
     const id = crewNodeId(crew.name);
     layer.nodes.push({
@@ -45,7 +57,19 @@ export function crewCanvasLayer(
     });
     // A stopped crew stays folded: its members have nothing to show.
     if (crew.status !== "stopped") layer.expanded.push(id);
-    for (const member of members.filter((entry) => entry.crew === crew.name)) {
+    const crewMembers = members.filter((entry) => entry.crew === crew.name);
+    // The frame and its flow/back-classified edges come from the same
+    // topology math the edit mode uses (crewTopologyFrame) — one
+    // classification, not two, so run view and edit view never disagree on
+    // which link bows out as a back edge.
+    const topology = crewTopologyFrame(
+      crew.name,
+      crewMembers.map((entry) => ({ key: entry.key, groupId: entry.groupId, lead: entry.lead })),
+      linksByCrew[crew.name] ?? [],
+    );
+    layer.frames.push(...topology.frames);
+    layer.edges.push(...topology.edges);
+    for (const member of crewMembers) {
       const status = ACTIVITY_STATUS[member.activity];
       layer.nodes.push({
         id: memberNodeId(member.address),
@@ -53,11 +77,59 @@ export function crewCanvasLayer(
         label: member.key,
         ...(status ? { status } : {}),
         parentId: id,
+        frameId: crewFrameId(crew.name),
         meta: { address: member.address, role: member.role, lead: member.lead, threadId: member.threadId, activity: member.activity },
       });
     }
   }
   return layer;
+}
+
+export type CrewTopology = { frames: CanvasFrame[]; nodes: (CanvasNode & { frameId: string })[]; edges: CanvasEdge[] };
+
+export const crewFrameId = (crew: string): string => `frame:${crew}`;
+
+/** The inverse of `crewFrameId` — crew names never contain ":" (BBP-170 WI6). */
+export const crewNameFromFrameId = (frameId: string): string => frameId.slice("frame:".length);
+
+/**
+ * One crew's topology as a bb-canvas frame (BBP-163): the lead and its
+ * members inside one frame, in canvas-layout's row order (lead first, then
+ * the groups in file order), and the crew's links as edges. A link that
+ * points back up (pathBetween's "back" shape) becomes a back edge, the rest
+ * flow edges. Links to unknown members or to oneself are dropped.
+ */
+export function crewTopologyFrame(
+  crew: string,
+  members: readonly CrewMemberRef[],
+  links: readonly { from: string; to: string; kind: string }[],
+): CrewTopology {
+  const frameId = crewFrameId(crew);
+  const nodeId = (key: string) => memberNodeId(`${key}@${crew}`);
+  const layers = crewLayers(members);
+  const placed = placeLayers(layers, { width: 1, height: 1 });
+  const boxes = new Map(placed.boxes.map((box) => [box.id, box]));
+  const byKey = new Map(members.map((member) => [member.key, member]));
+  const nodes = placed.boxes.map((box) => {
+    const member = byKey.get(box.id)!;
+    return {
+      id: nodeId(member.key),
+      kind: "member" as const,
+      label: member.key,
+      parentId: null,
+      frameId,
+      meta: { lead: member.lead, groupId: member.groupId, layer: box.layer },
+    };
+  });
+  const edges: CanvasEdge[] = links
+    .filter((link) => link.from !== link.to && boxes.has(link.from) && boxes.has(link.to))
+    .map((link) => ({
+      from: nodeId(link.from),
+      to: nodeId(link.to),
+      variant: pathBetween(boxes.get(link.from)!, boxes.get(link.to)!).shape === "back" ? "back" : "flow",
+      label: link.kind,
+    }));
+  return { frames: [{ id: frameId, parentId: null, label: crew }], nodes, edges };
 }
 
 export const GRAPH_STUDIO_PLUGIN_ID = "graph-studio";

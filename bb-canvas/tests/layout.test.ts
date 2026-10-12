@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layoutTree, MARGIN, NODE_HEIGHT, NODE_WIDTH, COLUMN_GAP, ROW_GAP } from "@/lib/layout";
-import type { CanvasEdge, CanvasNode } from "@/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode } from "@/lib/types";
 
 function node(id: string, parentId: string | null, overrides: Partial<CanvasNode> = {}): CanvasNode {
   return { id, kind: "member", label: id, parentId, ...overrides };
@@ -118,5 +118,117 @@ describe("layoutTree", () => {
     // "run" itself is not expanded, so neither step is visible.
     const { edges: placed } = layoutTree(nodes, new Set(), edges);
     expect(placed).toHaveLength(0);
+  });
+
+  describe("edge state (BBP-146)", () => {
+    it("leaves a tree line without a state when its child was never attempted", () => {
+      const nodes = [node("run", null, { kind: "graph-run" }), node("a", "run", { kind: "step" })];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("marks a tree line 'taken' once its child has a status other than running", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step", status: "done" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBe("taken");
+    });
+
+    it("marks a tree line 'now' while its child is running", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step", status: "running" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBe("now");
+    });
+
+    it("leaves the line to an idle node plain — idle members are not a path the run took", () => {
+      const nodes = [node("crew", null, { kind: "crew" }), node("m1", "crew", { status: "idle" })];
+      const { edges } = layoutTree(nodes, new Set(["crew"]));
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("does not count a skipped step as taken (lead decision: skipped is where routing did not go)", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        // canvas-layer.ts maps a skipped attempt's status to "idle" — there is
+        // no separate "skipped" CanvasStatus.
+        node("a", "run", { kind: "step", status: "idle" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("passes a declared back edge's own state through unchanged", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step" }),
+        node("b", "run", { kind: "step" }),
+      ];
+      const edges: CanvasEdge[] = [{ from: "b", to: "a", variant: "back", state: "now" }];
+      const { edges: placed } = layoutTree(nodes, new Set(["run"]), edges);
+      expect(placed.find((edge) => edge.variant === "back")!.state).toBe("now");
+    });
+
+    it("leaves a declared edge without a state when none was given", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step" }),
+        node("b", "run", { kind: "step" }),
+      ];
+      const edges: CanvasEdge[] = [{ from: "b", to: "a", variant: "back" }];
+      const { edges: placed } = layoutTree(nodes, new Set(["run"]), edges);
+      expect(placed.find((edge) => edge.variant === "back")!.state).toBeUndefined();
+    });
+  });
+
+  describe("frames (BBP-165)", () => {
+    function frameNodes(): CanvasNode[] {
+      return [
+        node("crew", null, { kind: "crew" }),
+        node("lead", "crew", { kind: "member" }),
+        node("m1", "crew", { kind: "member" }),
+        node("m2", "crew", { kind: "member" }),
+      ];
+    }
+
+    it("without a frames argument, returns bit-identical results to before (negative criterion 1)", () => {
+      const nodes = frameNodes();
+      const expanded = new Set(["crew"]);
+      const withoutArg = layoutTree(nodes, expanded);
+      const withEmptyEdges = layoutTree(nodes, expanded, []);
+      expect(withoutArg).toEqual(withEmptyEdges);
+      expect((withoutArg as { frames?: unknown }).frames).toBeUndefined();
+    });
+
+    it("computes a frame's bounding box plus padding from its member cards", () => {
+      const nodes = frameNodes();
+      const expanded = new Set(["crew"]);
+      const frames: CanvasFrame[] = [{ id: "frame-crew", parentId: null, label: "crew" }];
+      nodes[1] = { ...nodes[1]!, frameId: "frame-crew" };
+      nodes[2] = { ...nodes[2]!, frameId: "frame-crew" };
+      nodes[3] = { ...nodes[3]!, frameId: "frame-crew" };
+      const { positions, frames: placedFrames } = layoutTree(nodes, expanded, [], frames);
+      const members = positions.filter((p) => ["lead", "m1", "m2"].includes(p.id));
+      const minX = Math.min(...members.map((p) => p.x));
+      const minY = Math.min(...members.map((p) => p.y));
+      const maxX = Math.max(...members.map((p) => p.x + p.width));
+      const maxY = Math.max(...members.map((p) => p.y + p.height));
+      const placed = placedFrames!.find((f) => f.id === "frame-crew")!;
+      expect(placed.x).toBeLessThan(minX);
+      expect(placed.y).toBeLessThan(minY);
+      expect(placed.x + placed.width).toBeGreaterThan(maxX);
+      expect(placed.y + placed.height).toBeGreaterThan(maxY);
+    });
+
+    it("drops a frame with no visible member nodes", () => {
+      const nodes = frameNodes();
+      const frames: CanvasFrame[] = [{ id: "empty-frame", parentId: null, label: "empty" }];
+      const { frames: placedFrames } = layoutTree(nodes, new Set(["crew"]), [], frames);
+      expect(placedFrames!.find((f) => f.id === "empty-frame")).toBeUndefined();
+    });
   });
 });

@@ -42,6 +42,7 @@ import {
 import { MARGIN, layoutGraph, type PlacedEdge } from "../lib/layout";
 import { elapsedLabel } from "../lib/activity";
 import { cn } from "@/lib/utils";
+import { usePrefersReducedMotion } from "./ui/hooks/use-media-query";
 
 /**
  * Model ids are long and front-loaded with the vendor ("claude-opus-5"); the
@@ -121,6 +122,11 @@ export type GraphCanvasProps = {
   dimUnreached?: boolean;
   /** Draw the edge into this node highlighted — the path the run just took. */
   activeEdgeKeys?: Set<string>;
+  /**
+   * The subset of `activeEdgeKeys` being taken right now (into a running
+   * step): drawn with a travelling dash on top, static under reduced motion.
+   */
+  liveEdgeKeys?: Set<string>;
   /**
    * Live signs of life for running nodes: since when, and what the worker is
    * doing. A node can sit in `running` for ten minutes, and without these two
@@ -274,6 +280,7 @@ type TerminalData = {
 type LayoutEdgeData = {
   placed: PlacedEdge;
   active: boolean;
+  live: boolean;
   onInsert: (() => void) | null;
 };
 
@@ -547,7 +554,7 @@ function StepView({ data }: NodeProps<StepNode>) {
 }
 
 /** Drawn along the layout's path, so back edges keep their arc on the right. */
-function LayoutEdgeView({
+export function LayoutEdgeView({
   data,
   sourceX,
   sourceY,
@@ -557,7 +564,8 @@ function LayoutEdgeView({
   targetPosition,
 }: EdgeProps<LayoutEdge>) {
   if (!data) return null;
-  const { placed, active, onInsert } = data;
+  const { placed, active, live, onInsert } = data;
+  const reducedMotion = usePrefersReducedMotion();
   // Drawn from where the nodes actually are, not from the computed layout —
   // once an author moves a node, its arrows have to go with it. A back edge
   // still bows out to the right so a cycle reads as a cycle.
@@ -596,6 +604,24 @@ function LayoutEdgeView({
         opacity={edge.candidate ? 0.7 : undefined}
         markerEnd={`url(#${edge.isBack ? "gs-arrow-back" : "gs-arrow"})`}
       />
+      {live ? (
+        // "Taken right now": a dash travelling toward the running step. Under
+        // reduced motion it stays put — still dashed, still primary, so the
+        // edge still reads as live.
+        <path
+          d={edge.path}
+          fill="none"
+          stroke="var(--primary)"
+          strokeWidth={2}
+          strokeDasharray="6 6"
+          strokeLinecap="round"
+          data-edge-state="now"
+        >
+          {reducedMotion ? null : (
+            <animate attributeName="stroke-dashoffset" from="12" to="0" dur="0.8s" repeatCount="indefinite" />
+          )}
+        </path>
+      ) : null}
       {/* A wide invisible twin, so a 1.5px line can be hit with a pointer. */}
       <path d={edge.path} fill="none" stroke="transparent" strokeWidth={14} />
       {edge.label ? (
@@ -841,6 +867,7 @@ function GraphCanvasInner({
   visits = {},
   dimUnreached = false,
   activeEdgeKeys,
+  liveEdgeKeys,
   activity = {},
   now,
   durations = {},
@@ -998,6 +1025,7 @@ function GraphCanvasInner({
     data: {
       placed,
       active: activeEdgeKeys?.has(placed.key) ?? false,
+      live: liveEdgeKeys?.has(placed.key) ?? false,
       // Not on a drawn handoff candidate: that arrow is not an edge of the
       // graph, so there is nothing to splice into.
       onInsert:

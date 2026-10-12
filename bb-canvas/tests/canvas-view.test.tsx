@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CanvasView } from "@/components/CanvasView";
-import type { CanvasNode } from "@/lib/types";
+import type { CanvasFrame, CanvasNode } from "@/lib/types";
 
 afterEach(cleanup);
 
@@ -124,6 +124,145 @@ describe("CanvasView keyboard navigation", () => {
       fireEvent.keyDown(root, { key: "+" });
       fireEvent.keyDown(root, { key: "-" });
     }).not.toThrow();
+  });
+});
+
+describe("CanvasView run/edit mode (BBP-166)", () => {
+  const frameNodes: CanvasNode[] = [
+    { id: "crew", kind: "crew", label: "factory-1", parentId: null },
+    { id: "lead", kind: "member", label: "orch-lead", parentId: "crew", frameId: "frame-a" },
+    { id: "m1", kind: "member", label: "steps-impl", parentId: "crew", frameId: "frame-a" },
+    { id: "m2", kind: "member", label: "steps-review", parentId: "crew", frameId: "frame-b" },
+    { id: "outside", kind: "member", label: "outsider", parentId: "crew" },
+  ];
+  const frames: CanvasFrame[] = [
+    { id: "frame-a", parentId: null, label: "Team A" },
+    { id: "frame-b", parentId: null, label: "Team B" },
+  ];
+
+  function renderEditableView() {
+    const { container } = render(
+      <CanvasView
+        nodes={frameNodes}
+        frames={frames}
+        editableFrameIds={new Set(["frame-a"])}
+        initialExpanded={new Set(["crew"])}
+      />,
+    );
+    return container.querySelector("[data-canvas-view]") as HTMLElement;
+  }
+
+  it("E on a card inside an editable frame dims every card outside it and locks their clicks", () => {
+    const root = renderEditableView();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    const outsider = card(new RegExp("^outsider — "));
+    expect(outsider.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(outsider);
+    expect(outsider.getAttribute("aria-pressed")).toBe("false");
+    const member = card(new RegExp("^steps-impl — "));
+    expect(member.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("E on a card whose frame is not editable does nothing", () => {
+    const root = renderEditableView();
+    fireEvent.click(card(new RegExp("^steps-review — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    const outsider = card(new RegExp("^outsider — "));
+    expect(outsider.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("E with no card selected does nothing", () => {
+    const root = renderEditableView();
+    fireEvent.keyDown(root, { key: "e" });
+    const outsider = card(new RegExp("^outsider — "));
+    expect(outsider.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("Escape exits edit mode and un-dims every card (priority over the plain deselect)", () => {
+    const root = renderEditableView();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    fireEvent.keyDown(root, { key: "Escape" });
+    expect(card(new RegExp("^outsider — ")).getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("a nested E — selecting a card in a second frame while already editing — is ignored", () => {
+    const root = renderEditableView();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    // frame-b is not editable, but even if it were, entering edit mode a
+    // second level deep must not happen without an Escape first.
+    fireEvent.click(card(new RegExp("^steps-review — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    // Still editing frame-a: steps-impl (frame-a) stays undimmed, outsider stays dimmed.
+    expect(card(new RegExp("^steps-impl — ")).getAttribute("aria-disabled")).not.toBe("true");
+    expect(card(new RegExp("^outsider — ")).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("forces type colour mode while editing, without touching the saved status/type preference", () => {
+    const root = renderEditableView();
+    const neutral = card(new RegExp("^steps-impl — "));
+    expect(neutral.style.border).toContain("var(--border)"); // starts in status mode, neutral
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    expect(card(new RegExp("^steps-impl — ")).style.border).not.toContain("var(--border)");
+    fireEvent.keyDown(root, { key: "Escape" });
+    expect(card(new RegExp("^steps-impl — ")).style.border).toContain("var(--border)");
+  });
+});
+
+describe("CanvasView frame editor slot (BBP-170 WI6)", () => {
+  const frameNodes: CanvasNode[] = [
+    { id: "crew", kind: "crew", label: "factory-1", parentId: null },
+    { id: "lead", kind: "member", label: "orch-lead", parentId: "crew", frameId: "frame-a" },
+  ];
+  const frames: CanvasFrame[] = [{ id: "frame-a", parentId: null, label: "Team A" }];
+
+  function renderWithEditor() {
+    const { container } = render(
+      <CanvasView
+        nodes={frameNodes}
+        frames={frames}
+        editableFrameIds={new Set(["frame-a"])}
+        initialExpanded={new Set(["crew"])}
+        renderFrameEditor={(frameId) => <div data-frame-editor={frameId}>Editing {frameId}</div>}
+      />,
+    );
+    return container.querySelector("[data-canvas-view]") as HTMLElement;
+  }
+
+  it("shows the frame editor instead of the sidebar once edit mode starts", () => {
+    const root = renderWithEditor();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
+    fireEvent.keyDown(root, { key: "e" });
+    expect(screen.getByText("Editing frame-a")).toBeTruthy();
+    expect(screen.queryByLabelText("Details for orch-lead")).toBeNull();
+  });
+
+  it("Escape brings the sidebar back for the still-selected card", () => {
+    const root = renderWithEditor();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    fireEvent.keyDown(root, { key: "Escape" });
+    expect(screen.queryByText("Editing frame-a")).toBeNull();
+    expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
+  });
+
+  it("without renderFrameEditor, edit mode simply shows no side panel", () => {
+    const { container } = render(
+      <CanvasView
+        nodes={frameNodes}
+        frames={frames}
+        editableFrameIds={new Set(["frame-a"])}
+        initialExpanded={new Set(["crew"])}
+      />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    expect(screen.queryByLabelText("Details for orch-lead")).toBeNull();
   });
 });
 
