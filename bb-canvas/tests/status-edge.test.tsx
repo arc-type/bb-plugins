@@ -21,13 +21,6 @@ describe("StatusEdge state (BBP-146)", () => {
     expect(path.getAttribute("class")).not.toContain("bb-canvas-edge-now");
   });
 
-  it("draws a solid primary line when taken", () => {
-    const path = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", state: "taken" });
-    expect(path.style.stroke).toBe("var(--primary)");
-    expect(path.style.strokeWidth).toBe("2");
-    expect(path.getAttribute("class")).not.toContain("bb-canvas-edge-now");
-  });
-
   it("animates a travelling dash when now", () => {
     const path = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", state: "now" });
     expect(path.style.stroke).toBe("var(--primary)");

@@ -14,19 +14,25 @@ import type { CrewStatus } from "./store";
 export const crewNodeId = (crew: string): string => `crew:${crew}`;
 export const memberNodeId = (address: string): string => `member:${address}`;
 
-const CREW_STATUS: Record<CrewStatus, CanvasStatus> = {
-  stopped: "idle",
-  starting: "waiting",
-  running: "running",
-  degraded: "failed",
-};
-
 const ACTIVITY_STATUS: Record<string, CanvasStatus> = {
   working: "running",
   idle: "idle",
   "needs-you": "waiting",
   error: "failed",
 };
+
+/** A crew's own lifecycle status (`running` = created and not stopped) is not
+ *  activity: a crew with every member idle must read as neutral, not light up
+ *  blue just because nobody asked it to stop (BBP-214 Befund 19:17). Only
+ *  `stopped` and `degraded` are taken from the crew itself; `running` and
+ *  `starting` are derived from what its members are actually doing. */
+function deriveCrewStatus(status: CrewStatus, members: MemberInfo[]): CanvasStatus | undefined {
+  if (status === "stopped") return "idle";
+  if (status === "degraded") return "failed";
+  if (members.some((member) => member.activity === "working")) return "running";
+  if (members.some((member) => member.activity === "needs-you")) return "waiting";
+  return status === "starting" ? "waiting" : undefined;
+}
 
 /** A crew's declared links (BBP-170): the same ones `crewTopologyFrame`
  *  classifies into flow/back edges, keyed by crew name. */
@@ -49,13 +55,15 @@ export function crewCanvasLayer(
     const id = crewNodeId(crew.name);
     const crewMembers = members.filter((entry) => entry.crew === crew.name);
     const lead = crewMembers.find((entry) => entry.lead)?.key;
+    const status = deriveCrewStatus(crew.status, crewMembers);
+    const active = crewMembers.filter((entry) => entry.activity === "working").length;
     layer.nodes.push({
       id,
       kind: "crew",
       label: crew.name,
-      status: CREW_STATUS[crew.status],
+      ...(status ? { status } : {}),
       parentId: projectNodeId(projectId),
-      meta: { crew: crew.name, status: crew.status, members: crewMembers.length, ...(lead ? { lead } : {}) },
+      meta: { crew: crew.name, status: crew.status, members: crewMembers.length, ...(lead ? { lead } : {}), active },
     });
     // A stopped crew stays folded: its members have nothing to show.
     if (crew.status !== "stopped") layer.expanded.push(id);
