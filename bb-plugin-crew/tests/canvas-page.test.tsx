@@ -5,7 +5,7 @@
 import { cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { POLL_MS } from "../lib/visible-poll";
+import { POLL_MS } from "../vendor/bb-canvas/lib/visible-poll";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 
 let app: CapturedPluginApp;

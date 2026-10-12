@@ -19,7 +19,7 @@ import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/li
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
-import { startVisiblePoll } from "../lib/visible-poll";
+import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
 import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
 import type { rpcContract } from "../server";
 

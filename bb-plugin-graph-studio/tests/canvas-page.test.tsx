@@ -3,7 +3,9 @@
 // The canvas nav panel end to end through the SDK's own slot harness: the
 // RPC call it makes, and the lazy timeline fetch behind a thread node.
 import { cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { POLL_MS } from "../vendor/bb-canvas/lib/visible-poll";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 
 let app: CapturedPluginApp;
@@ -12,7 +14,10 @@ beforeAll(async () => {
   app = await loadPluginApp(() => import("../app"));
 });
 beforeEach(() => localStorage.clear());
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const LABELS: Record<string, string> = { p1: "Shop", p2: "Blog" };
 
@@ -185,5 +190,67 @@ describe("the canvas page", () => {
   it("negative: an empty project list says so instead of an empty canvas", async () => {
     canvasPanel({ projectId: null, sdk: { projects: { list: async () => [] } } });
     expect(await screen.findByText("No projects yet.")).toBeTruthy();
+  });
+
+  // BBP-197 fix 2: this is the page BB shows while Graph Studio is active,
+  // so the live reload has to run here, not only on crew's hidden copy.
+  describe("live updates", () => {
+    const layerWith = (...names: string[]) => ({
+      ...layerFor("p1"),
+      nodes: [
+        ...layerFor("p1").nodes.filter((node) => node.kind !== "member"),
+        ...names.map((name) => ({ id: `member:${name}@crew`, kind: "member", label: name, parentId: "project:p1", meta: {} })),
+      ],
+    });
+
+    // Before the render: the page starts its interval on mount.
+    beforeEach(() => void vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
+
+    async function poll() {
+      await act(async () => {
+        vi.advanceTimersByTime(POLL_MS);
+      });
+    }
+
+    it("a new member appears on the next poll, the selection stays", async () => {
+      let names = ["a"];
+      canvasPanel({ rpc: { canvasLayer: () => layerWith(...names) } });
+      fireEvent.click(await screen.findByRole("button", { name: /^a — / }));
+      names = ["a", "b"];
+      await poll();
+      await waitFor(() => expect(screen.getByRole("button", { name: /^b — / })).toBeTruthy());
+      expect(screen.getByRole("button", { name: /^a — / }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.queryByText("Loading…")).toBeNull();
+    });
+
+    it("negative: a hidden tab makes no canvasLayer call", async () => {
+      const canvasLayer = vi.fn(() => layerWith("a"));
+      canvasPanel({ rpc: { canvasLayer } });
+      await screen.findByRole("button", { name: /^a — / });
+      const calls = canvasLayer.mock.calls.length;
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      await poll();
+      await poll();
+      expect(canvasLayer.mock.calls.length).toBe(calls);
+      visibility.mockRestore();
+    });
+
+    it("negative: a poll without changes resets nothing — selection and sidebar stay", async () => {
+      canvasPanel({ rpc: { canvasLayer: () => layerWith("a") } });
+      fireEvent.click(await screen.findByRole("button", { name: /^a — / }));
+      await poll();
+      expect(screen.getByRole("button", { name: /^a — / }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByLabelText("Details for a")).toBeTruthy();
+    });
+
+    it("negative: a failed poll keeps the last tree instead of an error", async () => {
+      let fail = false;
+      canvasPanel({ rpc: { canvasLayer: () => { if (fail) throw new Error("offline"); return layerWith("a"); } } });
+      await screen.findByRole("button", { name: /^a — / });
+      fail = true;
+      await poll();
+      expect(screen.queryByText(/Canvas not available/)).toBeNull();
+      expect(screen.getByRole("button", { name: /^a — / })).toBeTruthy();
+    });
   });
 });

@@ -1,4 +1,4 @@
-// BBP-200: the canvas refreshes itself, but only for someone looking at it —
+// BBP-200: a canvas page refreshes itself, but only for someone looking at it —
 // a background tab makes no calls at all.
 export const POLL_MS = 5000;
 
