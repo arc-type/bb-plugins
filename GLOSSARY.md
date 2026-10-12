@@ -19,3 +19,11 @@ crew branch into main.
 
 **Checks** — the crew's single command that must be green before the
 integrator merges a crew branch into main.
+
+**Project filter** — the canvas toolbar's choice of which projects it shows. An
+empty selection means *all* projects; "Clear selection" returns to that state.
+
+**Searchable multi-select** — a dropdown list of options with a search field,
+checkboxes and keyboard control. Ticked options stay on top even when they do
+not match the search. The project filter is one; the Focus dropdown is to be
+another.
