@@ -19,7 +19,6 @@ import { reasonCounts } from "./lib/topology";
 import { DEFAULT_POLICY } from "./lib/policy";
 import { registerAgentTools, type Confirm } from "./lib/agent";
 import { crewCanvasLayer, crewOwnsCanvasPage } from "./lib/canvas-layer";
-import { canvasExtensionDescribe, canvasExtensionLayer } from "./lib/canvas-extension";
 import { CONTRACT_VERSION } from "./lib/contract";
 import { openLayout } from "./lib/layout";
 import { runCli, CLI_COMMANDS, type CliContext } from "./lib/cli";
@@ -452,24 +451,6 @@ export const rpcContract = defineRpcContract({
   canvasPage: {
     input: z.object({}).default({}),
     output: z.object({ visible: z.boolean() }),
-  },
-
-  // --- BBP-174 spike: canvasExtension.* prototype (not production contract) ---
-  "canvasExtension.describe": {
-    input: z.object({}).default({}),
-    output: z.object({
-      layers: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string() })),
-    }),
-  },
-  "canvasExtension.layer": {
-    input: z.object({ projectId: z.string().min(1) }),
-    output: z.object({
-      contractVersion: z.number(),
-      nodes: z.array(canvasNodeSchema),
-      edges: z.array(canvasEdgeSchema),
-      expanded: z.array(z.string()),
-      frames: z.array(canvasFrameSchema),
-    }),
   },
 
   /** Sidebar row icons and the Needs-you count, for every bound member thread. */
@@ -1120,13 +1101,6 @@ export default async function plugin(bb: BbPluginApi) {
       const crews = store.listCrews(projectId);
       const linksByCrew = Object.fromEntries(crews.map((crew) => [crew.name, store.listLinks(crew.id)]));
       return { contractVersion: CONTRACT_VERSION, ...crewCanvasLayer(projectId, crews, members, linksByCrew) };
-    },
-    "canvasExtension.describe": () => canvasExtensionDescribe(),
-    "canvasExtension.layer": async ({ projectId }) => {
-      const { members } = await service.contract.listMembers(projectId);
-      const crews = store.listCrews(projectId);
-      const linksByCrew = Object.fromEntries(crews.map((crew) => [crew.name, store.listLinks(crew.id)]));
-      return canvasExtensionLayer({ projectId }, crews, members, linksByCrew);
     },
     canvasPage: async () => {
       try {

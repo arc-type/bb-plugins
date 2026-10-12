@@ -1,11 +1,11 @@
-// BBP-174 spike 2: notify-Prototyp mit Caller-Prüfung.
+// BBP-174 spike 2: notify prototype with caller verification.
 //
-// Nutzt die echte SDK-Testing-Harness (createFakePluginHost), nicht eine
-// selbstgebaute Attrappe: `harness.callRpc(method, input, options)` validiert
-// Ein-/Ausgabe wie der echte Host und setzt `experimental_caller` exakt so,
-// wie `bb.sdk.plugins.callRpc` es laut SDK-Doku serverseitig täte (SDK
-// >= 0.6.15; in der von crew/graph-studio genutzten 0.5.29 existiert dieser
-// Mechanismus nicht — das war der Fund aus Spike 1).
+// Uses the real SDK testing harness (createFakePluginHost), not a hand-rolled
+// stand-in: `harness.callRpc(method, input, options)` validates input/output
+// like the real host and sets `experimental_caller` exactly the way
+// `bb.sdk.plugins.callRpc` would server-side per the SDK docs (SDK >= 0.6.15;
+// the 0.5.29 used by crew/graph-studio has no such mechanism — that was the
+// Spike 1 finding).
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerCanvasNotify, startPollingFallback, type ReloadTracker } from "../lib/notify";
@@ -22,29 +22,29 @@ function setup() {
   return { harness, reloads };
 }
 
-describe("canvas.notify Caller-Prüfung (BBP-174 Spike 2, Kriterium 3)", () => {
-  it("akzeptiert einen echten Plugin-Aufruf mit passender pluginId und löst einen Reload aus", async () => {
+describe("canvas.notify caller verification (BBP-174 Spike 2, criterion 3)", () => {
+  it("accepts a real plugin call with a matching pluginId and triggers a reload", async () => {
     const { harness, reloads } = setup();
     const result = await harness.callRpc("canvas.notify", { pluginId: "crew" }, { experimental_caller: { kind: "plugin", pluginId: "crew" } });
     expect(result).toEqual({ accepted: true });
     await vi.waitFor(() => expect(reloads).toEqual([{ pluginId: "crew", scope: undefined }]));
   });
 
-  it("negativ: lehnt einen gefälschten Aufruf ab (Caller behauptet eine andere pluginId als er ist) und löst keinen Reload aus", async () => {
+  it("negative: rejects a spoofed call (caller claims a different pluginId than it is) and triggers no reload", async () => {
     const { harness, reloads } = setup();
     const result = await harness.callRpc("canvas.notify", { pluginId: "crew" }, { experimental_caller: { kind: "plugin", pluginId: "evil" } });
     expect(result).toEqual({ accepted: false });
     expect(reloads).toEqual([]);
   });
 
-  it("negativ: lehnt einen Aufruf ohne Plugin-Identität ab (kind: client, z.B. direkt aus der UI oder der CLI)", async () => {
+  it("negative: rejects a call with no plugin identity (kind: client, e.g. straight from the UI or the CLI)", async () => {
     const { harness, reloads } = setup();
     const result = await harness.callRpc("canvas.notify", { pluginId: "crew" }, { experimental_caller: { kind: "client" } });
     expect(result).toEqual({ accepted: false });
     expect(reloads).toEqual([]);
   });
 
-  it("negativ: lehnt eine nicht beim Canvas angemeldete Erweiterung ab, auch mit echter Caller-Identität", async () => {
+  it("negative: rejects an extension not registered with the canvas, even with a genuine caller identity", async () => {
     const { harness, reloads } = setup();
     const result = await harness.callRpc("canvas.notify", { pluginId: "unregistered" }, { experimental_caller: { kind: "plugin", pluginId: "unregistered" } });
     expect(result).toEqual({ accepted: false });
@@ -52,11 +52,11 @@ describe("canvas.notify Caller-Prüfung (BBP-174 Spike 2, Kriterium 3)", () => {
   });
 });
 
-describe("Entprellung (600ms, BBP-174 Spike 2)", () => {
+describe("debounce (600ms, BBP-174 Spike 2)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("fasst mehrere notifies für dasselbe Plugin/Scope innerhalb von 600ms zu einem Reload zusammen", async () => {
+  it("collapses several notifies for the same plugin/scope within 600ms into one reload", async () => {
     const { harness, reloads } = setup();
     const caller = { experimental_caller: { kind: "plugin" as const, pluginId: "crew" } };
     void harness.callRpc("canvas.notify", { pluginId: "crew" }, caller);
@@ -68,7 +68,7 @@ describe("Entprellung (600ms, BBP-174 Spike 2)", () => {
     expect(reloads).toEqual([{ pluginId: "crew", scope: undefined }]);
   });
 
-  it("negativ: zwei notifies mehr als 600ms auseinander lösen zwei Reloads aus", async () => {
+  it("negative: two notifies more than 600ms apart trigger two reloads", async () => {
     const { harness, reloads } = setup();
     const caller = { experimental_caller: { kind: "plugin" as const, pluginId: "crew" } };
     void harness.callRpc("canvas.notify", { pluginId: "crew" }, caller);
@@ -79,11 +79,11 @@ describe("Entprellung (600ms, BBP-174 Spike 2)", () => {
   });
 });
 
-describe("10s-Polling-Rückfall für Erweiterungen ohne notify (BBP-174 Spike 2)", () => {
+describe("10s polling fallback for extensions without notify (BBP-174 Spike 2)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("lädt alle 10s neu, solange die Ansicht sichtbar ist", async () => {
+  it("reloads every 10s while the view stays visible", async () => {
     const reloads: { pluginId: string; scope: unknown }[] = [];
     const stop = startPollingFallback("graph-studio", { projectId: "p1" }, {
       reload: (pluginId, scope) => reloads.push({ pluginId, scope }),
@@ -97,7 +97,7 @@ describe("10s-Polling-Rückfall für Erweiterungen ohne notify (BBP-174 Spike 2)
     stop();
   });
 
-  it("negativ: nach dem Stop (Ansicht verlassen) lädt es nicht mehr nach", async () => {
+  it("negative: stops reloading once stopped (the view was left)", async () => {
     const reloads: unknown[] = [];
     const stop = startPollingFallback("graph-studio", {}, { reload: () => reloads.push(true) });
     stop();

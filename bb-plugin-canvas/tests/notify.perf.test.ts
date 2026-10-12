@@ -6,8 +6,8 @@ import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { describe, it } from "vitest";
 import { registerCanvasNotify } from "../lib/notify";
 
-describe("BBP-174 Spike 2: notify -> reload Latenz (p50/p95, 20 Durchläufe)", () => {
-  it("misst real über die SDK-Testing-Harness", { timeout: 20_000 }, async () => {
+describe("BBP-174 Spike 2: notify -> reload latency (p50/p95, 20 runs)", () => {
+  it("measures for real through the SDK testing harness", { timeout: 20_000 }, async () => {
     const samples: number[] = [];
     for (let i = 0; i < 20; i++) {
       const { bb, harness } = createFakePluginHost();
