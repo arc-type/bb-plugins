@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CanvasShell, colorLightness } from "@/components/CanvasShell";
-import type { CanvasEdge, CanvasNode } from "@/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode } from "@/lib/types";
 
 afterEach(cleanup);
 
@@ -57,6 +57,19 @@ describe("CanvasShell", () => {
     );
     const card = screen.getByRole("button", { name: new RegExp("^steps-impl — ") });
     expect(card.style.border).not.toContain("var(--border)");
+  });
+});
+
+describe("CanvasShell frames (BBP-165)", () => {
+  it("renders a frame's label behind its member cards", () => {
+    const framedNodes: CanvasNode[] = nodes.map((node) =>
+      node.id === "m1" || node.id === "m2" ? { ...node, frameId: "frame-crew" } : node,
+    );
+    const frames: CanvasFrame[] = [{ id: "frame-crew", parentId: null, label: "crew-frame" }];
+    render(
+      <CanvasShell nodes={framedNodes} expanded={new Set(["crew"])} edges={edges} frames={frames} />,
+    );
+    expect(screen.getByText("crew-frame")).toBeTruthy();
   });
 });
 

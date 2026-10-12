@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layoutTree, MARGIN, NODE_HEIGHT, NODE_WIDTH, COLUMN_GAP, ROW_GAP } from "@/lib/layout";
-import type { CanvasEdge, CanvasNode } from "@/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode } from "@/lib/types";
 
 function node(id: string, parentId: string | null, overrides: Partial<CanvasNode> = {}): CanvasNode {
   return { id, kind: "member", label: id, parentId, ...overrides };
@@ -182,6 +182,53 @@ describe("layoutTree", () => {
       const edges: CanvasEdge[] = [{ from: "b", to: "a", variant: "back" }];
       const { edges: placed } = layoutTree(nodes, new Set(["run"]), edges);
       expect(placed.find((edge) => edge.variant === "back")!.state).toBeUndefined();
+    });
+  });
+
+  describe("frames (BBP-165)", () => {
+    function frameNodes(): CanvasNode[] {
+      return [
+        node("crew", null, { kind: "crew" }),
+        node("lead", "crew", { kind: "member" }),
+        node("m1", "crew", { kind: "member" }),
+        node("m2", "crew", { kind: "member" }),
+      ];
+    }
+
+    it("without a frames argument, returns bit-identical results to before (negative criterion 1)", () => {
+      const nodes = frameNodes();
+      const expanded = new Set(["crew"]);
+      const withoutArg = layoutTree(nodes, expanded);
+      const withEmptyEdges = layoutTree(nodes, expanded, []);
+      expect(withoutArg).toEqual(withEmptyEdges);
+      expect((withoutArg as { frames?: unknown }).frames).toBeUndefined();
+    });
+
+    it("computes a frame's bounding box plus padding from its member cards", () => {
+      const nodes = frameNodes();
+      const expanded = new Set(["crew"]);
+      const frames: CanvasFrame[] = [{ id: "frame-crew", parentId: null, label: "crew" }];
+      nodes[1] = { ...nodes[1]!, frameId: "frame-crew" };
+      nodes[2] = { ...nodes[2]!, frameId: "frame-crew" };
+      nodes[3] = { ...nodes[3]!, frameId: "frame-crew" };
+      const { positions, frames: placedFrames } = layoutTree(nodes, expanded, [], frames);
+      const members = positions.filter((p) => ["lead", "m1", "m2"].includes(p.id));
+      const minX = Math.min(...members.map((p) => p.x));
+      const minY = Math.min(...members.map((p) => p.y));
+      const maxX = Math.max(...members.map((p) => p.x + p.width));
+      const maxY = Math.max(...members.map((p) => p.y + p.height));
+      const placed = placedFrames!.find((f) => f.id === "frame-crew")!;
+      expect(placed.x).toBeLessThan(minX);
+      expect(placed.y).toBeLessThan(minY);
+      expect(placed.x + placed.width).toBeGreaterThan(maxX);
+      expect(placed.y + placed.height).toBeGreaterThan(maxY);
+    });
+
+    it("drops a frame with no visible member nodes", () => {
+      const nodes = frameNodes();
+      const frames: CanvasFrame[] = [{ id: "empty-frame", parentId: null, label: "empty" }];
+      const { frames: placedFrames } = layoutTree(nodes, new Set(["crew"]), [], frames);
+      expect(placedFrames!.find((f) => f.id === "empty-frame")).toBeUndefined();
     });
   });
 });
