@@ -186,4 +186,25 @@ describe("the canvas page", () => {
     canvasPanel({ projectId: null, sdk: { projects: { list: async () => [] } } });
     expect(await screen.findByText("No projects yet.")).toBeTruthy();
   });
+
+  // BBP-215: the real caller reloads the canvas layer (and remounts
+  // CanvasView via `key={shownKey}`) on every filter change, since the
+  // layer depends on which projects are shown. That must not tear the
+  // toolbar's SearchableMultiSelect down with it — the dropdown has to
+  // stay open, focused and keep its search text across checking two
+  // projects back to back.
+  it("the Projects dropdown stays open and focused while checking two projects back to back", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shop" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Blog — ") })).toBeNull());
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Blog" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy());
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+  });
 });

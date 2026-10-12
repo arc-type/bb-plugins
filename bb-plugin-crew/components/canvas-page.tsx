@@ -109,7 +109,11 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   useEffect(() => {
     if (shown === null || projects === null || visible !== true) return;
     let cancelled = false;
-    setLayer(null);
+    // BBP-215: used to `setLayer(null)` here too, which fell through to the
+    // "Loading…" branch below and replaced the whole page — including the
+    // toolbar's project filter — on every refetch, closing its dropdown.
+    // The stale layer now stays on screen until the new one lands; only the
+    // very first load (still `null`) hits that branch.
     const labels = new Map(projects.map((project) => [project.id, project.name]));
     Promise.all(
       shown.map((projectId) =>
@@ -176,8 +180,11 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
 
   return (
     <CanvasView
-      // `initialExpanded` is read once at mount, so a new project set needs a fresh view.
-      key={shownKey}
+      // BBP-215: used to be `key={shownKey}`, which also tore down and
+      // rebuilt `toolbar` (the project filter) on every check, closing its
+      // dropdown. `resetKey` resets only the canvas's own per-project-set
+      // state; the toolbar keeps its identity across a filter change.
+      resetKey={shownKey}
       nodes={layer.nodes}
       edges={layer.edges}
       frames={layer.frames}
