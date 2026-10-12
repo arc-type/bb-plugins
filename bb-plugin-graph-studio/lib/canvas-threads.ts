@@ -2,6 +2,7 @@
 // and — lazily, once that thread node is opened — its turns and tool calls
 // from the SDK timeline. Pure mapping, so it is testable without the SDK.
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
+import { formatTimestamp } from "../vendor/bb-canvas/lib/format";
 import type { ThreadLike } from "./canvas-details";
 
 export const threadNodeId = (threadId: string): string => `thread:${threadId}`;
@@ -86,11 +87,14 @@ export async function enrichThreadNodes(
 }
 
 /** The slice of a `ThreadTimelineResponse` row this mapping reads, aligned
- *  with the SDK's `TimelineRow` union (`TimelineTurnRow` | `TimelineSourceRow`,
- *  where the latter is `TimelineConversationRow | TimelineWorkRow |
- *  TimelineSystemRow`): `kind` is `"turn"`, `"conversation"`, `"work"`, or
- *  `"system"`; a `"work"` row's `workKind` discriminates `"tool"` from
- *  `"delegation"` (a subagent spawn) and the rest. */
+ *  with the SDK's real `TimelineRow` union (verified against the
+ *  `@get-bb/plugin-sdk` bundled zod schemas and real samples, BBP-206 R2a/b
+ *  — see `bb-canvas/fixtures/real-timeline-rows.json`): `kind` is `"turn"`,
+ *  `"conversation"`, `"work"`, or `"system"`. A `"work"` row's `workKind` is
+ *  a 16-way discriminated union with *disjoint* fields per kind — this type
+ *  only models the four BBP-206 covers (`command`, `tool`, `file-change`,
+ *  `delegation`); every other `workKind` falls through to the generic
+ *  fallback mapping untouched. */
 export type TimelineRowLike = {
   id: string;
   kind: string;
@@ -107,31 +111,53 @@ export type TimelineRowLike = {
    *  turn steps are fetched lazily via `timelineTurnSummaryDetails` — but a
    *  caller that already has them (e.g. a future eager page) can still nest them. */
   children?: readonly TimelineRowLike[] | null;
-  /** Discriminates a `"work"` row, e.g. `"tool"`, `"delegation"`. */
+  /** Discriminates a `"work"` row: `"command"` (shell), `"tool"` (MCP/other
+   *  tool calls), `"file-change"` (Edit/Write), `"delegation"` (subagent
+   *  spawn), or one of 12 other kinds this mapping does not special-case. */
   workKind?: string;
-  /** The tool's name, e.g. `"Bash"`, `"Read"`, `"Task"` for a delegation. */
+  /** Real Unix-ms timestamps (not strings — BBP-206 R2b correction). */
+  startedAt?: number;
+  completedAt?: number;
+  /** `workKind: "command"` fields: a shell invocation. No `toolName`/`toolArgs`. */
+  command?: string;
+  cwd?: string;
+  exitCode?: number;
+  /** `workKind: "tool"` fields: an MCP/other tool call. No `exitCode`/`command`. */
   toolName?: string;
-  /** A delegation (subagent) row's task description. */
+  toolArgs?: unknown;
+  /** Shared by `command` and `tool`. */
+  output?: string;
+  outputPreview?: string;
+  /** `workKind: "file-change"` fields: one file edit. No `output`/`exitCode`. */
+  change?: {
+    path?: string;
+    kind?: string;
+    movePath?: string | null;
+    diffStats?: { added: number; removed: number };
+  };
+  stdout?: string | null;
+  stderr?: string | null;
+  /** `workKind: "delegation"` (subagent) row's task description. */
   description?: string | null;
   /** A delegation row's own nested rows (`TimelineDelegationWorkRow.childRows`). */
   childRows?: readonly TimelineRowLike[] | null;
-  /** A delegation row's final output, shown as a short summary. */
-  output?: string;
   /** A `"system"` row's own fields. */
   title?: string;
-  detail?: string;
-  /** e.g. `error`, `operation`, `warning`, `deprecation`, `debug`, `reconnect`. */
+  detail?: string | null;
+  /** e.g. `"debug"`, `"error"`, `"reconnect"`, or `"operation"` (see `operationKind`). */
   systemKind?: string;
-  /** e.g. `context_clear`, `compaction`, `parent-change`. */
+  /** e.g. `"context-clear"`, `"compaction"`, `"parent-change"`, `"reasoning"`,
+   *  `"warning"` — real values are hyphenated, not underscored. */
   operationKind?: string;
-  oldParentId?: string;
-  newParentId?: string;
-  /** A `"work"` row's own fields. */
-  toolArgs?: unknown;
-  outputPreview?: string;
-  exitCode?: number;
-  startedAt?: string;
-  completedAt?: string;
+  /** Only present when `operationKind === "parent-change"`; titles are the
+   *  human-readable form, preferred over the bare ids. */
+  parentChange?: {
+    action?: string;
+    previousParentThreadId?: string;
+    previousParentThreadTitle?: string;
+    nextParentThreadId?: string;
+    nextParentThreadTitle?: string;
+  };
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -164,51 +190,111 @@ function argsText(args: unknown): string {
   return JSON.stringify(args) ?? "";
 }
 
-/** The file a tool call touches, if its arguments name one. */
-function argsFileName(args: unknown): string {
-  if (!args || typeof args !== "object") return "";
-  const record = args as Record<string, unknown>;
-  const path = record.file_path ?? record.path ?? record.notebook_path;
-  return typeof path === "string" ? (path.split("/").pop() ?? "") : "";
+/** `"400ms"` under a second, else `"2.3s"` — computed from real Unix-ms
+ *  numbers (BBP-206 R2b: `Date.parse` on a number was always `NaN`). */
+function duration(startedAt?: number, completedAt?: number): string | undefined {
+  if (typeof startedAt !== "number" || typeof completedAt !== "number") return undefined;
+  const ms = completedAt - startedAt;
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-function duration(startedAt?: string, completedAt?: string): string {
-  if (!startedAt || !completedAt) return "";
-  const ms = Date.parse(completedAt) - Date.parse(startedAt);
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+/** The first line of the first conversation row with `role: "user"` among
+ *  `rows` — the turn's own request. Untruncated; callers pick their own
+ *  length (the card label and the sidebar field truncate differently). */
+function firstUserLine(rows: readonly TimelineRowLike[] | null | undefined): string | undefined {
+  const request = (rows ?? []).find((row) => row.kind === "conversation" && row.role === "user");
+  const line = request?.text?.split("\n").find((candidate) => candidate.trim() !== "");
+  return line || undefined;
 }
 
 function rowLabel(row: TimelineRowLike): string {
   if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
   if (isSubagentRow(row)) return `Agent: ${row.description ?? "(no description)"}`;
   if (row.toolName) return row.toolName;
-  if (row.kind === "work") {
-    const fromArgs = (args: unknown) =>
-      typeof args === "object" && args !== null && typeof (args as { command?: unknown }).command === "string"
-        ? argsText(args)
-        : argsFileName(args) || argsText(args);
-    return truncate(fromArgs(row.toolArgs), 48) || row.kind;
-  }
   return row.kind;
 }
 
 // The sidebar itself truncates a long value behind a "more" toggle
-// (BBP-206 review round 1) — this stores the full value, never a clipped
-// one, so "more" always has the real thing to reveal.
-function workMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
-  const command = argsText(row.toolArgs);
-  const isCommand = typeof row.toolArgs === "string" || typeof (row.toolArgs as { command?: unknown } | null)?.command === "string";
+// (BBP-206 review round 1) — every meta builder below stores the full
+// value, never a clipped one, so "more" always has the real thing to reveal.
+function commandMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
   return compact({
-    toolName: row.toolName,
-    ...(isCommand ? { command } : { toolArgs: command }),
+    command: row.command,
+    cwd: row.cwd,
     outputPreview: row.outputPreview || row.output || "",
     exitCode: row.exitCode,
     duration: duration(row.startedAt, row.completedAt),
-    startedAt: row.startedAt,
-    completedAt: row.completedAt,
+    startedAt: formatTimestamp(row.startedAt),
+    completedAt: formatTimestamp(row.completedAt),
     ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
   });
+}
+
+function toolMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
+  const argsString = argsText(row.toolArgs);
+  const isCommandShaped = typeof row.toolArgs === "string" || typeof (row.toolArgs as { command?: unknown } | null)?.command === "string";
+  return compact({
+    toolName: row.toolName,
+    ...(isCommandShaped ? { command: argsString } : { toolArgs: argsString }),
+    outputPreview: row.outputPreview || row.output || "",
+    duration: duration(row.startedAt, row.completedAt),
+    startedAt: formatTimestamp(row.startedAt),
+    completedAt: formatTimestamp(row.completedAt),
+    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+  });
+}
+
+function fileChangeMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
+  const diffStats = row.change?.diffStats;
+  return compact({
+    path: row.change?.path,
+    kind: row.change?.kind,
+    diffStats: diffStats ? `+${diffStats.added} -${diffStats.removed}` : undefined,
+    stdout: row.stdout || "",
+    stderr: row.stderr || "",
+    duration: duration(row.startedAt, row.completedAt),
+    startedAt: formatTimestamp(row.startedAt),
+    completedAt: formatTimestamp(row.completedAt),
+    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+  });
+}
+
+/** Dispatches a `"work"` row's sidebar fields by `workKind` — the four real
+ *  shapes BBP-206 covers have disjoint fields (a shell command's `exitCode`
+ *  does not exist on an MCP tool call, a file edit has neither); reading
+ *  them through one flat object produced `[object Object]`/empty fields
+ *  before (BBP-206 R2b finding 1). Any other `workKind` (11 not covered)
+ *  falls through to an empty object — status/summary from the caller still
+ *  show, nothing crashes or reads fields that do not exist on it. */
+function workMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
+  switch (row.workKind) {
+    case "command":
+      return commandMeta(row, threadId);
+    case "tool":
+      return toolMeta(row, threadId);
+    case "file-change":
+      return fileChangeMeta(row, threadId);
+    default:
+      return {};
+  }
+}
+
+/** The card label for a `"work"` row, by `workKind`. Delegation is handled
+ *  by `rowLabel`'s subagent branch before this is ever reached. */
+function workLabel(row: TimelineRowLike): string {
+  switch (row.workKind) {
+    case "command":
+      return row.command ? truncate(row.command, 48) : row.kind;
+    case "tool":
+      return row.toolName ?? row.kind;
+    case "file-change": {
+      const path = row.change?.path;
+      return path ? (path.split("/").pop() ?? path) : row.kind;
+    }
+    default:
+      return rowLabel(row);
+  }
 }
 
 /** Builds a row's own canvas node plus, for a subagent spawn, its own
@@ -220,14 +306,14 @@ function rowNodes(row: TimelineRowLike, parentId: string, threadId?: string): Ca
   const node: CanvasNode = {
     id,
     kind: row.kind === "conversation" ? "turn" : isSubagentRow(row) ? "subagent" : "tool-call",
-    label: rowLabel(row),
+    label: isWork ? workLabel(row) : rowLabel(row),
     ...(failed ? { status: "failed" as const } : {}),
     parentId,
     meta: {
       rowId: row.id,
       kind: row.kind,
       ...(row.status ? { status: row.status } : {}),
-      ...(row.output ? { summary: row.output } : {}),
+      ...(row.output && isSubagentRow(row) ? { summary: row.output } : {}),
       ...(isWork ? workMeta(row, threadId) : {}),
     },
   };
@@ -236,12 +322,22 @@ function rowNodes(row: TimelineRowLike, parentId: string, threadId?: string): Ca
 }
 
 /** An error, or an operation that says what happened, stands on its own;
- *  every other system row is noise worth one bundled node. */
+ *  `reasoning` always bundles even though it always has a `detail` (BBP-206
+ *  R2b finding 6 — a reasoning-heavy turn produced dozens of single-row
+ *  "Thought" nodes before this exclusion). Every other minor system row is
+ *  noise worth one bundled node. */
 function isOwnSystemEvent(row: TimelineRowLike): boolean {
-  return row.systemKind === "error" || (row.systemKind === "operation" && !!row.detail);
+  if (row.systemKind === "error") return true;
+  if (row.systemKind !== "operation") return false;
+  if (row.operationKind === "reasoning") return false;
+  // A parent-change's own information lives in `parentChange`, not `detail`
+  // (which is often null for it) — it always stands on its own regardless.
+  if (row.operationKind === "parent-change") return true;
+  return !!row.detail;
 }
 
 function systemEventNode(row: TimelineRowLike, parentId: string): CanvasNode {
+  const parentChange = row.operationKind === "parent-change" ? row.parentChange : undefined;
   return {
     id: `row:${row.id}`,
     kind: "system-event",
@@ -251,7 +347,12 @@ function systemEventNode(row: TimelineRowLike, parentId: string): CanvasNode {
     meta: compact({
       rowId: row.id,
       detail: row.detail,
-      ...(row.operationKind === "parent-change" ? { oldParent: row.oldParentId, newParent: row.newParentId } : {}),
+      ...(parentChange
+        ? {
+            oldParent: parentChange.previousParentThreadTitle ?? parentChange.previousParentThreadId,
+            newParent: parentChange.nextParentThreadTitle ?? parentChange.nextParentThreadId,
+          }
+        : {}),
     }),
   };
 }
@@ -312,8 +413,7 @@ export function timelineToCanvas(
     flush();
     const turnNodeId = `row:${row.id}`;
     const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
-    const request = row.children?.find((child) => child.kind === "conversation" && child.role === "user");
-    const firstLine = truncate(request?.text?.split("\n").find((line) => line.trim() !== "") ?? "", 120);
+    const firstLine = truncate(firstUserLine(row.children) ?? "", 120);
     nodes.push({
       id: turnNodeId,
       kind: "turn",
@@ -346,4 +446,55 @@ export function turnDetailsToCanvas(
   threadId?: string,
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   return { nodes: mapRows(response.rows, turnNodeId, threadId), edges: [] };
+}
+
+/** What `enrichTurnNodes` needs to fetch one turn's lazily-loaded steps —
+ *  the same page `loadChildren` fetches on an expand click, just triggered
+ *  eagerly here so the card's first line doesn't wait for that. */
+export type TurnFirstLinePort = {
+  turnDetails: (
+    turnId: string,
+    threadId: string,
+    sourceSeqStart: number,
+    sourceSeqEnd: number,
+  ) => Promise<{ rows: readonly TimelineRowLike[] }>;
+};
+
+/** Replaces each turn node without a `meta.firstLine` — real thread-level
+ *  pages never carry a turn's `children` (BBP-206 R2b finding 3: they are
+ *  always `null`, fetched lazily) — with one carrying the first line of its
+ *  own request, once that page loads. A turn with 0 steps, missing
+ *  coordinates, or whose first page has no `role: "user"` row keeps its
+ *  plain `"Turn · n steps"` label; this never throws and never drops a node. */
+export async function enrichTurnNodes(nodes: readonly CanvasNode[], port: TurnFirstLinePort): Promise<CanvasNode[]> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const pending = nodes.filter((node) => node.kind === "turn" && node.meta?.firstLine === undefined);
+  await Promise.all(
+    pending.map(async (node) => {
+      const { threadId, turnId, sourceSeqStart, sourceSeqEnd, summaryCount } = node.meta ?? {};
+      if (
+        typeof threadId !== "string" ||
+        typeof turnId !== "string" ||
+        typeof sourceSeqStart !== "number" ||
+        typeof sourceSeqEnd !== "number" ||
+        typeof summaryCount !== "number" ||
+        summaryCount === 0
+      ) {
+        return;
+      }
+      try {
+        const { rows } = await port.turnDetails(turnId, threadId, sourceSeqStart, sourceSeqEnd);
+        const line = firstUserLine(rows);
+        if (!line) return;
+        byId.set(node.id, {
+          ...node,
+          label: `${truncate(line, 48)} · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
+          meta: { ...node.meta, firstLine: truncate(line, 120) },
+        });
+      } catch {
+        // Turn steps unreadable: the plain "Turn · n steps" label stands.
+      }
+    }),
+  );
+  return nodes.map((node) => byId.get(node.id) ?? node);
 }

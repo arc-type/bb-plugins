@@ -1,7 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { enrichThreadNodes, threadNodeFor, threadNodeId, timelineToCanvas, turnDetailsToCanvas } from "../lib/canvas-threads";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+import {
+  enrichThreadNodes,
+  enrichTurnNodes,
+  threadNodeFor,
+  threadNodeId,
+  timelineToCanvas,
+  turnDetailsToCanvas,
+  type TimelineRowLike,
+} from "../lib/canvas-threads";
 import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
 import type { ThreadLike } from "../lib/canvas-details";
+
+// Real sdk.threads.timeline() rows (BBP-206 R2a/R2b) — see
+// bb-canvas/fixtures/README.md for sources and what is and isn't
+// independently verified.
+const fixtures = JSON.parse(readFileSync("../bb-canvas/fixtures/real-timeline-rows.json", "utf8")) as Record<string, unknown>;
 
 describe("threadNodeFor", () => {
   it("builds a collapsed thread node under a member with a bound thread", () => {
@@ -96,7 +110,7 @@ describe("timelineToCanvas", () => {
     expect(nodes.filter((node) => node.parentId === subagent.id).map((node) => node.id)).toEqual(["row:r7"]);
   });
 
-  it("puts status and a short output summary into a tool-call's meta", () => {
+  it("puts status and a short output summary into a delegation's meta", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
         { id: "r8", kind: "work", workKind: "delegation", toolName: "Task", status: "completed", description: "list files", output: "ls -la → 3 files" },
@@ -223,66 +237,182 @@ describe("threadNodeFor labels (BBP-209)", () => {
   });
 });
 
-describe("work row mapping (BBP-209)", () => {
-  it("curates tool name, command, output, duration, times and a thread link", () => {
+// BBP-206 R2b: `work` rows are a 16-way discriminated union on `workKind`
+// with disjoint fields, not the one flat shape BBP-207/208/209 assumed —
+// see the "Timeline shape" comment on BBP-206. These four (`command`,
+// `tool`, `file-change`, `delegation`) are what this round covers.
+describe("work row mapping: workKind command (BBP-206 R2b)", () => {
+  it("curates command, output, exit code, duration and formatted times for a shell command", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "w1",
+          kind: "work",
+          workKind: "command",
+          command: "bb tasks show BBP-112",
+          cwd: "/repo",
+          status: "completed",
+          output: "Task BBP-112 …",
+          exitCode: 0,
+          startedAt: 1000,
+          completedAt: 1400,
+          sourceSeqStart: 9,
+        },
+      ],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "bb tasks show BBP-112" });
+    expect(nodes[0]!.status).not.toBe("failed");
+    expect(nodes[0]!.meta).toMatchObject({
+      command: "bb tasks show BBP-112",
+      cwd: "/repo",
+      outputPreview: "Task BBP-112 …",
+      exitCode: 0,
+      duration: "400ms",
+      threadId: "t1",
+      sourceSeq: 9,
+    });
+    expect(nodes[0]!.meta!.startedAt).toMatch(/UTC$/);
+    expect(nodes[0]!.meta).not.toHaveProperty("toolName");
+    expect(nodes[0]!.meta).not.toHaveProperty("toolArgs");
+  });
+
+  it("marks a non-zero exit code as failed, even though exitCode: 0 with error-looking output is not a bug (the tool itself exited 0)", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w2", kind: "work", workKind: "command", command: "grep -rl x", exitCode: 1, output: "" }],
+    });
+    expect(nodes[0]!.status).toBe("failed");
+    expect(nodes[0]!.meta).toMatchObject({ exitCode: 1 });
+
+    const ok = timelineToCanvas("t1", {
+      rows: [{ id: "w3", kind: "work", workKind: "command", command: "tsc", exitCode: 0, output: "error TS2322: …" }],
+    });
+    expect(ok.nodes[0]!.status).not.toBe("failed");
+  });
+
+  it("truncates a long command for the card label but keeps the full command in meta", () => {
+    const long = "echo " + "x".repeat(100);
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "w4", kind: "work", workKind: "command", command: long }] });
+    expect(nodes[0]!.label.length).toBeLessThanOrEqual(48);
+    expect(nodes[0]!.meta!.command).toBe(long);
+  });
+
+  it("writes no empty fields and no duration/sourceSeq when the data isn't there", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w5", kind: "work", workKind: "command", command: "ls" }],
+    });
+    const meta = nodes[0]!.meta!;
+    for (const value of Object.values(meta)) expect(value === "" || value === undefined || value === null).toBe(false);
+    for (const key of ["cwd", "outputPreview", "exitCode", "duration", "startedAt", "completedAt", "sourceSeq", "toolName", "toolArgs"]) {
+      expect(meta).not.toHaveProperty(key);
+    }
+  });
+});
+
+describe("work row mapping: workKind tool (BBP-206 R2b)", () => {
+  it("curates tool name, formatted args, output and duration — never an exit code (the schema has none)", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
         {
           id: "w1",
           kind: "work",
           workKind: "tool",
-          toolName: "Bash",
-          status: "completed",
-          toolArgs: { command: "npm test" },
-          output: "all green",
-          exitCode: 0,
-          startedAt: "2026-10-12T10:00:00.000Z",
-          completedAt: "2026-10-12T10:00:02.300Z",
-          sourceSeqStart: 42,
+          toolName: "crew_inbox",
+          toolArgs: { limit: 5 },
+          output: "2026-10-06T16:25Z msg_… human → concierge-lead@concierge",
+          startedAt: 1000,
+          completedAt: 1200,
+          sourceSeqStart: 8,
         },
       ],
     });
-    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "Bash" });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "crew_inbox" });
     expect(nodes[0]!.meta).toMatchObject({
-      toolName: "Bash",
-      command: "npm test",
-      outputPreview: "all green",
-      exitCode: 0,
-      duration: "2.3s",
-      startedAt: "2026-10-12T10:00:00.000Z",
-      completedAt: "2026-10-12T10:00:02.300Z",
+      toolName: "crew_inbox",
+      toolArgs: JSON.stringify({ limit: 5 }),
+      outputPreview: "2026-10-06T16:25Z msg_… human → concierge-lead@concierge",
+      duration: "200ms",
       threadId: "t1",
-      sourceSeq: 42,
+      sourceSeq: 8,
     });
+    expect(nodes[0]!.meta).not.toHaveProperty("exitCode");
+    expect(nodes[0]!.meta).not.toHaveProperty("command");
     expect(nodes[0]!.status).not.toBe("failed");
   });
 
-  it("labels by command or file name when there is no tool name", () => {
-    const a = timelineToCanvas("t1", { rows: [{ id: "a", kind: "work", workKind: "tool", toolArgs: { command: "ls -la" } }] });
-    expect(a.nodes[0]!.label).toBe("ls -la");
-    const b = timelineToCanvas("t1", { rows: [{ id: "b", kind: "work", workKind: "tool", toolArgs: { file_path: "/x/y/z.ts" } }] });
-    expect(b.nodes[0]!.label).toBe("z.ts");
-  });
-
-  it("marks a non-zero exit code as failed", () => {
+  it("curates the command string when toolArgs itself names one", () => {
     const { nodes } = timelineToCanvas("t1", {
-      rows: [{ id: "w2", kind: "work", workKind: "tool", toolName: "Bash", status: "completed", exitCode: 1 }],
+      rows: [{ id: "w2", kind: "work", workKind: "tool", toolName: "Bash", toolArgs: { command: "npm test" } }],
     });
-    expect(nodes[0]!.status).toBe("failed");
-    expect(nodes[0]!.meta).toMatchObject({ exitCode: 1 });
+    expect(nodes[0]!.meta).toMatchObject({ command: "npm test" });
+    expect(nodes[0]!.meta).not.toHaveProperty("toolArgs");
   });
 
-  it("writes no empty fields for a bare work row", () => {
+  it("writes no empty fields for a bare tool row", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [{ id: "w3", kind: "work", workKind: "tool", toolName: "Read", toolArgs: "", output: "" }],
     });
     const meta = nodes[0]!.meta!;
     for (const value of Object.values(meta)) expect(value === "" || value === undefined || value === null).toBe(false);
-    for (const key of ["command", "toolArgs", "outputPreview", "duration", "startedAt", "sourceSeq"]) expect(meta).not.toHaveProperty(key);
+    for (const key of ["command", "toolArgs", "outputPreview", "duration", "startedAt", "sourceSeq", "exitCode"]) {
+      expect(meta).not.toHaveProperty(key);
+    }
   });
 });
 
-describe("system row mapping (BBP-209)", () => {
+describe("work row mapping: workKind file-change (BBP-206 R2b)", () => {
+  it("labels the card by the file name and curates path, change kind and diff stats — no output, no exit code", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "w1",
+          kind: "work",
+          workKind: "file-change",
+          change: { path: "/repo/lib/search.ts", kind: "update", diffStats: { added: 14, removed: 0 } },
+          stdout: null,
+          stderr: null,
+          startedAt: 1000,
+          completedAt: 1300,
+        },
+      ],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "search.ts" });
+    expect(nodes[0]!.meta).toMatchObject({
+      path: "/repo/lib/search.ts",
+      kind: "update",
+      diffStats: "+14 -0",
+      duration: "300ms",
+    });
+    expect(nodes[0]!.meta).not.toHaveProperty("output");
+    expect(nodes[0]!.meta).not.toHaveProperty("outputPreview");
+    expect(nodes[0]!.meta).not.toHaveProperty("exitCode");
+    expect(nodes[0]!.meta).not.toHaveProperty("toolName");
+  });
+
+  it("falls back to the raw kind when change.path is missing", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "w2", kind: "work", workKind: "file-change" }] });
+    expect(nodes[0]!.label).toBe("work");
+  });
+
+  it("curates stdout/stderr only when present", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w3", kind: "work", workKind: "file-change", change: { path: "a.ts" }, stdout: "note", stderr: null }],
+    });
+    expect(nodes[0]!.meta).toMatchObject({ stdout: "note" });
+    expect(nodes[0]!.meta).not.toHaveProperty("stderr");
+  });
+});
+
+describe("work row mapping: unknown workKind falls through safely (BBP-206 R2b)", () => {
+  it("does not crash and never renders a stringified object for one of the 11 uncovered workKinds", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "w1", kind: "work", workKind: "web-search", status: "completed", toolName: "WebSearch" }],
+    });
+    expect(nodes[0]).toMatchObject({ kind: "tool-call", label: "WebSearch", meta: { status: "completed" } });
+    for (const value of Object.values(nodes[0]!.meta!)) expect(String(value)).not.toContain("[object Object]");
+  });
+});
+
+describe("system row mapping (BBP-206 R2b)", () => {
   it("gives an error its own failed system-event node", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [{ id: "s1", kind: "system", systemKind: "error", title: "Provider crashed", detail: "stack…" }],
@@ -291,13 +421,57 @@ describe("system row mapping (BBP-209)", () => {
     expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Provider crashed", status: "failed", meta: { detail: "stack…" } });
   });
 
-  it("shows old and new parent for a parent-change operation", () => {
+  it("recognizes the real hyphenated operationKind and shows old/new parent from the nested parentChange object", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
-        { id: "s2", kind: "system", systemKind: "operation", operationKind: "parent-change", title: "Moved", detail: "re-parented", oldParentId: "p1", newParentId: "p2" },
+        {
+          id: "s2",
+          kind: "system",
+          systemKind: "operation",
+          operationKind: "parent-change",
+          title: "Thread re-parented",
+          detail: null,
+          parentChange: {
+            action: "transfer",
+            previousParentThreadId: "thr_old",
+            previousParentThreadTitle: "orch-lead@factory-1",
+            nextParentThreadId: "thr_new",
+            nextParentThreadTitle: "orch-lead@factory-2",
+          },
+        },
       ],
     });
-    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Moved", meta: { detail: "re-parented", oldParent: "p1", newParent: "p2" } });
+    expect(nodes[0]).toMatchObject({
+      kind: "system-event",
+      label: "Thread re-parented",
+      meta: { oldParent: "orch-lead@factory-1", newParent: "orch-lead@factory-2" },
+    });
+  });
+
+  it("falls back to the bare thread id when a parent-change has no title", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "s3",
+          kind: "system",
+          systemKind: "operation",
+          operationKind: "parent-change",
+          title: "Thread re-parented",
+          parentChange: { previousParentThreadId: "thr_old", nextParentThreadId: "thr_new" },
+        },
+      ],
+    });
+    expect(nodes[0]!.meta).toMatchObject({ oldParent: "thr_old", newParent: "thr_new" });
+  });
+
+  it("recognizes context-clear (hyphenated, not context_clear) as its own operation node", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "s4", kind: "system", systemKind: "operation", operationKind: "context-clear", title: "Context cleared", detail: "Earlier chat is hidden…" },
+      ],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Context cleared", meta: { detail: "Earlier chat is hidden…" } });
   });
 
   it("bundles consecutive debug/reconnect rows into one node", () => {
@@ -330,10 +504,36 @@ describe("system row mapping (BBP-209)", () => {
     expect(nodes).toHaveLength(1);
     expect(nodes[0]).toMatchObject({ label: "2 system events", parentId: "row:turn" });
   });
+
+  it("bundles a reasoning-heavy turn's operation rows into one node, even though each has its own detail (BBP-206 R2b finding 6)", () => {
+    const reasoningRows: TimelineRowLike[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `reason-${i}`,
+      kind: "system",
+      systemKind: "operation",
+      operationKind: "reasoning",
+      title: `Thought for ${i + 10}s`,
+      detail: `Some real reasoning text number ${i}…`,
+    }));
+    const { nodes } = timelineToCanvas("t1", { rows: reasoningRows });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "5 system events" });
+    expect(nodes[0]!.meta!.titles).toEqual(["Thought for 10s", "Thought for 11s", "Thought for 12s", "Thought for 13s", "Thought for 14s"]);
+  });
+
+  it("still stands alone for a non-reasoning operation with detail set, between bundled rows", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "a", kind: "system", systemKind: "debug", title: "x" },
+        { id: "b", kind: "system", systemKind: "operation", operationKind: "warning", title: "Rate limit warning", detail: "90% of quota used" },
+        { id: "c", kind: "system", systemKind: "debug", title: "y" },
+      ],
+    });
+    expect(nodes.map((node) => node.label)).toEqual(["1 system event", "Rate limit warning", "1 system event"]);
+  });
 });
 
-describe("turn firstLine (BBP-209)", () => {
-  it("puts the first line of the user's request into the turn's meta", () => {
+describe("turn firstLine (BBP-206 R2b)", () => {
+  it("puts the first line of the user's request into the turn's meta when children are eagerly provided", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
         {
@@ -349,9 +549,10 @@ describe("turn firstLine (BBP-209)", () => {
     expect(nodes[0]).toMatchObject({ label: "Turn · 2 steps", meta: { firstLine: "Add dark mode" } });
   });
 
-  it("omits firstLine without a user message", () => {
+  it("omits firstLine without a user message, and on the real shape where children is always null", () => {
     const { nodes } = timelineToCanvas("t1", { rows: [{ id: "turn", kind: "turn", children: null }] });
     expect(nodes[0]!.meta).not.toHaveProperty("firstLine");
+    expect(nodes[0]!.label).toBe("Turn · 0 steps");
   });
 });
 
@@ -400,5 +601,153 @@ describe("enrichThreadNodes (BBP-210)", () => {
       firstUserMessage: async () => undefined,
     });
     expect(nodes).toEqual([other]);
+  });
+});
+
+describe("enrichTurnNodes (BBP-206 R2b)", () => {
+  const turnNode: CanvasNode = {
+    id: "row:turn-1",
+    kind: "turn",
+    label: "Turn · 9 steps",
+    parentId: "thread:t1",
+    meta: { rowId: "turn-1", threadId: "t1", turnId: "turn-1", sourceSeqStart: 7, sourceSeqEnd: 44, summaryCount: 9 },
+  };
+
+  it("replaces the plain label with the first line of the turn's own request, once its steps load", async () => {
+    const port = {
+      turnDetails: async () => ({
+        rows: [{ id: "c1", kind: "conversation", role: "user", text: "Fix the login bug\nmore detail" }] as readonly TimelineRowLike[],
+      }),
+    };
+    const [node] = await enrichTurnNodes([turnNode], port);
+    expect(node.label).toBe("Fix the login bug · 9 steps");
+    expect(node.meta).toMatchObject({ firstLine: "Fix the login bug" });
+  });
+
+  it("leaves the node as-is when no step is a user conversation row", async () => {
+    const port = { turnDetails: async () => ({ rows: [{ id: "s1", kind: "system", systemKind: "debug" }] as readonly TimelineRowLike[] }) };
+    const [node] = await enrichTurnNodes([turnNode], port);
+    expect(node).toEqual(turnNode);
+  });
+
+  it("leaves a turn with summaryCount: 0 untouched, without even calling the port", async () => {
+    const empty: CanvasNode = { ...turnNode, id: "row:turn-2", meta: { ...turnNode.meta, summaryCount: 0 } };
+    const turnDetails = vi.fn(async () => ({ rows: [] }));
+    const [node] = await enrichTurnNodes([empty], { turnDetails });
+    expect(node).toEqual(empty);
+    expect(turnDetails).not.toHaveBeenCalled();
+  });
+
+  it("leaves the node as-is when a coordinate is missing", async () => {
+    const incomplete: CanvasNode = { ...turnNode, id: "row:turn-3", meta: { rowId: "turn-3", threadId: "t1", summaryCount: 2 } };
+    const [node] = await enrichTurnNodes([incomplete], { turnDetails: async () => ({ rows: [] }) });
+    expect(node).toEqual(incomplete);
+  });
+
+  it("keeps the plain label when the turn's steps fail to load", async () => {
+    const [node] = await enrichTurnNodes([turnNode], {
+      turnDetails: async () => {
+        throw new Error("gone");
+      },
+    });
+    expect(node).toEqual(turnNode);
+  });
+
+  it("skips a turn that already has a firstLine (does not refetch)", async () => {
+    const already: CanvasNode = { ...turnNode, id: "row:turn-4", meta: { ...turnNode.meta, firstLine: "Already there" } };
+    const turnDetails = vi.fn(async () => ({ rows: [] }));
+    const [node] = await enrichTurnNodes([already], { turnDetails });
+    expect(node).toEqual(already);
+    expect(turnDetails).not.toHaveBeenCalled();
+  });
+
+  it("leaves every non-turn node untouched", async () => {
+    const other: CanvasNode = { id: "project:p1", kind: "project", label: "p1", parentId: null };
+    const nodes = await enrichTurnNodes([other], { turnDetails: async () => ({ rows: [] }) });
+    expect(nodes).toEqual([other]);
+  });
+});
+
+describe("BBP-206 R2b acceptance: real timeline fixtures", () => {
+  it("workCommandBash: Bash command card, full sidebar, exit code 0 not failed", () => {
+    const row = fixtures.workCommandBash as TimelineRowLike;
+    const { nodes } = timelineToCanvas(row.id /* unused */, { rows: [row] });
+    const node = nodes[0]!;
+    expect(node.label).toBe("bb tasks show BBP-112");
+    expect(node.status).not.toBe("failed");
+    expect(node.meta).toMatchObject({ exitCode: 0, command: (fixtures.workCommandBash as Record<string, string>).command });
+    expect(node.meta!.duration).toBe("400ms");
+    expect(String(node.meta!.startedAt)).toMatch(/UTC$/);
+  });
+
+  it("workCommandFailed: non-zero exit code fails the node", () => {
+    const row = fixtures.workCommandFailed as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    expect(nodes[0]!.status).toBe("failed");
+    expect(nodes[0]!.meta).toMatchObject({ exitCode: 1 });
+  });
+
+  it("workToolMcpCall: MCP tool call card and args, no exit code field", () => {
+    const row = fixtures.workToolMcpCall as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    expect(nodes[0]!.label).toBe("crew_inbox");
+    expect(nodes[0]!.meta).not.toHaveProperty("exitCode");
+    expect(nodes[0]!.meta!.toolArgs).toBe(JSON.stringify({ limit: 5 }));
+  });
+
+  it("workFileChangeEdit: file name on the card, path/kind/diffStats in meta, no output/exitCode", () => {
+    const row = fixtures.workFileChangeEdit as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    expect(nodes[0]!.label).toBe("search.ts");
+    expect(nodes[0]!.meta).toMatchObject({ kind: "update", diffStats: "+14 -0" });
+    expect(nodes[0]!.meta).not.toHaveProperty("output");
+    expect(nodes[0]!.meta).not.toHaveProperty("exitCode");
+  });
+
+  it("workDelegationSubagent: unchanged Agent: <description> label, childRows nested", () => {
+    const row = fixtures.workDelegationSubagent as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    const subagent = nodes.find((node) => node.id === `row:${row.id}`)!;
+    expect(subagent).toMatchObject({ kind: "subagent", label: "Agent: Find where sidenav search filters by tag" });
+    expect(nodes.some((node) => node.parentId === subagent.id)).toBe(true);
+  });
+
+  it("workFileRead: no crash, no toolArgs/command/exitCode field that isn't in the schema", () => {
+    const row = fixtures.workFileRead as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    expect(nodes).toHaveLength(1);
+    for (const key of ["toolArgs", "command", "exitCode"]) expect(nodes[0]!.meta).not.toHaveProperty(key);
+  });
+
+  it("systemOperationContextClear: own node, hyphenated operationKind recognized", () => {
+    const row = fixtures.systemOperationContextClear as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "system-event", label: "Context cleared" });
+  });
+
+  it("systemOperationParentChange: old/new parent from the nested parentChange's titles", () => {
+    const row = fixtures.systemOperationParentChange as TimelineRowLike;
+    const { nodes } = timelineToCanvas("t1", { rows: [row] });
+    expect(nodes[0]!.meta).toMatchObject({ oldParent: "orch-lead@factory-1", newParent: "orch-lead@factory-2" });
+  });
+
+  it("systemBundleCandidate: two debug rows bundle into one node listing both titles", () => {
+    const rows = (fixtures.systemBundleCandidate as { rows: TimelineRowLike[] }).rows;
+    const { nodes } = timelineToCanvas("t1", { rows });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ label: "2 system events" });
+    expect(nodes[0]!.meta!.titles).toEqual(["Preparing Worktree…", "Creating worktree"]);
+  });
+
+  it("turnWithManySteps + enrichTurnNodes: card gets the first line of conversationUser's text", async () => {
+    const turnRow = fixtures.turnWithManySteps as TimelineRowLike;
+    const { nodes } = timelineToCanvas("thr_wyw9bnia2w", { rows: [turnRow] });
+    const port = {
+      turnDetails: async () => ({ rows: [fixtures.conversationUser as TimelineRowLike, fixtures.conversationAssistant as TimelineRowLike] }),
+    };
+    const [enriched] = await enrichTurnNodes(nodes, port);
+    expect(enriched.label).toMatch(/^\[crew\] Kickoff brief for steps-impl@factory-1 · 9 steps$/);
+    expect(enriched.meta!.firstLine).toContain("[crew] Kickoff brief for steps-impl@factory-1");
   });
 });
