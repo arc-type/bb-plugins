@@ -33,6 +33,7 @@ import {
   type Graph,
   type GraphEdge,
   type GraphNode,
+  type ServiceTier,
 } from "../lib/graph";
 import { runCommand } from "../lib/describe";
 import { edgeLabel } from "../lib/layout";
@@ -272,7 +273,7 @@ function NodeExecutionSection({
                     providerId: value.providerId,
                     model: value.model,
                     reasoningLevel: value.reasoningLevel,
-                    serviceTier: value.serviceTier ?? null,
+                    serviceTier: (value.serviceTier as ServiceTier | undefined) ?? null,
                   })
                 }
               />
@@ -503,7 +504,7 @@ function NodeExecutionSection({
                     providerId: value.providerId,
                     model: value.model,
                     reasoningLevel: value.reasoningLevel,
-                    serviceTier: value.serviceTier ?? null,
+                    serviceTier: (value.serviceTier as ServiceTier | undefined) ?? null,
                   })
                 }
               />

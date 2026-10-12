@@ -4,7 +4,7 @@
   "type": "module",
   "engines": {
     "bb": ">=0.44",
-    "bbPluginSdk": ">=0.5.29"
+    "bbPluginSdk": ">=0.6.15"
   },
   "bb": {
     "name": "Crew",
@@ -26,7 +26,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.5.29",
+    "@get-bb/plugin-sdk": "0.6.15",
     "@playwright/test": "^1.64.0",
     "esbuild": "^0.28.2",
     "@pierre/diffs": "^1.2.9",
