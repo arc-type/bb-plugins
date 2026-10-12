@@ -87,6 +87,11 @@ export type CanvasViewProps = {
   /** Page-owned controls shown in the toolbar beside the colour toggle —
    *  the project filter, say (BBP-181). */
   toolbar?: ReactNode;
+  /** Passed straight through to the `Sidebar`'s own action buttons (BBP-185) —
+   *  absent here means absent there, so no dead link ever renders. */
+  onOpenThread?: (threadId: string) => void;
+  onOpenRun?: (runId: string) => void;
+  onOpenCrew?: (crew: string) => void;
   className?: string;
 };
 
@@ -105,6 +110,9 @@ export function CanvasView({
   canLoadChildren,
   surface,
   toolbar,
+  onOpenThread,
+  onOpenRun,
+  onOpenCrew,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -437,7 +445,15 @@ export function CanvasView({
         {editingFrameId !== null
           ? (renderFrameEditor?.(editingFrameId) ?? null)
           : selected
-            ? <Sidebar node={selected} onClose={() => select(null)} />
+            ? (
+                <Sidebar
+                  node={selected}
+                  onClose={() => select(null)}
+                  onOpenThread={onOpenThread}
+                  onOpenRun={onOpenRun}
+                  onOpenCrew={onOpenCrew}
+                />
+              )
             : null}
       </div>
     </div>

@@ -46,6 +46,7 @@ const KIND_COLOR: Record<CanvasNodeKind, string> = {
   thread: "#db2777",
   turn: "#65a30d",
   "tool-call": "#d97706",
+  subagent: "#4f46e5",
 };
 
 const AMBER = "#d97706";

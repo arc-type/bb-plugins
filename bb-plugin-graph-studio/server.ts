@@ -140,7 +140,7 @@ export type NodeRunDto = z.infer<typeof nodeRunSchema>;
 
 const canvasNodeSchema = z.object({
   id: z.string(),
-  kind: z.enum(["agents", "project", "crew", "member", "graph-run", "step", "thread", "turn", "tool-call"]),
+  kind: z.enum(["agents", "project", "crew", "member", "graph-run", "step", "thread", "turn", "tool-call", "subagent"]),
   label: z.string(),
   status: z.enum(["idle", "running", "waiting", "done", "failed", "escalated"]).optional(),
   parentId: z.string().nullable(),

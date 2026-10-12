@@ -17,8 +17,12 @@ export function threadNodeFor(parent: CanvasNode): CanvasNode | null {
   return { id: threadNodeId(threadId), kind: "thread", label: "Thread", parentId: parent.id, meta: { threadId } };
 }
 
-/** The slice of a `ThreadTimelineResponse` row this mapping reads — every
- *  row kind, conversation or work, carries at least this much. */
+/** The slice of a `ThreadTimelineResponse` row this mapping reads, aligned
+ *  with the SDK's `TimelineRow` union (`TimelineTurnRow` | `TimelineSourceRow`,
+ *  where the latter is `TimelineConversationRow | TimelineWorkRow |
+ *  TimelineSystemRow`): `kind` is `"turn"`, `"conversation"`, `"work"`, or
+ *  `"system"`; a `"work"` row's `workKind` discriminates `"tool"` from
+ *  `"delegation"` (a subagent spawn) and the rest. */
 export type TimelineRowLike = {
   id: string;
   kind: string;
@@ -27,7 +31,18 @@ export type TimelineRowLike = {
   role?: string;
   status?: string;
   summaryCount?: number;
+  /** A `"turn"` row's own nested rows. */
   children?: readonly TimelineRowLike[] | null;
+  /** Discriminates a `"work"` row, e.g. `"tool"`, `"delegation"`. */
+  workKind?: string;
+  /** The tool's name, e.g. `"Bash"`, `"Read"`, `"Task"` for a delegation. */
+  toolName?: string;
+  /** A delegation (subagent) row's task description. */
+  description?: string | null;
+  /** A delegation row's own nested rows (`TimelineDelegationWorkRow.childRows`). */
+  childRows?: readonly TimelineRowLike[] | null;
+  /** A delegation row's final output, shown as a short summary. */
+  output?: string;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -44,19 +59,35 @@ function truncate(text: string, max: number): string {
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
-function rowLabel(row: TimelineRowLike): string {
-  if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
-  return row.kind;
+/** A delegation row is the SDK's representation of a spawned subagent. */
+function isSubagentRow(row: TimelineRowLike): boolean {
+  return row.workKind === "delegation";
 }
 
-function rowNode(row: TimelineRowLike, parentId: string): CanvasNode {
-  return {
-    id: `row:${row.id}`,
-    kind: row.kind === "conversation" ? "turn" : "tool-call",
+function rowLabel(row: TimelineRowLike): string {
+  if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
+  if (isSubagentRow(row)) return `Agent: ${row.description ?? "(no description)"}`;
+  return row.toolName ?? row.kind;
+}
+
+/** Builds a row's own canvas node plus, for a subagent spawn, its own
+ *  `childRows` flattened alongside it. */
+function rowNodes(row: TimelineRowLike, parentId: string): CanvasNode[] {
+  const id = `row:${row.id}`;
+  const node: CanvasNode = {
+    id,
+    kind: row.kind === "conversation" ? "turn" : isSubagentRow(row) ? "subagent" : "tool-call",
     label: rowLabel(row),
     parentId,
-    meta: { rowId: row.id, kind: row.kind },
+    meta: {
+      rowId: row.id,
+      kind: row.kind,
+      ...(row.status ? { status: row.status } : {}),
+      ...(row.output ? { summary: row.output } : {}),
+    },
   };
+  const children = (row.childRows ?? []).flatMap((child) => rowNodes(child, id));
+  return [node, ...children];
 }
 
 /**
@@ -82,9 +113,9 @@ export function timelineToCanvas(
         parentId: parent,
         meta: { rowId: row.id },
       });
-      for (const child of row.children ?? []) nodes.push(rowNode(child, turnId));
+      for (const child of row.children ?? []) nodes.push(...rowNodes(child, turnId));
     } else {
-      nodes.push(rowNode(row, parent));
+      nodes.push(...rowNodes(row, parent));
     }
   }
   return { nodes, edges: [] };
