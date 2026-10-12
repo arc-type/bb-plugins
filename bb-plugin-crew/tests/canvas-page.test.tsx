@@ -3,7 +3,9 @@
 // Crew's own copy of the canvas page (BBP-131 WI4): shown only when
 // `canvasPage` says Graph Studio is not active, otherwise a short note.
 import { cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { POLL_MS } from "../vendor/bb-canvas/lib/visible-poll";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 
 let app: CapturedPluginApp;
@@ -12,7 +14,10 @@ beforeAll(async () => {
   app = await loadPluginApp(() => import("../app"));
 });
 beforeEach(() => localStorage.clear());
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function canvasPanel(
   overrides: { rpc?: Record<string, unknown>; sdk?: Record<string, unknown>; projectId?: string | null; subPath?: string } = {},
@@ -124,6 +129,66 @@ describe("crew's canvas page", () => {
     // The subagent's own child stays hidden until the subagent card itself
     // is expanded — it must not be flattened straight into the turn.
     expect(screen.queryByRole("button", { name: new RegExp("^Read") })).toBeNull();
+  });
+
+  // BBP-196 Teil A: the real SDK never nests a turn row's steps under
+  // `children` (that field is always `null`) — they are fetched lazily via
+  // `timelineTurnSummaryDetails`, the same lazy mechanism threads already use.
+  it("lazily loads a turn's steps via timelineTurnSummaryDetails, once the turn node is opened", async () => {
+    const timeline = async () => ({
+      rows: [
+        {
+          id: "turn-1",
+          kind: "turn",
+          turnId: "turn-1",
+          status: "completed",
+          summaryCount: 1,
+          sourceSeqStart: 10,
+          sourceSeqEnd: 20,
+          completedAt: 1700000000000,
+          children: null,
+        },
+      ],
+    });
+    const calls: unknown[] = [];
+    const timelineTurnSummaryDetails = async (args: unknown) => {
+      calls.push(args);
+      return { rows: [{ id: "tool-1", kind: "work", workKind: "tool", toolName: "Bash", status: "completed" }] };
+    };
+    canvasPanel({
+      sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { timeline, timelineTurnSummaryDetails } },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    const turnCard = await screen.findByRole("button", { name: new RegExp("^Turn · 1 step") });
+    fireEvent.click(turnCard);
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: new RegExp("^Bash") })).toBeTruthy();
+    expect(calls).toEqual([{ threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" }]);
+  });
+
+  // Negative case: a turn without steps gets no chevron, so it never calls
+  // `timelineTurnSummaryDetails` and reacts to Enter the way a leaf does.
+  it("gives a turn with no steps no chevron, so Enter does nothing", async () => {
+    const timeline = async () => ({
+      rows: [
+        { id: "turn-1", kind: "turn", turnId: "turn-1", status: "completed", summaryCount: 0, sourceSeqStart: 10, sourceSeqEnd: 10, children: null },
+      ],
+    });
+    let detailsCalled = false;
+    const timelineTurnSummaryDetails = async () => {
+      detailsCalled = true;
+      return { rows: [] };
+    };
+    canvasPanel({
+      sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { timeline, timelineTurnSummaryDetails } },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    const turnCard = await screen.findByRole("button", { name: new RegExp("^Turn · 0 steps") });
+    fireEvent.click(turnCard);
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(detailsCalled).toBe(false);
   });
 
   it("falls back to visible when the canvasPage RPC itself fails", async () => {
@@ -250,5 +315,60 @@ describe("crew's canvas page frame/edit mode (BBP-170 WI6)", () => {
     fireEvent.click(card);
     expect(() => fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "e" })).not.toThrow();
     expect(screen.queryByText(/^Editing /)).toBeNull();
+  });
+
+  describe("live updates (BBP-200)", () => {
+    const member = (name: string) => ({ id: `member:${name}@crew`, kind: "member", label: name, parentId: "project:p1", meta: {} });
+    const layerWith = (...names: string[]) => ({ contractVersion: 1, nodes: names.map(member), edges: [], expanded: [] });
+
+    // Before the render: the page starts its interval on mount.
+    beforeEach(() => void vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
+
+    async function poll() {
+      await act(async () => {
+        vi.advanceTimersByTime(POLL_MS);
+      });
+    }
+
+    it("a new member appears on the next poll, the selection stays", async () => {
+      let names = ["a"];
+      canvasPanel({ rpc: { canvasLayer: () => layerWith(...names) } });
+      fireEvent.click(await screen.findByRole("button", { name: /^a — / }));
+      names = ["a", "b"];
+      await poll();
+      await waitFor(() => expect(screen.getByRole("button", { name: /^b — / })).toBeTruthy());
+      expect(screen.getByRole("button", { name: /^a — / }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.queryByText("Loading…")).toBeNull();
+    });
+
+    it("negative: a hidden tab makes no canvasLayer call", async () => {
+      const canvasLayer = vi.fn(() => layerWith("a"));
+      canvasPanel({ rpc: { canvasLayer } });
+      await screen.findByRole("button", { name: /^a — / });
+      const calls = canvasLayer.mock.calls.length;
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      await poll();
+      await poll();
+      expect(canvasLayer.mock.calls.length).toBe(calls);
+      visibility.mockRestore();
+    });
+
+    it("negative: a poll without changes resets nothing — selection and sidebar stay", async () => {
+      canvasPanel({ rpc: { canvasLayer: () => layerWith("a") } });
+      fireEvent.click(await screen.findByRole("button", { name: /^a — / }));
+      await poll();
+      expect(screen.getByRole("button", { name: /^a — / }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByLabelText("Details for a")).toBeTruthy();
+    });
+
+    it("negative: a failed poll keeps the last tree instead of an error", async () => {
+      let fail = false;
+      canvasPanel({ rpc: { canvasLayer: () => { if (fail) throw new Error("offline"); return layerWith("a"); } } });
+      await screen.findByRole("button", { name: /^a — / });
+      fail = true;
+      await poll();
+      expect(screen.queryByText(/Canvas not available/)).toBeNull();
+      expect(screen.getByRole("button", { name: /^a — / })).toBeTruthy();
+    });
   });
 });

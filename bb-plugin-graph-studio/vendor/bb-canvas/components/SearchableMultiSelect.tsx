@@ -180,6 +180,10 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
         <div
           role="group"
           aria-label={label}
+          // Scrolling a long option list must not pan the canvas underneath
+          // the popover (BBP-199) — React Flow skips its own wheel handling
+          // for this class.
+          className="nowheel"
           style={{
             position: "absolute",
             left: place?.offset ?? 0,

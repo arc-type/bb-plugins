@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { clampWidth, DEFAULT_WIDTH, fitWidth, maxWidthFor, MIN_WIDTH } from "../lib/clampWidth";
 import { curateMeta, type CanvasNode, type CanvasStatus } from "../lib/types";
+import type { RelationGroup } from "../lib/relations";
 import { KindIcon, KIND_LABEL } from "./KindIcon";
 
 const WIDTH_KEY = "bb-canvas:sidebar-width";
@@ -149,6 +150,10 @@ export type SidebarProps = {
   onOpenRun?: (runId: string) => void;
   /** Shown as "Open crew" only when `meta.crew` is a string. */
   onOpenCrew?: (crew: string) => void;
+  /** The node's own relations by kind (BBP-203); a target's name selects it
+   *  through `onSelect`. Empty or absent: no section. */
+  relations?: readonly RelationGroup[];
+  onSelect?: (nodeId: string) => void;
 };
 
 function stringMeta(node: CanvasNode, key: string): string | undefined {
@@ -156,7 +161,7 @@ function stringMeta(node: CanvasNode, key: string): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: SidebarProps) {
+export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, relations = [], onSelect }: SidebarProps) {
   const { curated, details } = curateMeta(node.kind, node.meta);
   const threadId = onOpenThread ? stringMeta(node, "threadId") : undefined;
   const runId = onOpenRun ? stringMeta(node, "runId") : undefined;
@@ -224,6 +229,9 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
     <aside
       ref={asideRef}
       aria-label={`Details for ${node.label}`}
+      // Scrolling a long details list must not pan the canvas underneath it
+      // (BBP-199) — React Flow skips its own wheel handling for this class.
+      className="nowheel"
       style={{
         position: "relative",
         // border-box: the clamped value is the width on screen, padding and border included.
@@ -295,6 +303,28 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <SectionHeading>{KIND_LABEL[node.kind]}</SectionHeading>
           <FieldList fields={curated} />
+        </section>
+      ) : null}
+      {relations.length > 0 ? (
+        <section aria-label="Relations" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {relations.map((group) => (
+            <div key={group.kind} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <SectionHeading>{group.kind}</SectionHeading>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {group.targets.map((target) => (
+                  <button
+                    key={target.id}
+                    type="button"
+                    onClick={() => onSelect?.(target.id)}
+                    className="bb-canvas-action"
+                    style={ACTION_STYLE}
+                  >
+                    {target.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
       ) : null}
       {hasActions ? (

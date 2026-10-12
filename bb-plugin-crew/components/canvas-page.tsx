@@ -16,9 +16,10 @@ import {
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
-import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import { threadNodeFor, timelineToCanvas, turnDetailsToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
+import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
 import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
 import type { rpcContract } from "../server";
 
@@ -113,46 +114,54 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     // "Loading…" branch below and replaced the whole page — including the
     // toolbar's project filter — on every refetch, closing its dropdown.
     // The stale layer now stays on screen until the new one lands; only the
-    // very first load (still `null`) hits that branch.
+    // very first load (still `null`) hits that branch. A poll likewise swaps
+    // the layer in place, so the view keeps its selection, cards and
+    // viewport (BBP-200).
     const labels = new Map(projects.map((project) => [project.id, project.name]));
-    Promise.all(
-      shown.map((projectId) =>
-        rpc.call("canvasLayer", { projectId }).then((result) => ({ projectId, result })),
-      ),
-    ).then(
-      (results) => {
-        if (cancelled) return;
-        // Each project is its own root under `agents`; `mergeLayers` keeps
-        // the one `agents` node they all share.
-        const page = mergeLayers(
-          ...results.map(({ projectId, result }) =>
-            withRoots(projectId, labels.get(projectId) ?? projectId, { nodes: result.nodes, edges: result.edges, expanded: result.expanded }),
-          ),
-        );
-        const frameProjects = new Map<string, string>();
-        const frames: CanvasFrame[] = [];
-        for (const { projectId, result } of results) {
-          for (const frame of result.frames ?? []) {
-            if (frameProjects.has(frame.id)) continue;
-            frameProjects.set(frame.id, projectId);
-            frames.push(frame);
+    const load = (initial: boolean) =>
+      Promise.all(
+        shown.map((projectId) =>
+          rpc.call("canvasLayer", { projectId }).then((result) => ({ projectId, result })),
+        ),
+      ).then(
+        (results) => {
+          if (cancelled) return;
+          // Each project is its own root under `agents`; `mergeLayers` keeps
+          // the one `agents` node they all share.
+          const page = mergeLayers(
+            ...results.map(({ projectId, result }) =>
+              withRoots(projectId, labels.get(projectId) ?? projectId, { nodes: result.nodes, edges: result.edges, expanded: result.expanded }),
+            ),
+          );
+          const frameProjects = new Map<string, string>();
+          const frames: CanvasFrame[] = [];
+          for (const { projectId, result } of results) {
+            for (const frame of result.frames ?? []) {
+              if (frameProjects.has(frame.id)) continue;
+              frameProjects.set(frame.id, projectId);
+              frames.push(frame);
+            }
           }
-        }
-        setLayer({
-          nodes: withThreadNodes(page.nodes),
-          edges: [...page.edges],
-          expanded: new Set(page.expanded),
-          frames,
-          frameProjects,
-        });
-        setError(null);
-      },
-      (cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      },
-    );
+          setLayer({
+            nodes: withThreadNodes(page.nodes),
+            edges: [...page.edges],
+            expanded: new Set(page.expanded),
+            frames,
+            frameProjects,
+          });
+          setError(null);
+        },
+        (cause: unknown) => {
+          // A failed poll keeps the last good tree on screen; only the
+          // first load has nothing better to show than the error.
+          if (!cancelled && initial) setError(cause instanceof Error ? cause.message : String(cause));
+        },
+      );
+    void load(true);
+    const stopPolling = startVisiblePoll(() => void load(false));
     return () => {
       cancelled = true;
+      stopPolling();
     };
     // `shownKey` stands in for `shown`, which is a fresh array on every filter change.
   }, [rpc, shownKey, visible]);
@@ -192,15 +201,39 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       renderFrameEditor={(frameId) => <CrewFrameEditPanel projectId={layer.frameProjects.get(frameId)!} crew={crewNameFromFrameId(frameId)} />}
       initialExpanded={layer.expanded}
       surface="canvas"
-      // Only a thread has children to fetch; every other card without
-      // children is a leaf and gets no chevron (BBP-183).
-      canLoadChildren={(node) => node.kind === "thread" && typeof node.meta?.threadId === "string"}
+      // A thread always has children to fetch; a turn only if it has steps
+      // (`summaryCount > 0`) — every other card without children is a leaf
+      // and gets no chevron (BBP-183).
+      canLoadChildren={(node) =>
+        (node.kind === "thread" && typeof node.meta?.threadId === "string") ||
+        (node.kind === "turn" && typeof node.meta?.summaryCount === "number" && node.meta.summaryCount > 0)
+      }
       loadChildren={async (node) => {
-        if (node.kind !== "thread") return { nodes: [] };
-        const threadId = node.meta?.threadId;
-        if (typeof threadId !== "string") return { nodes: [] };
-        const response = await sdk.threads.timeline({ threadId });
-        return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+        if (node.kind === "thread") {
+          const threadId = node.meta?.threadId;
+          if (typeof threadId !== "string") return { nodes: [] };
+          const response = await sdk.threads.timeline({ threadId });
+          return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+        }
+        if (node.kind === "turn") {
+          const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};
+          if (
+            typeof threadId !== "string" ||
+            typeof turnId !== "string" ||
+            typeof sourceSeqStart !== "number" ||
+            typeof sourceSeqEnd !== "number"
+          ) {
+            return { nodes: [] };
+          }
+          const response = await sdk.threads.timelineTurnSummaryDetails({
+            threadId,
+            turnId,
+            sourceSeqStart: String(sourceSeqStart),
+            sourceSeqEnd: String(sourceSeqEnd),
+          });
+          return turnDetailsToCanvas(node.id, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+        }
+        return { nodes: [] };
       }}
       // BBP-179: a thread's sidebar shows BB's status, provider, model, times
       // and turn count, not just its id — loaded once, on first selection.

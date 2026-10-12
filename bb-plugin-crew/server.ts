@@ -219,6 +219,11 @@ const canvasEdgeSchema = z.object({
   variant: z.enum(["flow", "back", "message"]),
   label: z.string().optional(),
   count: z.number().optional(),
+  // A crew link drawn on demand (BBP-202/203); without these the canvas
+  // never sees relations — zod drops unknown keys.
+  relation: z.boolean().optional(),
+  emphasis: z.enum(["highlight", "dim"]).optional(),
+  links: z.array(z.object({ from: z.string(), to: z.string(), kind: z.string() })).readonly().optional(),
 });
 
 export const rpcContract = defineRpcContract({

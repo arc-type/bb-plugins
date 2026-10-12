@@ -43,6 +43,27 @@ describe("canvasLayer RPC", () => {
     expect(page.expanded).toEqual(["agents", "project:p1", "crew:trio"]);
   });
 
+  it("passes crew's relation edges through with relation and links (BBP-197 fix)", async () => {
+    const link = {
+      from: "member:lead@trio", to: "member:dev@trio", variant: "flow", label: "assigns_to", relation: true,
+      links: [{ from: "member:lead@trio", to: "member:dev@trio", kind: "assigns_to" }],
+    };
+    const host = load(async (args) =>
+      args.outputSchema.parse({
+        contractVersion: 1,
+        nodes: [
+          { id: "crew:trio", kind: "crew", label: "trio", parentId: "project:p1" },
+          { id: "member:lead@trio", kind: "member", label: "lead", parentId: "crew:trio" },
+          { id: "member:dev@trio", kind: "member", label: "dev", parentId: "crew:trio" },
+        ],
+        edges: [link],
+        expanded: ["crew:trio"],
+      }),
+    );
+    const page = (await host.harness.behavior.callRpc("canvasLayer", { projectId: "p1" })) as Page & { edges: unknown[] };
+    expect(page.edges).toContainEqual(link);
+  });
+
   it("negative: crew not installed → no crew level, no error", async () => {
     const host = load(async () => { throw new Error('No plugin "crew"'); });
     const page = (await host.harness.behavior.callRpc("canvasLayer", { projectId: "p1" })) as Page;
