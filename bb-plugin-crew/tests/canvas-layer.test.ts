@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crewCanvasLayer, crewOwnsCanvasPage, memberNodeId } from "../lib/canvas-layer";
+import { crewCanvasLayer, crewOwnsCanvasPage, crewTopologyFrame, memberNodeId } from "../lib/canvas-layer";
 import type { MemberInfo } from "../lib/contract";
 
 const member = (over: Partial<MemberInfo>): MemberInfo => ({
@@ -70,5 +70,46 @@ describe("canvasLayer / canvasPage RPC", () => {
     await plugin(bb);
     expect(await harness.behavior.callRpc("canvasPage", {})).toEqual({ visible: true });
     await harness.lifecycle.dispose();
+  });
+});
+
+describe("crewTopologyFrame", () => {
+  // Shaped like a crew.yaml: lead in group "orch", two devs in "dev", links between them.
+  const members = [
+    { key: "dev-a", groupId: "dev", lead: false },
+    { key: "lead", groupId: "orch", lead: true },
+    { key: "dev-b", groupId: "dev", lead: false },
+  ];
+  const links = [
+    { from: "lead", to: "dev-a", kind: "assigns_to" },
+    { from: "dev-a", to: "dev-b", kind: "works_with" },
+    { from: "dev-b", to: "lead", kind: "escalates_to" },
+  ];
+
+  it("frames the crew, orders lead first then groups, members carry the frame id", () => {
+    const topo = crewTopologyFrame("trio", members, links);
+    expect(topo.frames).toEqual([{ id: "frame:trio", parentId: null, label: "trio" }]);
+    expect(topo.nodes.map((node) => node.id)).toEqual(["member:lead@trio", "member:dev-a@trio", "member:dev-b@trio"]);
+    expect(topo.nodes.every((node) => node.frameId === "frame:trio" && node.kind === "member")).toBe(true);
+    expect(topo.nodes[0]).toMatchObject({ label: "lead", parentId: null, meta: { lead: true, groupId: "orch", layer: 0 } });
+    expect(topo.nodes[1]!.meta).toMatchObject({ layer: 1, groupId: "dev" });
+  });
+
+  it("turns links into edges, the shape from pathBetween picking flow or back", () => {
+    const topo = crewTopologyFrame("trio", members, links);
+    expect(topo.edges).toEqual([
+      { from: "member:lead@trio", to: "member:dev-a@trio", variant: "flow", label: "assigns_to" },
+      { from: "member:dev-a@trio", to: "member:dev-b@trio", variant: "flow", label: "works_with" },
+      { from: "member:dev-b@trio", to: "member:lead@trio", variant: "back", label: "escalates_to" },
+    ]);
+  });
+
+  it("negative: links to unknown members or to self are dropped; empty crew still yields its frame", () => {
+    const topo = crewTopologyFrame("trio", members, [
+      { from: "lead", to: "ghost", kind: "assigns_to" },
+      { from: "lead", to: "lead", kind: "works_with" },
+    ]);
+    expect(topo.edges).toEqual([]);
+    expect(crewTopologyFrame("empty", [], [])).toEqual({ frames: [{ id: "frame:empty", parentId: null, label: "empty" }], nodes: [], edges: [] });
   });
 });
