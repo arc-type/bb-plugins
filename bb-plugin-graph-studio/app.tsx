@@ -31,7 +31,7 @@ export default definePluginApp((app) => {
     title: "Activity Canvas",
     icon: GRAPH_STUDIO_ICON,
     path: "canvas",
-    component: () => <CanvasPage />,
+    component: ({ subPath }) => <CanvasPage subPath={subPath} />,
   });
 
   app.slots.threadPanelAction({

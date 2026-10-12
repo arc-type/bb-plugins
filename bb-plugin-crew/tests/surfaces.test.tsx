@@ -683,7 +683,9 @@ describe("crew file editor", () => {
     fireEvent.change(impl.getByLabelText("Model"), { target: { value: "claude-sonnet-5" } });
     fireEvent.change(impl.getByLabelText("Reasoning level"), { target: { value: "high" } });
     fireEvent.click(impl.getByRole("button", { name: "Apply execution selection" }));
-    fireEvent.click(slot.getByRole("tab", { name: "YAML" }));
+    // BBP-169: the inner yaml/form toggle is now named "Text", since the file
+    // editor's own tab bar (above it) is "Canvas" | "YAML".
+    fireEvent.click(slot.getByRole("tab", { name: "Text" }));
     const yaml = (slot.getByLabelText("Crew file YAML") as HTMLTextAreaElement).value;
     const members = new Map(validateCrew(yaml).members.map((m) => [m.key, m]));
     expect(members.get("dev-impl")).toMatchObject({ provider: "claude-code", model: "claude-sonnet-5", reasoningLevel: "high" });
@@ -699,7 +701,7 @@ describe("crew file editor", () => {
     await slot.findByLabelText("Crew file YAML");
     fireEvent.click(slot.getByRole("tab", { name: "Form" }));
     fireEvent.change(slot.getByLabelText("dev-impl role"), { target: { value: "Builds carefully." } });
-    fireEvent.click(slot.getByRole("tab", { name: "YAML" }));
+    fireEvent.click(slot.getByRole("tab", { name: "Text" }));
     const yaml = (slot.getByLabelText("Crew file YAML") as HTMLTextAreaElement).value;
     expect(yaml).toContain("role: Builds carefully.");
     expect(yaml).toContain("# keep me");

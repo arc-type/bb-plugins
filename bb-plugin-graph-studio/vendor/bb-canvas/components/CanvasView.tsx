@@ -2,16 +2,21 @@
 // (CanvasShell already has that), keyboard navigation, breadcrumb, search and
 // the detail sidebar. Works against whatever `nodes`/`edges` it is given —
 // fixtures here, RPC data once the owning plugin wires it up (WI3/WI4).
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
 import { Breadcrumb } from "./Breadcrumb";
 import { Sidebar } from "./Sidebar";
 import { SearchBox } from "./SearchBox";
 import { ColorModeToggle, type ColorMode } from "./ColorModeToggle";
 import { layoutTree } from "../lib/layout";
-import type { CanvasEdge, CanvasNode } from "../lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const COLOR_MODE_KEY = "bb-canvas:colour-mode";
+const EMPTY_DIMMED: ReadonlySet<string> = new Set();
+/** Floor height so the canvas stays usable even with no sized ancestor
+ *  (BBP-173). Tall enough to show a handful of cards, short enough to not
+ *  force scroll in a host that does size its container normally. */
+const MIN_HEIGHT = 320;
 
 /** Never throws: a private-browsing tab, a full quota, or an environment
  *  with no `localStorage` at all must fall back to the default, not crash
@@ -38,6 +43,14 @@ export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly Ca
 export type CanvasViewProps = {
   nodes: readonly CanvasNode[];
   edges?: readonly CanvasEdge[];
+  frames?: readonly CanvasFrame[];
+  /** Frames the current selection may enter edit mode on; a frame absent
+   *  here never responds to `E` (BBP-166 negative criterion 2). */
+  editableFrameIds?: ReadonlySet<string>;
+  /** What to show in the side panel while a frame is being edited, in place
+   *  of the generic `Sidebar` — e.g. a provider's own edit-action panel
+   *  (BBP-170). Absent: edit mode simply shows no side panel. */
+  renderFrameEditor?: (frameId: string) => ReactNode;
   /** Expanded by default — e.g. every node up to the member level. */
   initialExpanded?: ReadonlySet<string>;
   /**
@@ -55,13 +68,25 @@ function parentOf(byId: Map<string, CanvasNode>, node: CanvasNode): string | nul
   return node.parentId !== null && byId.has(node.parentId) ? node.parentId : null;
 }
 
-export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, className }: CanvasViewProps) {
+export function CanvasView({
+  nodes,
+  edges = [],
+  frames = [],
+  editableFrameIds,
+  renderFrameEditor,
+  initialExpanded,
+  loadChildren,
+  className,
+}: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded ?? []));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [loaded, setLoaded] = useState<ReadonlyMap<string, LoadedChildren>>(new Map());
   const [colorMode, setColorMode] = useState<ColorMode>(() => loadColorMode());
+  // Only one frame editable at a time (BBP-166): entering a second frame's
+  // edit mode without an `Escape` first is a no-op, not a silent switch.
+  const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
   const loading = useRef<Set<string>>(new Set());
   const shellRef = useRef<CanvasShellHandle>(null);
 
@@ -98,6 +123,33 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
   }, [allNodes, byId]);
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
+
+  const dimmedIds = useMemo(() => {
+    if (editingFrameId === null) return EMPTY_DIMMED;
+    const ids = new Set<string>();
+    for (const node of visible) if (node.frameId !== editingFrameId) ids.add(node.id);
+    for (const frame of frames) if (frame.id !== editingFrameId) ids.add(frame.id);
+    return ids;
+  }, [editingFrameId, visible, frames]);
+
+  // Edit mode forces "type" so the edited layer's own kinds read clearly,
+  // without touching the user's saved status/type preference — `Escape`
+  // hands control straight back to `colorMode` below.
+  const effectiveColorMode = editingFrameId !== null ? "type" : colorMode;
+
+  function enterEditMode() {
+    if (editingFrameId !== null) return; // nested edit attempt: ignored, not switched.
+    if (selectedId === null) return;
+    const frameId = byId.get(selectedId)?.frameId;
+    if (frameId === undefined || !editableFrameIds?.has(frameId)) return;
+    setEditingFrameId(frameId);
+  }
+
+  function exitEditMode(): boolean {
+    if (editingFrameId === null) return false;
+    setEditingFrameId(null);
+    return true;
+  }
 
   function select(id: string | null) {
     setSelectedId(id);
@@ -228,7 +280,15 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
         event.preventDefault();
         setSearchOpen(true);
         break;
+      case "e":
+      case "E":
+        event.preventDefault();
+        enterEditMode();
+        break;
       case "Escape":
+        // Leaving edit mode wins over the plain deselect below — with both
+        // active, one Escape must not do both at once.
+        if (exitEditMode()) break;
         if (selected) select(null);
         break;
       default:
@@ -244,7 +304,11 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
       // or the sidebar must not steal focus away from it.
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none" }}
+      // `height: "100%"` alone collapses to 0 the moment an ancestor has no
+      // explicit height of its own — the nav-panel route's container, for
+      // one (BBP-173). `minHeight` is the floor that keeps the canvas usable
+      // either way; a sized ancestor still wins, since 100% there is taller.
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: MIN_HEIGHT, outline: "none" }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
@@ -267,12 +331,18 @@ export function CanvasView({ nodes, edges = [], initialExpanded, loadChildren, c
             nodes={allNodes}
             expanded={expanded}
             edges={allEdges}
+            frames={frames}
             selectedId={selectedId}
             onSelect={select}
-            colorMode={colorMode}
+            colorMode={effectiveColorMode}
+            dimmedIds={dimmedIds}
           />
         </div>
-        {selected ? <Sidebar node={selected} onClose={() => select(null)} /> : null}
+        {editingFrameId !== null
+          ? (renderFrameEditor?.(editingFrameId) ?? null)
+          : selected
+            ? <Sidebar node={selected} onClose={() => select(null)} />
+            : null}
       </div>
     </div>
   );

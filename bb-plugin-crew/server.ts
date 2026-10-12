@@ -170,6 +170,7 @@ const contractMember = z.object({
   address: z.string(),
   crew: z.string(),
   key: z.string(),
+  groupId: z.string(),
   lead: z.boolean(),
   role: z.string(),
   threadId: z.string().nullable(),
@@ -204,6 +205,12 @@ const canvasNodeSchema = z.object({
   status: canvasStatus.optional(),
   parentId: z.string().nullable(),
   meta: z.record(z.string(), z.unknown()).optional(),
+  frameId: z.string().optional(),
+});
+const canvasFrameSchema = z.object({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  label: z.string().optional(),
 });
 const canvasEdgeSchema = z.object({
   from: z.string(),
@@ -436,6 +443,8 @@ export const rpcContract = defineRpcContract({
       nodes: z.array(canvasNodeSchema),
       edges: z.array(canvasEdgeSchema),
       expanded: z.array(z.string()),
+      /** One frame per crew (BBP-170 WI6), drawn around its member nodes. */
+      frames: z.array(canvasFrameSchema),
     }),
   },
   /** Whether crew shows the canvas page itself: only while graph-studio is not active. */
@@ -1089,7 +1098,9 @@ export default async function plugin(bb: BbPluginApi) {
     listMembers: ({ projectId, crew }) => service.contract.listMembers(projectId, crew),
     canvasLayer: async ({ projectId }) => {
       const { members } = await service.contract.listMembers(projectId);
-      return { contractVersion: CONTRACT_VERSION, ...crewCanvasLayer(projectId, store.listCrews(projectId), members) };
+      const crews = store.listCrews(projectId);
+      const linksByCrew = Object.fromEntries(crews.map((crew) => [crew.name, store.listLinks(crew.id)]));
+      return { contractVersion: CONTRACT_VERSION, ...crewCanvasLayer(projectId, crews, members, linksByCrew) };
     },
     canvasPage: async () => {
       try {

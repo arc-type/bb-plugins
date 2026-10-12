@@ -20,6 +20,9 @@ export type MemberInfo = {
   address: string;
   crew: string;
   key: string;
+  /** The crew.yaml group this member belongs to (BBP-170 WI6): needed to lay
+   *  the crew's own topology frame out lead-first, then group by group. */
+  groupId: string;
   lead: boolean;
   role: string;
   threadId: string | null;
@@ -49,6 +52,7 @@ export function createContract(deps: {
       address: member.address,
       crew: crewName,
       key: member.key,
+      groupId: member.groupId,
       lead: member.lead,
       role: String(member.config.role ?? ""),
       threadId: binding?.threadId ?? null,

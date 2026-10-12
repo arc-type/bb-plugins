@@ -24,6 +24,10 @@ export type NodeCardProps = {
   icon?: ReactNode;
   selected?: boolean;
   onClick?: () => void;
+  /** Outside the frame currently being edited (BBP-166): faded and locked,
+   *  not merely unclickable — a reader must see at a glance which layer is
+   *  live right now. */
+  dimmed?: boolean;
 };
 
 /** One fixed accent per kind — not derived from the id, unlike aside's
@@ -92,6 +96,7 @@ export function NodeCard({
   icon,
   selected = false,
   onClick,
+  dimmed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
   const { border, pulse } = borderFor(status, kind, colorMode);
@@ -100,7 +105,8 @@ export function NodeCard({
       type="button"
       aria-label={subtitle ? `${label} — ${subtitle}` : label}
       aria-pressed={selected}
-      onClick={onClick}
+      aria-disabled={dimmed}
+      onClick={dimmed ? undefined : onClick}
       className={pulse ? PULSE_CLASS : undefined}
       style={{
         display: "flex",
@@ -116,12 +122,14 @@ export function NodeCard({
         background: "var(--card)",
         color: "var(--foreground)",
         textAlign: "left",
-        cursor: "pointer",
+        cursor: dimmed ? "default" : "pointer",
+        opacity: dimmed ? 0.35 : 1,
         // React Flow marks a non-selectable, non-draggable node's own wrapper
         // `pointer-events: none` — an optimization that, left alone, blocks
         // every click reaching the card inside it too, since the CSS property
-        // inherits down through descendants.
-        pointerEvents: "auto",
+        // inherits down through descendants. A dimmed card locks the same way
+        // on purpose: outside the frame being edited, nothing is selectable.
+        pointerEvents: dimmed ? "none" : "auto",
       }}
     >
       {icon ? (

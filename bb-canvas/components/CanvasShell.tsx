@@ -2,7 +2,7 @@
 // zoom at the pointer. No MiniMap and no keyboard here — those are the next
 // work item, built on fixture data before either plugin feeds this component
 // real data.
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -18,9 +18,10 @@ import {
 import "@xyflow/react/dist/style.css";
 import { layoutTree, type TreeLayout } from "../lib/layout";
 import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
+import { Frame, type FrameProps } from "./Frame";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
-import type { CanvasEdge, CanvasNode } from "../lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 /** React Flow's colour mode, read from the BB theme actually on screen —
  *  left at its default, React Flow paints white chrome inside a dark host. */
@@ -40,6 +41,20 @@ export function useHostColorMode(): [React.RefObject<HTMLDivElement | null>, Col
     }
   }, []);
   useLayoutEffect(measure);
+  // A theme switch repaints the host without re-rendering the canvas, so
+  // measuring on render alone keeps the old mode until something else
+  // happens to re-render it.
+  useEffect(() => {
+    if (typeof MutationObserver !== "function") return;
+    const observer = new MutationObserver(measure);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+    media?.addEventListener("change", measure);
+    return () => {
+      observer.disconnect();
+      media?.removeEventListener("change", measure);
+    };
+  }, [measure]);
   return [ref, mode];
 }
 
@@ -68,15 +83,41 @@ function CanvasNodeView({ data }: { data: NodeCardProps }) {
   );
 }
 
-const NODE_TYPES = { canvasNode: CanvasNodeView };
+/** `width`/`height` arrive via the node's own `style`, not `data` — React
+ *  Flow positions the wrapper, `Frame` just fills it. */
+function CanvasFrameView({
+  data,
+  style,
+}: {
+  data: Pick<FrameProps, "label" | "dimmed">;
+  style?: { width?: number; height?: number };
+}) {
+  return (
+    <Frame
+      label={data.label}
+      dimmed={data.dimmed}
+      x={0}
+      y={0}
+      width={style?.width ?? 0}
+      height={style?.height ?? 0}
+    />
+  );
+}
+
+const NODE_TYPES = { canvasNode: CanvasNodeView, canvasFrame: CanvasFrameView };
 const EDGE_TYPES = { statusEdge: StatusEdge };
+const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
   expanded: ReadonlySet<string>;
   edges?: readonly CanvasEdge[];
+  frames?: readonly CanvasFrame[];
   selectedId?: string | null;
   onSelect?: (nodeId: string) => void;
+  /** Node and frame ids outside the frame being edited (BBP-166) — faded,
+   *  locked, no `onSelect`. */
+  dimmedIds?: ReadonlySet<string>;
   /** "status" (default) borders a card by its run state; "type" tints a
    *  neutral card by `kind` instead. An error or needs-input border always
    *  wins over either. */
@@ -95,11 +136,14 @@ export type CanvasShellHandle = {
 function toFlow(
   layout: TreeLayout,
   nodes: readonly CanvasNode[],
+  frames: readonly CanvasFrame[],
   selectedId: string | null | undefined,
   onSelect: ((id: string) => void) | undefined,
   colorMode: NodeCardColorMode,
+  dimmedIds: ReadonlySet<string>,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
+  const byFrameId = new Map(frames.map((frame) => [frame.id, frame]));
   const childCount = new Map<string, number>();
   for (const node of nodes) {
     if (node.parentId !== null) childCount.set(node.parentId, (childCount.get(node.parentId) ?? 0) + 1);
@@ -115,6 +159,7 @@ function toFlow(
       colorMode,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
+      dimmed: dimmedIds.has(node.id),
     };
     return {
       id: placed.id,
@@ -146,19 +191,46 @@ function toFlow(
     } satisfies StatusEdgeData as unknown as Record<string, unknown>,
   }));
 
-  return { flowNodes, flowEdges };
+  const frameNodes: Node[] = (layout.frames ?? []).map((placed) => ({
+    id: placed.id,
+    type: "canvasFrame",
+    position: { x: placed.x, y: placed.y },
+    style: { width: placed.width, height: placed.height },
+    width: placed.width,
+    height: placed.height,
+    data: {
+      label: byFrameId.get(placed.id)?.label,
+      dimmed: dimmedIds.has(placed.id),
+    } as unknown as Record<string, unknown>,
+    draggable: false,
+    selectable: false,
+    // Below every card: React Flow stacks nodes in array order by default.
+    zIndex: 0,
+  }));
+
+  return { flowNodes: [...frameNodes, ...flowNodes], flowEdges };
 }
 
 const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(function CanvasShellInner(
-  { nodes, expanded, edges = [], selectedId, onSelect, colorMode: cardColorMode = "status", className },
+  {
+    nodes,
+    expanded,
+    edges = [],
+    frames = [],
+    selectedId,
+    onSelect,
+    colorMode: cardColorMode = "status",
+    dimmedIds = EMPTY_DIMMED,
+    className,
+  },
   handleRef,
 ) {
   const [hostRef, themeMode] = useHostColorMode();
   const flow = useReactFlow();
-  const layout = useMemo(() => layoutTree(nodes, expanded, edges), [nodes, expanded, edges]);
+  const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, selectedId, onSelect, cardColorMode),
-    [layout, nodes, selectedId, onSelect, cardColorMode],
+    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds),
+    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds],
   );
 
   useImperativeHandle(
