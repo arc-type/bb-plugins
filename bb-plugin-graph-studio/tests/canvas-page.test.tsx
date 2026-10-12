@@ -207,4 +207,34 @@ describe("the canvas page", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy());
     expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
   });
+
+  // BBP-216: a search that matches nothing must say so and hide "Select all
+  // matches", while a project that's already checked stays visible under a
+  // "Selected" heading instead of vanishing or looking like a real match.
+  it("a search with no matches shows No matches and keeps a checked project under Selected", async () => {
+    // Shop is already checked (filter persisted from a prior visit) before
+    // the dropdown opens, so it's in the frozen checked block when typing starts.
+    localStorage.setItem("bb-canvas:project-filter", '["p1"]');
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Shop — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects: Shop/ }));
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByText("No matches")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select all matches" })).toBeNull();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Shop" })).toBeTruthy();
+  });
+
+  // BBP-216: Enter in the search field checks the first visible match, the
+  // same shortcut the toolbar advertises via arrow keys + Space/Enter.
+  it("Enter in the search field checks the first matching project", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "blo" } });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Shop — ") })).toBeNull());
+    expect(await screen.findByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+  });
 });
