@@ -294,6 +294,27 @@ describe("CanvasView lazy children", () => {
     fireEvent.keyDown(root, { key: "Enter" });
     expect(loadChildren).toHaveBeenCalledOnce();
   });
+
+  // BBP-179 root cause: a rejected `loadChildren` used to vanish silently —
+  // the card just stayed empty, indistinguishable from a thread that
+  // genuinely has no turns. A failed load must leave a trace a developer (or
+  // the next acceptance pass) can actually find.
+  it("logs a failed load instead of leaving it silently empty", async () => {
+    const error = new Error("timeline fetch failed");
+    const loadChildren = vi.fn(async () => {
+      throw error;
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = render(
+      <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    expect(errorSpy.mock.calls[0]).toContain(error);
+    errorSpy.mockRestore();
+  });
 });
 
 describe("CanvasView sidebar action wiring (BBP-185)", () => {

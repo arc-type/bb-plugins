@@ -241,8 +241,13 @@ export function CanvasView({
         loading.current.delete(id);
         setLoaded((prev) => new Map(prev).set(id, result));
       },
-      () => {
+      (error: unknown) => {
         loading.current.delete(id);
+        // BBP-179: a rejected load used to vanish — the card just stayed
+        // empty, indistinguishable from "this thread genuinely has no
+        // turns". Surfacing it here at least makes a real failure
+        // diagnosable from the console, rather than silently uncountable.
+        console.error(`bb-canvas: failed to load children for node "${id}"`, error);
       },
     );
   }
