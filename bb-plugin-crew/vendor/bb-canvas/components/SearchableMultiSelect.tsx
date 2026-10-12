@@ -98,7 +98,18 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   // as before; checked entries the query no longer matches move to their own
   // "Selected" block so they aren't mistaken for actual search matches.
   const checkedMatching = normalizedQuery === "" ? checkedBlock : checkedBlock.filter(matches);
-  const checkedNotMatching = normalizedQuery === "" ? [] : checkedBlock.filter((option) => !matches(option));
+  // Entries checked after the popover opened aren't in the frozen checked
+  // block (that split stays frozen so match rows don't jump), but a
+  // non-matching one must still surface in Selected right away (BBP-218)
+  // instead of disappearing from the list until the next open.
+  const checkedNotMatching = normalizedQuery === ""
+    ? []
+    : [
+        ...checkedBlock.filter((option) => !matches(option)),
+        ...frozenOrder.filter(
+          (option) => !frozenCheckedIds.has(option.id) && selected.includes(option.id) && !matches(option),
+        ),
+      ].sort((a, b) => a.name.localeCompare(b.name));
   const remaining = frozenOrder.filter(
     (option) => !frozenCheckedIds.has(option.id) && (normalizedQuery === "" || matches(option)),
   );

@@ -299,6 +299,24 @@ describe("the canvas page", () => {
     expect(await screen.findByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
   });
 
+  // BBP-218: a project checked while the dropdown is already open must show
+  // up under "Selected" as soon as a search no longer matches it, not just
+  // ones that were already checked before the dropdown opened (BBP-216).
+  it("a project checked while open moves into Selected once the query no longer matches it", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shop" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Blog — ") })).toBeNull());
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "blo" } });
+    expect(screen.queryByText("No matches")).toBeNull();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Shop" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Blog" })).toBeTruthy();
+  });
+
   // BBP-197 fix 2: this is the page BB shows while Graph Studio is active,
   // so the live reload has to run here, not only on crew's hidden copy.
   describe("live updates", () => {

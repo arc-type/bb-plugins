@@ -296,6 +296,26 @@ describe("SearchableMultiSelect", () => {
     expect(onChange).toHaveBeenLastCalledWith(["p2"]);
   });
 
+  it("moves a project checked while open into Selected as soon as it no longer matches the query (BBP-218)", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    // Check Gamma while the dropdown is open (not checked at open time).
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gamma" }));
+    expect(onChange).toHaveBeenLastCalledWith(["p3"]);
+    rerender(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p3"]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    // Now type a query that Gamma no longer matches: it must appear under Selected right away.
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "et" } });
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBeTruthy();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Gamma" })).toBeTruthy();
+    expect(screen.queryByText("No matches")).toBeNull();
+  });
+
   it("does not let ArrowDown, Space or Enter reach the canvas's own shortcuts", () => {
     const canvasShortcut = vi.fn();
     render(
