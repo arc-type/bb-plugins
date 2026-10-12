@@ -95,7 +95,8 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   // `state` is the thread's own BB status, loaded on selection; the node-level
   // pill is the status of whatever the thread hangs under, not the thread.
   thread: ["title", "state", "provider", "model", "turns", "created", "updated"],
-  turn: ["from", "firstLine", "summaryCount", "text"],
+  // `firstLine` is the card title, already the sidebar header — not repeated.
+  turn: ["from", "request", "answerPreview", "duration", "summaryCount", "text"],
   "tool-call": [
     "toolName",
     "command",
@@ -159,6 +160,8 @@ const FIELD_LABELS: Record<string, string> = {
   created: "Created",
   updated: "Updated",
   firstLine: "First line",
+  request: "Request",
+  answerPreview: "Answer",
   toolName: "Tool",
   command: "Command",
   toolArgs: "Input",

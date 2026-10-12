@@ -964,6 +964,15 @@ describe("timelineToCanvas: turn titles from the triggering request (BBP-228)", 
     expect(turn.meta!.answerPreview).toBe((fixtures.conversationAssistant as Record<string, string>).text);
   });
 
+  it("sets meta.request to the full request text and meta.duration from the turn's own times", () => {
+    const { nodes } = timelineToCanvas("thr_wyw9bnia2w", {
+      rows: [fixtures.conversationUser as TimelineRowLike, fixtures.turnWithManySteps as TimelineRowLike],
+    });
+    const turn = nodes.find((node) => node.id === `row:${(fixtures.turnWithManySteps as Record<string, string>).id}`)!;
+    expect(turn.meta!.request).toBe((fixtures.conversationUser as Record<string, string>).text.trim());
+    expect(turn.meta!.duration).toMatch(/s$/);
+  });
+
   it("assigns a Pi-style user row without turnId to the next following turn by sourceSeqStart order", () => {
     const { rows } = fixtures.piThreadRequestFallback as { rows: TimelineRowLike[] };
     const { nodes } = timelineToCanvas("thr_m5hdus9gv4", { rows });

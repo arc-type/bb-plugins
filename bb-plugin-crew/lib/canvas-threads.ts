@@ -686,7 +686,11 @@ export function timelineToCanvas(
         sourceSeqEnd: row.sourceSeqEnd,
         summaryCount,
         ...(title ? { firstLine: title } : {}),
+        // The sidebar's own rows: the full request (the card title is only
+        // its first line), the answer, and how long the turn took.
+        ...(requestFullText?.trim() ? { request: requestFullText.trim() } : {}),
         ...(answerPreview ? { answerPreview } : {}),
+        ...(duration(row.startedAt, row.completedAt) ? { duration: duration(row.startedAt, row.completedAt) } : {}),
       },
     });
     nodes.push(...mapRows(row.children ?? [], turnNodeId, threadId));
@@ -750,7 +754,7 @@ export async function enrichTurnNodes(nodes: readonly CanvasNode[], port: TurnFi
           ...node,
           // The step count is already the card's subtitle ("Turn · n steps").
           label: truncate(title, 48),
-          meta: { ...node.meta, firstLine: title },
+          meta: { ...node.meta, firstLine: title, request: request.text.trim() },
         });
       } catch {
         // Turn steps unreadable: the plain "Turn · n steps" label stands.

@@ -132,7 +132,17 @@ describe("curateMeta", () => {
   });
 
   it("keeps a turn's and thread's ids in debug, not curated", () => {
-    expect(curateMeta("turn", { rowId: "r1", firstLine: "Hi" }).curated).toEqual([{ label: "First line", value: "Hi" }]);
+    expect(curateMeta("turn", { rowId: "r1", request: "Hi" }).curated).toEqual([{ label: "Request", value: "Hi" }]);
+  });
+
+  it("shows a turn's request, answer, duration and steps, not its title again", () => {
+    const { curated } = curateMeta("turn", { firstLine: "Hi", request: "Hi\nthere", answerPreview: "Done", duration: "2s", summaryCount: 3 });
+    expect(curated).toEqual([
+      { label: "Request", value: "Hi\nthere" },
+      { label: "Answer", value: "Done" },
+      { label: "Duration", value: "2s" },
+      { label: "Steps", value: "3" },
+    ]);
     const thread = curateMeta("thread", { threadId: "th1", title: "T" });
     expect(thread.curated).toEqual([{ label: "Title", value: "T" }]);
     expect(thread.debug).toEqual([{ label: "Thread", value: "th1" }]);
