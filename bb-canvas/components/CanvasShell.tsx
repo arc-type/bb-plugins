@@ -2,7 +2,7 @@
 // zoom at the pointer. No MiniMap and no keyboard here — those are the next
 // work item, built on fixture data before either plugin feeds this component
 // real data.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
 import {
   Background,
   Controls,
@@ -159,6 +159,20 @@ const NODE_TYPES = { canvasNode: CanvasNodeView, canvasFrame: CanvasFrameView };
 const EDGE_TYPES = { statusEdge: StatusEdge };
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 const FIT_VIEW_OPTIONS = { padding: 0.08 };
+// React Flow's own floor (0.5) cuts off a real tree (two ten-member crews no
+// longer fit); its ceiling (2) is left as is.
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 2;
+
+/** `-deltaY` scaled the same way React Flow's own pinch handler reads a wheel
+ *  event — pixel/line/page delta modes — but without its extra ×10 factor for
+ *  Ctrl+wheel on macOS, which turns one mouse-wheel notch into a 4x zoom jump
+ *  (BBP-197 Fix 3). One formula for both a mouse-wheel notch (deltaY ~100,
+ *  a mild ~13% step) and a trackpad pinch (deltaY ~1–10, smooth). */
+function wheelZoomDelta(event: { deltaY: number; deltaMode: number }): number {
+  const modeFactor = event.deltaMode === 1 ? 0.05 : event.deltaMode === 2 ? 1 : 0.002;
+  return -event.deltaY * modeFactor;
+}
 
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
@@ -341,8 +355,37 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     [flow],
   );
 
+  // Own Ctrl/Cmd+wheel zoom, at the pointer (BBP-197 Fix 3): React Flow's
+  // built-in pinch-on-wheel path only recognises Ctrl (not Cmd/Meta), and
+  // only on macOS multiplies the step by 10 for Ctrl, not for Cmd — neither
+  // of which this canvas wants. Captured above the pane, so it runs (and can
+  // stop the event) before React Flow's own wheel listener sees it; a plain
+  // wheel/trackpad-pan gesture (no Ctrl/Cmd) is untouched and still pans.
+  const onWheelCapture = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const pointer = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+      const before = flow.getViewport();
+      const factor = Math.pow(2, wheelZoomDelta(event));
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, before.zoom * factor));
+      // The flow-space point under the pointer stays fixed: solve for the
+      // new viewport offset that keeps it under the same screen pixel.
+      const flowPoint = { x: (pointer.x - before.x) / before.zoom, y: (pointer.y - before.y) / before.zoom };
+      flow.setViewport({ x: pointer.x - flowPoint.x * zoom, y: pointer.y - flowPoint.y * zoom, zoom });
+    },
+    [flow],
+  );
+
   return (
-    <div ref={hostRef} className={className} style={{ width: "100%", height: "100%" }}>
+    <div
+      ref={hostRef}
+      className={className}
+      style={{ width: "100%", height: "100%" }}
+      onWheelCapture={onWheelCapture}
+    >
       <style>{MOTION_CSS}</style>
       <ReactFlow
         nodes={animatedNodes}
@@ -361,15 +404,14 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         zoomOnScroll={false}
         panOnScroll
         zoomOnPinch
-        zoomActivationKeyCode={["Meta", "Control"]}
+        // Ctrl/Cmd+wheel zoom is handled above (`onWheelCapture`) instead.
+        zoomActivationKeyCode={null}
         // Fits the first tree only: a later update (a poll, BBP-200) keeps
         // the user's zoom and pan.
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
-        // React Flow's default floor (0.5) is too high for a real tree: two
-        // crews with ten members each no longer fit, so the start view and
-        // `0` cut off the top instead of showing the whole tree.
-        minZoom={0.2}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
         // The canvas is a page of its own inside BB, not a demo; the corner
         // badge would be the only non-BB text on it.
         proOptions={{ hideAttribution: true }}
