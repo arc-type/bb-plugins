@@ -46,3 +46,17 @@ describe("StatusEdge state (BBP-146)", () => {
     expect(document.querySelectorAll("#bb-canvas-status-edge-styles")).toHaveLength(1);
   });
 });
+
+describe("StatusEdge relation hover (BBP-197 design)", () => {
+  // React Flow gives unselectable edges pointer-events: none; a relation
+  // must take them back on its own group, or hover never reaches it.
+  it("a relation edge takes pointer events on its stroke", () => {
+    const group = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "assigns_to", relation: true }).closest("g")!;
+    expect(group.style.pointerEvents).toBe("stroke");
+  });
+
+  it("negative: any other edge leaves pointer events to React Flow", () => {
+    const group = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "" }).closest("g")!;
+    expect(group.style.pointerEvents).toBe("");
+  });
+});
