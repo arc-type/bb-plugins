@@ -87,6 +87,21 @@ describe("crew's canvas page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Blog" }));
     expect(slot.navigateCalls).toEqual([{ method: "toPluginPanel", path: "canvas", options: { subPath: "p2" } }]);
   });
+
+  it("picker says it is loading until the project list arrives, then asks for a pick", async () => {
+    let release: (list: { id: string; name: string }[]) => void = () => {};
+    const pending = new Promise<{ id: string; name: string }[]>((resolve) => (release = resolve));
+    canvasPanel({ projectId: null, sdk: { projects: { list: () => pending } } });
+    expect(await screen.findByText("Loading projects…")).toBeTruthy();
+    release([{ id: "p1", name: "Shop" }]);
+    expect(await screen.findByText("Pick a project to see its canvas.")).toBeTruthy();
+  });
+
+  it("negative: an empty project list says so instead of an orphaned prompt", async () => {
+    canvasPanel({ projectId: null, sdk: { projects: { list: async () => [] } } });
+    expect(await screen.findByText("No projects yet.")).toBeTruthy();
+    expect(screen.queryByText("Pick a project to see its canvas.")).toBeNull();
+  });
 });
 
 describe("crew's canvas page frame/edit mode (BBP-170 WI6)", () => {

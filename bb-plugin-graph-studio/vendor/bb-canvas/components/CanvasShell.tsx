@@ -2,7 +2,7 @@
 // zoom at the pointer. No MiniMap and no keyboard here — those are the next
 // work item, built on fixture data before either plugin feeds this component
 // real data.
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -41,6 +41,20 @@ export function useHostColorMode(): [React.RefObject<HTMLDivElement | null>, Col
     }
   }, []);
   useLayoutEffect(measure);
+  // A theme switch repaints the host without re-rendering the canvas, so
+  // measuring on render alone keeps the old mode until something else
+  // happens to re-render it.
+  useEffect(() => {
+    if (typeof MutationObserver !== "function") return;
+    const observer = new MutationObserver(measure);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+    const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+    media?.addEventListener("change", measure);
+    return () => {
+      observer.disconnect();
+      media?.removeEventListener("change", measure);
+    };
+  }, [measure]);
   return [ref, mode];
 }
 

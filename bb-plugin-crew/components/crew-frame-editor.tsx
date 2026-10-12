@@ -18,6 +18,8 @@
 import { type ComponentType, useState } from "react";
 import { experimental_ProviderModelPicker } from "@get-bb/plugin-sdk/app";
 import { InspectorHeader, InspectorSection } from "./inspector";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { LINK_KINDS, PERMISSIONS, validateCrew, type LinkKind } from "../lib/spec";
 import { addGroupToFile, addLinkToFile, editorModel, nextMemberId, setMemberExecution, setMemberValue, type EditorMember } from "../lib/crew-edit";
 
@@ -93,17 +95,20 @@ function CrewFrameEditorView({
   }
 
   return (
-    <div>
-      <div>
-        <button type="button" disabled={!model || !member} onClick={addMember}>
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" disabled={!model || !member} onClick={addMember}>
           Add member
-        </button>
-        <button type="button" disabled={!model} onClick={addGroup}>
+        </Button>
+        <Button variant="outline" size="sm" disabled={!model} onClick={addGroup}>
           Add group
-        </button>
+        </Button>
       </div>
-      <p>{errors.length === 0 ? "Valid" : errors.map((problem) => problem.message).join("; ")}</p>
-      <div data-card-area onPointerUp={handlePointerUp}>
+      <p className={cn("text-xs", errors.length === 0 ? "text-muted-foreground" : "text-destructive")}>
+        {errors.length === 0 ? "Valid" : errors.map((problem) => problem.message).join("; ")}
+      </p>
+      {/* Drag from one member onto another to propose a link. */}
+      <div data-card-area className="flex flex-wrap gap-1.5" onPointerUp={handlePointerUp}>
         {model?.members.map((entry) => (
           <button
             key={entry.key}
@@ -112,16 +117,29 @@ function CrewFrameEditorView({
             aria-pressed={entry.key === selectedKey}
             onPointerDown={() => setDragFrom(entry.key)}
             onClick={() => setSelectedKey(entry.key)}
+            className={cn(
+              "h-7 cursor-grab touch-none rounded-md border px-2.5 text-xs active:cursor-grabbing focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              entry.key === selectedKey
+                ? "border-foreground/40 bg-state-active text-foreground"
+                : "border-border text-muted-foreground hover:bg-state-hover hover:text-foreground",
+            )}
           >
             {entry.key}
           </button>
         ))}
       </div>
       {pendingLink ? (
-        <div role="dialog" aria-label={`Link ${pendingLink.from} to ${pendingLink.to}`}>
-          <label>
+        <div
+          role="dialog"
+          aria-label={`Link ${pendingLink.from} to ${pendingLink.to}`}
+          className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2 text-xs"
+        >
+          <span className="text-foreground">
+            {pendingLink.from} → {pendingLink.to}
+          </span>
+          <label className="flex items-center gap-1.5 text-muted-foreground">
             Link kind
-            <select aria-label="Link kind" value={linkKind} onChange={(event) => setLinkKind(event.target.value as LinkKind)}>
+            <select aria-label="Link kind" className={FIELD_CLASS} value={linkKind} onChange={(event) => setLinkKind(event.target.value as LinkKind)}>
               {LINK_KINDS.map((kind) => (
                 <option key={kind} value={kind}>
                   {kind}
@@ -129,12 +147,12 @@ function CrewFrameEditorView({
               ))}
             </select>
           </label>
-          <button type="button" onClick={confirmLink}>
+          <Button size="sm" onClick={confirmLink}>
             Add link
-          </button>
-          <button type="button" onClick={() => setPendingLink(null)}>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setPendingLink(null)}>
             Cancel
-          </button>
+          </Button>
         </div>
       ) : null}
       {member ? <MemberInspector member={member} onEdit={edit} ExecutionPicker={ExecutionPicker} /> : null}
@@ -168,6 +186,8 @@ function MemberInspector({
       <InspectorSection title="Role" summary={member.role || "none"}>
         <textarea
           aria-label="Role text"
+          rows={4}
+          className={cn(FIELD_CLASS, "w-full resize-y py-1.5")}
           value={member.role}
           onChange={(event) => onEdit((current) => setMemberValue(current, member.key, "role", event.target.value))}
         />
@@ -175,6 +195,7 @@ function MemberInspector({
       <InspectorSection title="Permissions" summary={member.permissions || "inherited"}>
         <select
           aria-label="Permissions"
+          className={FIELD_CLASS}
           value={member.permissions}
           onChange={(event) => onEdit((current) => setMemberValue(current, member.key, "permissions", event.target.value))}
         >
@@ -189,3 +210,6 @@ function MemberInspector({
     </div>
   );
 }
+
+const FIELD_CLASS =
+  "h-7 rounded-md border border-input bg-transparent px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";

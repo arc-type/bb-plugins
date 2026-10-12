@@ -8,6 +8,7 @@ import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../server";
 import { validateCrew } from "../lib/spec";
 import { CrewFrameEditor } from "./crew-frame-editor";
+import { Button } from "@/components/ui/button";
 
 export type CrewFrameEditPanelProps = {
   projectId: string;
@@ -68,9 +69,9 @@ export function CrewFrameEditPanel({ projectId, crew }: CrewFrameEditPanelProps)
           {error}
         </p>
       ) : null}
-      <button type="button" disabled={errors.length > 0 || applying} onClick={() => void apply()}>
-        Apply
-      </button>
+      <Button size="sm" className="self-start" disabled={errors.length > 0 || applying} onClick={() => void apply()}>
+        {applying ? "Applying…" : "Apply"}
+      </Button>
       {applied ? (
         <ul aria-label="Apply results" className="text-xs text-muted-foreground">
           {applied.map((line) => (

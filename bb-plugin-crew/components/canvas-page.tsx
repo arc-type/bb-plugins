@@ -43,8 +43,10 @@ function ProjectPicker() {
     };
   }, [sdk]);
   return (
-    <div className="flex flex-col items-start gap-2 p-4 text-sm">
-      <p className="text-muted-foreground">Pick a project to see its canvas.</p>
+    <div className="flex h-full flex-col items-start gap-1 overflow-y-auto p-4 text-sm">
+      <p className="text-muted-foreground">
+        {projects === null ? "Loading projects…" : projects.length === 0 ? "No projects yet." : "Pick a project to see its canvas."}
+      </p>
       {(projects ?? []).map((project) => (
         <button
           key={project.id}
