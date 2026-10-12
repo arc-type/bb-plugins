@@ -73,11 +73,13 @@ export type CuratedField = { label: string; value: string };
  *  `status` already has its own pill in the header, so it is curated only
  *  for `tool-call`/`subagent`, whose nodes carry no top-level `status`. */
 const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
-  crew: ["crew"],
+  crew: ["crew", "members", "lead"],
   member: ["address", "role", "lead", "activity"],
-  "graph-run": ["runId", "graphId", "threadId"],
+  "graph-run": ["graphId", "runId", "started", "steps", "threadId"],
   step: ["nodeId", "attempts"],
-  thread: ["threadId"],
+  // `state` is the thread's own BB status, loaded on selection; the node-level
+  // pill is the status of whatever the thread hangs under, not the thread.
+  thread: ["title", "state", "provider", "model", "turns", "created", "updated", "threadId"],
   turn: ["rowId"],
   "tool-call": ["status", "summary"],
   subagent: ["status", "summary"],
@@ -97,6 +99,16 @@ const FIELD_LABELS: Record<string, string> = {
   attempts: "Attempts",
   rowId: "Row",
   summary: "Summary",
+  members: "Members",
+  started: "Started",
+  steps: "Steps",
+  title: "Title",
+  state: "Status",
+  provider: "Provider",
+  model: "Model",
+  turns: "Turns",
+  created: "Created",
+  updated: "Updated",
 };
 
 function fieldLabel(key: string): string {

@@ -25,7 +25,8 @@ const initialExpanded = new Set(["agents", "project:p1", "crew:factory-1"]);
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
 createRoot(root).render(
-  <div style={{ width: "1200px", height: "800px" }}>
+  // min(): unchanged at the default viewport, narrow when a test narrows the viewport.
+  <div style={{ width: "min(1200px, 100vw)", height: "800px" }}>
     <CanvasView nodes={nodes} edges={edges} initialExpanded={initialExpanded} />
   </div>,
 );

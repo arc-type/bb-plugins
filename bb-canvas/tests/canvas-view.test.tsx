@@ -296,6 +296,41 @@ describe("CanvasView lazy children", () => {
   });
 });
 
+describe("CanvasView sidebar details (BBP-179 acceptance)", () => {
+  it("loads a selected node's details once and shows them in the sidebar", async () => {
+    const loadDetails = vi.fn(async () => ({ provider: "claude-code", turns: 7 }));
+    const threadNodes: CanvasNode[] = [{ id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "thr_1" } }];
+    render(<CanvasView nodes={threadNodes} loadDetails={loadDetails} />);
+    fireEvent.click(card(/^Thread — /));
+    expect(await screen.findByText("claude-code")).toBeTruthy();
+    expect(screen.getByText("7")).toBeTruthy();
+    expect(screen.getByText("thr_1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    fireEvent.click(card(/^Thread — /));
+    await screen.findByText("claude-code");
+    expect(loadDetails).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the sidebar working with the node's own meta when loading fails", async () => {
+    const loadDetails = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const threadNodes: CanvasNode[] = [{ id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "thr_1" } }];
+    render(<CanvasView nodes={threadNodes} loadDetails={loadDetails} />);
+    fireEvent.click(card(/^Thread — /));
+    await vi.waitFor(() => expect(loadDetails).toHaveBeenCalled());
+    expect(screen.getByText("thr_1")).toBeTruthy();
+  });
+
+  it("leaves the sidebar on the node.s own meta when the loader returns null", async () => {
+    const loadDetails = vi.fn(async () => null);
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadDetails={loadDetails} />);
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    await vi.waitFor(() => expect(loadDetails).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
+  });
+});
+
 describe("CanvasView sidebar action wiring (BBP-185)", () => {
   it("forwards onOpenThread to the Sidebar and calls it with the selected node's threadId", () => {
     const onOpenThread = vi.fn();

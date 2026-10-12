@@ -17,6 +17,7 @@ import {
 } from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
 import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
 import type { rpcContract } from "../server";
@@ -194,6 +195,18 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
         const response = await sdk.threads.timeline({ threadId });
         return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
       }}
+      // BBP-179: a thread's sidebar shows BB's status, provider, model, times
+      // and turn count, not just its id — loaded once, on first selection.
+      loadDetails={(node) =>
+        loadNodeDetails(
+          {
+            get: async (threadId) => (await sdk.threads.get({ threadId })) as unknown as ThreadLike,
+            model: async (threadId) => (await sdk.threads.defaultExecutionOptions({ threadId }))?.model ?? null,
+            timelineRows: async (threadId) => (await sdk.threads.timeline({ threadId })).rows as unknown as readonly { kind: string }[],
+          },
+          node,
+        )
+      }
       toolbar={<ProjectFilter projects={projects} selected={selected} onChange={choose} />}
       onOpenThread={(threadId) => navigate.toThread(threadId)}
       onOpenCrew={(crew) => {

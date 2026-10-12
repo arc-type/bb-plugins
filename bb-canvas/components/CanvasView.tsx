@@ -81,6 +81,12 @@ export type CanvasViewProps = {
    *  before their children arrive; every other node without children is a
    *  leaf. Absent: any node may load, as long as a loader is given. */
   canLoadChildren?: (node: CanvasNode) => boolean;
+  /** Fetches extra sidebar fields for a node the first time it is selected —
+   *  a thread's provider, model, times and turn count from the SDK (BBP-179).
+   *  The result is merged over the node's own `meta` for the sidebar only.
+   *  Called at most once per node id; `null` or a failure leaves the node's
+   *  own `meta` in place. */
+  loadDetails?: (node: CanvasNode) => Promise<Record<string, unknown> | null>;
   /** Persists expand/collapse under `bb-canvas:expanded:<surface>` (BBP-183).
    *  Absent: nothing is stored, `initialExpanded` applies on every mount. */
   surface?: string;
@@ -108,6 +114,7 @@ export function CanvasView({
   initialExpanded,
   loadChildren,
   canLoadChildren,
+  loadDetails,
   surface,
   toolbar,
   onOpenThread,
@@ -122,6 +129,8 @@ export function CanvasView({
     (surface === undefined ? null : loadExpandedState(surface)) ?? { open: [], closed: [] },
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [details, setDetails] = useState<ReadonlyMap<string, Record<string, unknown>>>(() => new Map());
+  const detailsRequested = useRef(new Set<string>());
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [loaded, setLoaded] = useState<ReadonlyMap<string, LoadedChildren>>(new Map());
@@ -190,6 +199,26 @@ export function CanvasView({
   }
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
+  const selectedDetails = selected ? details.get(selected.id) : undefined;
+  const sidebarNode = useMemo(
+    () => (selected && selectedDetails ? { ...selected, meta: { ...selected.meta, ...selectedDetails } } : selected),
+    [selected, selectedDetails],
+  );
+
+  useEffect(() => {
+    if (!selected || !loadDetails || detailsRequested.current.has(selected.id)) return;
+    const id = selected.id;
+    detailsRequested.current.add(id);
+    void loadDetails(selected).then(
+      (loadedDetails) => {
+        if (loadedDetails) setDetails((previous) => new Map(previous).set(id, loadedDetails));
+      },
+      () => {
+        // The sidebar keeps the node's own meta; a reselect does not retry,
+        // so a dead endpoint is not hammered on every click.
+      },
+    );
+  }, [selected, loadDetails]);
 
   const dimmedIds = useMemo(() => {
     if (editingFrameId === null) return EMPTY_DIMMED;
@@ -447,7 +476,7 @@ export function CanvasView({
           : selected
             ? (
                 <Sidebar
-                  node={selected}
+                  node={sidebarNode ?? selected}
                   onClose={() => select(null)}
                   onOpenThread={onOpenThread}
                   onOpenRun={onOpenRun}

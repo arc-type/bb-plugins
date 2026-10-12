@@ -72,3 +72,29 @@ test("the chosen width survives a reload", async ({ page }) => {
   await expect(handle(page)).toHaveAttribute("aria-valuenow", "352");
   expect(await renderedWidth(page)).toBe(352);
 });
+
+test.describe("in a narrow panel (BBP-179 acceptance)", () => {
+  test.use({ viewport: { width: 600, height: 700 } });
+
+  test("the sidebar takes at most half the canvas, and gets its width back when the panel widens", async ({ page }) => {
+    const row = await sidebar(page).evaluate((element) => element.parentElement!.clientWidth);
+    const half = Math.floor(row / 2);
+    await handle(page).focus();
+    await page.keyboard.press("End");
+    await expect(handle(page)).toHaveAttribute("aria-valuemax", String(half));
+    await expect(handle(page)).toHaveAttribute("aria-valuenow", String(half));
+    expect(await renderedWidth(page)).toBe(half);
+
+    // A drag past the edge stays capped as well.
+    const box = (await handle(page).boundingBox())!;
+    await page.mouse.move(box.x + 4, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 2000, box.y + 20, { steps: 5 });
+    await page.mouse.up();
+    expect(await renderedWidth(page)).toBe(half);
+
+    // The user's choice is kept, only capped: a wide panel shows it again.
+    await page.setViewportSize({ width: 1600, height: 700 });
+    await expect(handle(page)).toHaveAttribute("aria-valuenow", "640");
+  });
+});

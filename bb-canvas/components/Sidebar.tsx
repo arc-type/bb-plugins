@@ -4,7 +4,7 @@
 // for `thread`/`turn` nodes is a later ticket, once there is a timeline to
 // lazily load into this same slot.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { clampWidth, DEFAULT_WIDTH, MAX_WIDTH, MIN_WIDTH } from "../lib/clampWidth";
+import { clampWidth, DEFAULT_WIDTH, fitWidth, maxWidthFor, MIN_WIDTH } from "../lib/clampWidth";
 import { curateMeta, type CanvasNode, type CanvasStatus } from "../lib/types";
 import { KindIcon, KIND_LABEL } from "./KindIcon";
 
@@ -164,6 +164,23 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
   const hasActions = threadId !== undefined || runId !== undefined || crew !== undefined;
   const [width, setWidth] = useState(loadWidth);
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  // The row the sidebar shares with the canvas; 0 until measured.
+  const [containerWidth, setContainerWidth] = useState(0);
+  // `width` stays the user's choice (and what is stored); `shown` is that
+  // choice capped for a narrow panel, so widening the panel brings it back.
+  const shown = fitWidth(width, containerWidth);
+  const shownMax = maxWidthFor(containerWidth);
+
+  useEffect(() => {
+    const container = asideRef.current?.parentElement;
+    if (!container) return;
+    setContainerWidth(container.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setContainerWidth(container.clientWidth));
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => saveWidth(width), [width]);
   useEffect(ensureSidebarStyles, []);
@@ -187,15 +204,16 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
 
   const startDrag = (event: MouseEvent) => {
     event.preventDefault();
-    drag.current = { startX: event.clientX, startWidth: width };
+    drag.current = { startX: event.clientX, startWidth: shown };
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
     const next: Record<string, number> = {
-      ArrowLeft: width + KEY_STEP,
-      ArrowRight: width - KEY_STEP,
+      // From what is on screen, so a key always moves the visible edge.
+      ArrowLeft: shown + KEY_STEP,
+      ArrowRight: shown - KEY_STEP,
       Home: MIN_WIDTH,
-      End: MAX_WIDTH,
+      End: shownMax,
     };
     if (!(event.key in next)) return;
     event.preventDefault();
@@ -204,12 +222,13 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
 
   return (
     <aside
+      ref={asideRef}
       aria-label={`Details for ${node.label}`}
       style={{
         position: "relative",
         // border-box: the clamped value is the width on screen, padding and border included.
         boxSizing: "border-box",
-        width,
+        width: shown,
         flexShrink: 0,
         borderLeft: "1px solid var(--border)",
         padding: "14px 16px",
@@ -225,9 +244,9 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize details"
-        aria-valuenow={width}
-        aria-valuemin={MIN_WIDTH}
-        aria-valuemax={MAX_WIDTH}
+        aria-valuenow={shown}
+        aria-valuemin={Math.min(MIN_WIDTH, shownMax)}
+        aria-valuemax={shownMax}
         tabIndex={0}
         onMouseDown={startDrag}
         onKeyDown={onKeyDown}

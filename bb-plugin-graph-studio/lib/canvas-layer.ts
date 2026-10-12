@@ -8,6 +8,7 @@
 // card that opens into its steps.
 import { EMPTY_LAYER, mergeLayers, projectNodeId, withRoots, type CanvasLayer } from "../vendor/bb-canvas/lib/layer";
 import type { CanvasEdge, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
+import { formatTimestamp } from "../vendor/bb-canvas/lib/format";
 import { END_NODE, START_NODE, type Graph } from "./graph";
 import { now, taken } from "./edge-state";
 import { layoutGraph } from "./layout";
@@ -84,20 +85,29 @@ export function graphCanvasLayer(
 
 function addRun(layer: CanvasLayer, run: CanvasRun, parentId: string): void {
   const id = runNodeId(run.id);
+  const latest = new Map<string, { attempt: number; status: StepStatus }>();
+  for (const step of run.nodeRuns) {
+    const seen = latest.get(step.nodeId);
+    if (!seen || step.attempt >= seen.attempt) latest.set(step.nodeId, step);
+  }
+  const done = run.graph.nodes.filter((node) => latest.get(node.id)?.status === "done").length;
+  const started = formatTimestamp(run.createdAt);
   layer.nodes.push({
     id,
     kind: "graph-run",
     label: run.graph.name,
     status: RUN_STATUS[run.status],
     parentId,
-    meta: { runId: run.id, graphId: run.graph.id, status: run.status, threadId: run.threadId },
+    meta: {
+      runId: run.id,
+      graphId: run.graph.id,
+      status: run.status,
+      threadId: run.threadId,
+      ...(started ? { started } : {}),
+      steps: `${done}/${run.graph.nodes.length}`,
+    },
   });
 
-  const latest = new Map<string, { attempt: number; status: StepStatus }>();
-  for (const step of run.nodeRuns) {
-    const seen = latest.get(step.nodeId);
-    if (!seen || step.attempt >= seen.attempt) latest.set(step.nodeId, step);
-  }
   for (const node of run.graph.nodes) {
     const last = latest.get(node.id);
     const step: CanvasNode = {
