@@ -104,11 +104,11 @@ describe("ProjectFilter dropdown", () => {
     expect(onChange).toHaveBeenLastCalledWith([]);
   });
 
-  it("clears the selection with Show all", () => {
+  it("clears the selection with Clear selection", () => {
     const onChange = vi.fn();
     render(<ProjectFilter projects={projects} selected={["p1"]} onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
     expect(onChange).toHaveBeenLastCalledWith([]);
   });
 
