@@ -129,6 +129,9 @@ export type CanvasShellProps = {
    *  neutral card by `kind` instead. An error or needs-input border always
    *  wins over either. */
   colorMode?: NodeCardColorMode;
+  /** Nodes whose lazy load failed (BBP-179) — shown as a visible error on
+   *  the card instead of an empty one, and retried on the next toggle. */
+  failedLoads?: ReadonlySet<string>;
   className?: string;
 };
 
@@ -151,6 +154,7 @@ function toFlow(
   expanded: ReadonlySet<string>,
   expandable: ReadonlySet<string>,
   onToggle: ((id: string) => void) | undefined,
+  failedLoads: ReadonlySet<string>,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const byFrameId = new Map(frames.map((frame) => [frame.id, frame]));
@@ -170,6 +174,7 @@ function toFlow(
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
       dimmed: dimmedIds.has(node.id),
+      loadFailed: failedLoads.has(node.id),
       expander: expandable.has(node.id)
         ? {
             expanded: expanded.has(node.id),
@@ -241,6 +246,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     onSelect,
     colorMode: cardColorMode = "status",
     dimmedIds = EMPTY_DIMMED,
+    failedLoads = EMPTY_DIMMED,
     className,
   },
   handleRef,
@@ -249,8 +255,9 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle),
-    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle],
+    () =>
+      toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads),
+    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
 
   useEffect(() => {

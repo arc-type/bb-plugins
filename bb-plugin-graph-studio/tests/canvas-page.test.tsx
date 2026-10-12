@@ -71,6 +71,59 @@ describe("the canvas page", () => {
     expect(await screen.findByRole("button", { name: new RegExp("^Please fix the bug — ") })).toBeTruthy();
   });
 
+  // BBP-179 acceptance regression: a real SDK timeline response nests a
+  // turn's work rows under `children`, and a delegation (subagent) row
+  // nests its own rows under `childRows` — not the shallow
+  // `{kind:"conversation"}` fixture the test above uses. "Expand all"
+  // deliberately never fetches this; a thread must be opened individually.
+  it("shows a turn, a tool-call, and a nested subagent once a real-shaped timeline loads", async () => {
+    const timeline = () => ({
+      rows: [
+        {
+          id: "turn-1",
+          kind: "turn",
+          turnId: "turn-1",
+          status: "completed",
+          summaryCount: 2,
+          completedAt: 1700000000000,
+          children: [
+            {
+              id: "tool-1",
+              kind: "work",
+              workKind: "tool",
+              toolName: "Bash",
+              status: "completed",
+              callId: "call-1",
+              output: "3 files",
+            },
+            {
+              id: "deleg-1",
+              kind: "work",
+              workKind: "delegation",
+              toolName: "Task",
+              status: "completed",
+              callId: "call-2",
+              description: "research the bug",
+              output: "found it",
+              childRows: [
+                { id: "tool-2", kind: "work", workKind: "tool", toolName: "Read", status: "completed", callId: "call-3" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    canvasPanel({ sdk: { threads: { timeline } } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    const turnCard = await screen.findByRole("button", { name: new RegExp("^Turn · 2 steps") });
+    fireEvent.click(turnCard);
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(screen.getByRole("button", { name: new RegExp("^Bash") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^Agent: research the bug") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^Read") })).toBeNull();
+  });
+
   // BBP-173, measured in BB: on the nav-panel route `/plugins/<id>/canvas`
   // the host's context carries no projectId, even when opened from a project.
   it("takes the project from the subPath when the host context has none", async () => {

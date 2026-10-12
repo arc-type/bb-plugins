@@ -294,6 +294,60 @@ describe("CanvasView lazy children", () => {
     fireEvent.keyDown(root, { key: "Enter" });
     expect(loadChildren).toHaveBeenCalledOnce();
   });
+
+  // BBP-179 root cause: a rejected `loadChildren` used to vanish silently —
+  // the card just stayed empty, indistinguishable from a thread that
+  // genuinely has no turns. A failed load must leave a trace a developer (or
+  // the next acceptance pass) can actually find.
+  it("logs a failed load instead of leaving it silently empty", async () => {
+    const error = new Error("timeline fetch failed");
+    const loadChildren = vi.fn(async () => {
+      throw error;
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = render(
+      <CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    expect(errorSpy.mock.calls[0]).toContain(error);
+    errorSpy.mockRestore();
+  });
+
+  it("shows a visible error on the card when loadChildren fails, not just a silent empty card", async () => {
+    const loadChildren = vi.fn(async () => {
+      throw new Error("timeline fetch failed");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />);
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByText("Could not load activity")).toBeTruthy();
+    vi.restoreAllMocks();
+  });
+
+  it("retries the load when the failed card is clicked again", async () => {
+    const loadChildren = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timeline fetch failed"))
+      .mockResolvedValueOnce({
+        nodes: [{ id: "m1:turn-1", kind: "turn" as const, label: "Turn 1", parentId: "m1" }],
+      });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />);
+    const root = document.querySelector("[data-canvas-view]")!;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await screen.findByText("Could not load activity");
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: /^Turn 1 — / })).toBeTruthy();
+    expect(screen.queryByText("Could not load activity")).toBeNull();
+    expect(loadChildren).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
 });
 
 describe("CanvasView sidebar details (BBP-179 acceptance)", () => {
