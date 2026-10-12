@@ -2,7 +2,7 @@
 // (CanvasShell already has that), keyboard navigation, breadcrumb, search and
 // the detail sidebar. Works against whatever `nodes`/`edges` it is given —
 // fixtures here, RPC data once the owning plugin wires it up (WI3/WI4).
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
 import { Breadcrumb } from "./Breadcrumb";
 import { Sidebar } from "./Sidebar";
@@ -43,6 +43,10 @@ export type CanvasViewProps = {
   /** Frames the current selection may enter edit mode on; a frame absent
    *  here never responds to `E` (BBP-166 negative criterion 2). */
   editableFrameIds?: ReadonlySet<string>;
+  /** What to show in the side panel while a frame is being edited, in place
+   *  of the generic `Sidebar` — e.g. a provider's own edit-action panel
+   *  (BBP-170). Absent: edit mode simply shows no side panel. */
+  renderFrameEditor?: (frameId: string) => ReactNode;
   /** Expanded by default — e.g. every node up to the member level. */
   initialExpanded?: ReadonlySet<string>;
   /**
@@ -65,6 +69,7 @@ export function CanvasView({
   edges = [],
   frames = [],
   editableFrameIds,
+  renderFrameEditor,
   initialExpanded,
   loadChildren,
   className,
@@ -325,7 +330,11 @@ export function CanvasView({
             dimmedIds={dimmedIds}
           />
         </div>
-        {selected ? <Sidebar node={selected} onClose={() => select(null)} /> : null}
+        {editingFrameId !== null
+          ? (renderFrameEditor?.(editingFrameId) ?? null)
+          : selected
+            ? <Sidebar node={selected} onClose={() => select(null)} />
+            : null}
       </div>
     </div>
   );

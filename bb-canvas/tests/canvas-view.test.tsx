@@ -212,6 +212,60 @@ describe("CanvasView run/edit mode (BBP-166)", () => {
   });
 });
 
+describe("CanvasView frame editor slot (BBP-170 WI6)", () => {
+  const frameNodes: CanvasNode[] = [
+    { id: "crew", kind: "crew", label: "factory-1", parentId: null },
+    { id: "lead", kind: "member", label: "orch-lead", parentId: "crew", frameId: "frame-a" },
+  ];
+  const frames: CanvasFrame[] = [{ id: "frame-a", parentId: null, label: "Team A" }];
+
+  function renderWithEditor() {
+    const { container } = render(
+      <CanvasView
+        nodes={frameNodes}
+        frames={frames}
+        editableFrameIds={new Set(["frame-a"])}
+        initialExpanded={new Set(["crew"])}
+        renderFrameEditor={(frameId) => <div data-frame-editor={frameId}>Editing {frameId}</div>}
+      />,
+    );
+    return container.querySelector("[data-canvas-view]") as HTMLElement;
+  }
+
+  it("shows the frame editor instead of the sidebar once edit mode starts", () => {
+    const root = renderWithEditor();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
+    fireEvent.keyDown(root, { key: "e" });
+    expect(screen.getByText("Editing frame-a")).toBeTruthy();
+    expect(screen.queryByLabelText("Details for orch-lead")).toBeNull();
+  });
+
+  it("Escape brings the sidebar back for the still-selected card", () => {
+    const root = renderWithEditor();
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    fireEvent.keyDown(root, { key: "Escape" });
+    expect(screen.queryByText("Editing frame-a")).toBeNull();
+    expect(screen.getByLabelText("Details for orch-lead")).toBeTruthy();
+  });
+
+  it("without renderFrameEditor, edit mode simply shows no side panel", () => {
+    const { container } = render(
+      <CanvasView
+        nodes={frameNodes}
+        frames={frames}
+        editableFrameIds={new Set(["frame-a"])}
+        initialExpanded={new Set(["crew"])}
+      />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "e" });
+    expect(screen.queryByLabelText("Details for orch-lead")).toBeNull();
+  });
+});
+
 describe("CanvasView lazy children", () => {
   it("loads a node's children on first expand and renders them once they resolve", async () => {
     const loadChildren = vi.fn(async (node: CanvasNode) => ({
