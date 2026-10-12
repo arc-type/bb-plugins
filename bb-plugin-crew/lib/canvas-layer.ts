@@ -98,7 +98,8 @@ export const crewNameFromFrameId = (frameId: string): string => frameId.slice("f
  * members inside one frame, in canvas-layout's row order (lead first, then
  * the groups in file order), and the crew's links as edges. A link that
  * points back up (pathBetween's "back" shape) becomes a back edge, the rest
- * flow edges. Links to unknown members or to oneself are dropped.
+ * flow edges. Links to unknown members or to oneself are dropped; several
+ * links between one pair of members bundle into one edge.
  */
 export function crewTopologyFrame(
   crew: string,
@@ -122,14 +123,26 @@ export function crewTopologyFrame(
       meta: { lead: member.lead, groupId: member.groupId, layer: box.layer },
     };
   });
-  const edges: CanvasEdge[] = links
-    .filter((link) => link.from !== link.to && boxes.has(link.from) && boxes.has(link.to))
-    .map((link) => ({
-      from: nodeId(link.from),
-      to: nodeId(link.to),
-      variant: pathBetween(boxes.get(link.from)!, boxes.get(link.to)!).shape === "back" ? "back" : "flow",
-      label: link.kind,
-    }));
+  // One edge per node pair (BBP-201): the first link sets the direction,
+  // links the other way join the label after "⇄".
+  const pairs = new Map<string, { from: string; to: string; forward: Set<string>; back: Set<string> }>();
+  for (const link of links) {
+    if (link.from === link.to || !boxes.has(link.from) || !boxes.has(link.to)) continue;
+    const pair = pairs.get(`${link.to}\n${link.from}`);
+    if (pair) pair.back.add(link.kind);
+    else {
+      const key = `${link.from}\n${link.to}`;
+      const own = pairs.get(key) ?? { from: link.from, to: link.to, forward: new Set<string>(), back: new Set<string>() };
+      own.forward.add(link.kind);
+      pairs.set(key, own);
+    }
+  }
+  const edges: CanvasEdge[] = [...pairs.values()].map((pair) => ({
+    from: nodeId(pair.from),
+    to: nodeId(pair.to),
+    variant: pathBetween(boxes.get(pair.from)!, boxes.get(pair.to)!).shape === "back" ? "back" : "flow",
+    label: [[...pair.forward].join(", "), [...pair.back].join(", ")].filter(Boolean).join(" ⇄ "),
+  }));
   return { frames: [{ id: frameId, parentId: null, label: crew }], nodes, edges };
 }
 

@@ -149,4 +149,36 @@ describe("crewTopologyFrame", () => {
     expect(topo.edges).toEqual([]);
     expect(crewTopologyFrame("empty", [], [])).toEqual({ frames: [{ id: "frame:empty", parentId: null, label: "empty" }], nodes: [], edges: [] });
   });
+
+  describe("bundles links per node pair (BBP-201)", () => {
+    const pair = [
+      { key: "lead", lead: true, groupId: "orch" },
+      { key: "dev", lead: false, groupId: "impl" },
+    ] as const;
+
+    it("one link stays one edge with its kind as label", () => {
+      const topo = crewTopologyFrame("t", pair, [{ from: "lead", to: "dev", kind: "assigns_to" }]);
+      expect(topo.edges).toEqual([{ from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to" }]);
+    });
+
+    it("two opposite links become one edge in the first link's direction, label forward ⇄ back", () => {
+      const topo = crewTopologyFrame("t", pair, [
+        { from: "lead", to: "dev", kind: "assigns_to" },
+        { from: "dev", to: "lead", kind: "escalates_to" },
+      ]);
+      expect(topo.edges).toEqual([{ from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to ⇄ escalates_to" }]);
+    });
+
+    it("several links in the same direction join with commas, duplicates once", () => {
+      const topo = crewTopologyFrame("t", pair, [
+        { from: "lead", to: "dev", kind: "assigns_to" },
+        { from: "lead", to: "dev", kind: "works_with" },
+        { from: "lead", to: "dev", kind: "assigns_to" },
+        { from: "dev", to: "lead", kind: "escalates_to" },
+      ]);
+      expect(topo.edges).toEqual([
+        { from: "member:lead@t", to: "member:dev@t", variant: "flow", label: "assigns_to, works_with ⇄ escalates_to" },
+      ]);
+    });
+  });
 });
