@@ -40,15 +40,14 @@ describe("CanvasView keyboard navigation", () => {
     expect(card(new RegExp("^orch-lead — ")).getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("Enter on a collapsed card expands it, and does so only once", () => {
+  it("Enter toggles a card: expands it, then collapses it again (BBP-183)", () => {
     const root = renderView(new Set());
     fireEvent.click(card(new RegExp("^factory-1 — ")));
     expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
     fireEvent.keyDown(root, { key: "Enter" });
-    expect(screen.getByRole("button", { name: new RegExp("^orch-lead — ") })).toBeTruthy();
-    // Idempotent: pressing it again on the same, now-expanded card must not throw.
-    expect(() => fireEvent.keyDown(root, { key: "Enter" })).not.toThrow();
     expect(screen.getAllByRole("button", { name: new RegExp("^orch-lead — ") })).toHaveLength(1);
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(screen.queryByRole("button", { name: new RegExp("^orch-lead — ") })).toBeNull();
   });
 
   it("ArrowLeft collapses an expanded card", () => {

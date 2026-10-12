@@ -182,6 +182,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       editableFrameIds={editableFrameIds}
       renderFrameEditor={(frameId) => <CrewFrameEditPanel projectId={layer.frameProjects.get(frameId)!} crew={crewNameFromFrameId(frameId)} />}
       initialExpanded={layer.expanded}
+      surface="canvas"
+      // Only a thread has children to fetch; every other card without
+      // children is a leaf and gets no chevron (BBP-183).
+      canLoadChildren={(node) => node.kind === "thread" && typeof node.meta?.threadId === "string"}
       loadChildren={async (node) => {
         if (node.kind !== "thread") return { nodes: [] };
         const threadId = node.meta?.threadId;

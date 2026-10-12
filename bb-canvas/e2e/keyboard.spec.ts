@@ -26,9 +26,9 @@ test("arrow keys move the selection between siblings", async ({ page }) => {
 
 test("Enter expands a collapsed card", async ({ page }) => {
   await page.getByRole("button", { name: new RegExp("^orch-lead — ") }).click();
-  await expect(page.getByRole("button", { name: /review-flow #12/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toHaveCount(0);
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("button", { name: /review-flow #12/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toBeVisible();
 });
 
 test("J jumps to the running card", async ({ page }) => {
@@ -66,7 +66,7 @@ test("Escape closes the sidebar", async ({ page }) => {
 test("a back edge in a run draws as an arc, not a straight line", async ({ page }) => {
   await page.getByRole("button", { name: new RegExp("^orch-lead — ") }).click();
   await page.keyboard.press("Enter");
-  await page.getByRole("button", { name: /review-flow #12/ }).click();
+  await page.getByRole("button", { name: /^review-flow #12 — / }).click();
   await page.keyboard.press("Enter");
   const backEdge = page
     .locator('[data-testid="rf__edge-step:r1:review->step:r1:plan-9"] path.react-flow__edge-path')
@@ -83,8 +83,54 @@ test("a back edge in a run draws as an arc, not a straight line", async ({ page 
 test("screenshot: the canvas with a crew, a running run and its steps", async ({ page }) => {
   await page.getByRole("button", { name: new RegExp("^orch-lead — ") }).click();
   await page.keyboard.press("Enter");
-  await page.getByRole("button", { name: /review-flow #12/ }).click();
+  await page.getByRole("button", { name: /^review-flow #12 — / }).click();
   await page.keyboard.press("Enter");
   await page.keyboard.press("0");
   await page.screenshot({ path: "e2e/dist/canvas.png" });
+});
+
+// BBP-183: the chevron and the toggle keys, in a real browser.
+test("a chevron click opens a card and shows the count while collapsed", async ({ page }) => {
+  const chevron = page.getByRole("button", { name: /^Expand orch-lead \(1 child\)$/ });
+  await expect(chevron).toBeVisible();
+  await chevron.click();
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Collapse orch-lead$/ })).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: /^Collapse orch-lead$/ }).click();
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toHaveCount(0);
+});
+
+test("Enter toggles, ArrowLeft collapses and then goes to the parent", async ({ page }) => {
+  await page.getByRole("button", { name: new RegExp("^orch-lead — ") }).click();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toHaveCount(0);
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("button", { name: new RegExp("^orch-lead — ") })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("button", { name: /^review-flow #12 — / })).toHaveCount(0);
+});
+
+test("negative: a leaf has no chevron and Enter does not open it", async ({ page }) => {
+  await expect(page.getByRole("button", { name: /^(Expand|Collapse) steps-impl\b/ })).toHaveCount(0);
+  const leaf = page.getByRole("button", { name: new RegExp("^steps-impl — ") });
+  await leaf.click();
+  const before = await page.getByRole("button", { name: / — / }).count();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ArrowRight");
+  await expect(leaf).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: / — / })).toHaveCount(before);
+});
+
+test("Expand all and Collapse all act on the whole tree", async ({ page }) => {
+  await page.getByRole("button", { name: "Expand all" }).click();
+  await expect(page.getByRole("button", { name: new RegExp("^plan — ") })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse all" }).click();
+  await expect(page.getByRole("button", { name: new RegExp("^Agents — ") })).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp("^bb-plugins — ") })).toHaveCount(0);
 });

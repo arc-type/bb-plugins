@@ -111,6 +111,9 @@ const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
   expanded: ReadonlySet<string>;
+  /** Cards that get a chevron (BBP-183); absent: none do. */
+  expandable?: ReadonlySet<string>;
+  onToggle?: (nodeId: string) => void;
   edges?: readonly CanvasEdge[];
   frames?: readonly CanvasFrame[];
   selectedId?: string | null;
@@ -141,6 +144,9 @@ function toFlow(
   onSelect: ((id: string) => void) | undefined,
   colorMode: NodeCardColorMode,
   dimmedIds: ReadonlySet<string>,
+  expanded: ReadonlySet<string>,
+  expandable: ReadonlySet<string>,
+  onToggle: ((id: string) => void) | undefined,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const byFrameId = new Map(frames.map((frame) => [frame.id, frame]));
@@ -160,6 +166,13 @@ function toFlow(
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
       dimmed: dimmedIds.has(node.id),
+      expander: expandable.has(node.id)
+        ? {
+            expanded: expanded.has(node.id),
+            childCount: childCount.get(node.id) ?? 0,
+            onToggle: () => onToggle?.(node.id),
+          }
+        : undefined,
     };
     return {
       id: placed.id,
@@ -215,6 +228,8 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   {
     nodes,
     expanded,
+    expandable = EMPTY_DIMMED,
+    onToggle,
     edges = [],
     frames = [],
     selectedId,
@@ -229,8 +244,8 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds),
-    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds],
+    () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle),
+    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle],
   );
 
   useImperativeHandle(

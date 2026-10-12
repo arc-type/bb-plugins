@@ -124,6 +124,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       nodes={layer.nodes}
       edges={layer.edges}
       initialExpanded={layer.expanded}
+      surface="canvas"
+      // Only a thread has children to fetch; every other card without
+      // children is a leaf and gets no chevron (BBP-183).
+      canLoadChildren={(node) => node.kind === "thread" && typeof node.meta?.threadId === "string"}
       loadChildren={async (node) => {
         if (node.kind !== "thread") return { nodes: [] };
         const threadId = node.meta?.threadId;

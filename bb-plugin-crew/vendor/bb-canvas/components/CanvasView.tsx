@@ -2,16 +2,32 @@
 // (CanvasShell already has that), keyboard navigation, breadcrumb, search and
 // the detail sidebar. Works against whatever `nodes`/`edges` it is given —
 // fixtures here, RPC data once the owning plugin wires it up (WI3/WI4).
-import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
 import { Breadcrumb } from "./Breadcrumb";
 import { Sidebar } from "./Sidebar";
 import { SearchBox } from "./SearchBox";
 import { ColorModeToggle, type ColorMode } from "./ColorModeToggle";
 import { layoutTree } from "../lib/layout";
+import {
+  loadExpandedState,
+  restoreExpanded,
+  saveExpandedState,
+  withToggle,
+  type ExpandedState,
+} from "../lib/expanded-state";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const COLOR_MODE_KEY = "bb-canvas:colour-mode";
+const TOOLBAR_BUTTON = {
+  padding: "2px 8px",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  background: "var(--card)",
+  color: "var(--foreground)",
+  fontSize: 11,
+  cursor: "pointer",
+} as const;
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 /** Floor height so the canvas stays usable even with no sized ancestor
  *  (BBP-173). Tall enough to show a handful of cards, short enough to not
@@ -61,6 +77,13 @@ export type CanvasViewProps = {
    * already in `nodes` (crew, graph-run, …) need none of this.
    */
   loadChildren?: (node: CanvasNode) => Promise<LoadedChildren>;
+  /** Which nodes `loadChildren` can actually fill — those get a chevron
+   *  before their children arrive; every other node without children is a
+   *  leaf. Absent: any node may load, as long as a loader is given. */
+  canLoadChildren?: (node: CanvasNode) => boolean;
+  /** Persists expand/collapse under `bb-canvas:expanded:<surface>` (BBP-183).
+   *  Absent: nothing is stored, `initialExpanded` applies on every mount. */
+  surface?: string;
   /** Page-owned controls shown in the toolbar beside the colour toggle —
    *  the project filter, say (BBP-181). */
   toolbar?: ReactNode;
@@ -79,10 +102,17 @@ export function CanvasView({
   renderFrameEditor,
   initialExpanded,
   loadChildren,
+  canLoadChildren,
+  surface,
   toolbar,
   className,
 }: CanvasViewProps) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded ?? []));
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    restoreExpanded(initialExpanded ?? [], surface === undefined ? null : loadExpandedState(surface)),
+  );
+  const persisted = useRef<ExpandedState>(
+    (surface === undefined ? null : loadExpandedState(surface)) ?? { open: [], closed: [] },
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -126,6 +156,31 @@ export function CanvasView({
     return parents;
   }, [allNodes, byId]);
 
+  /** Cards that can open: known children, or a loader that has not run yet
+   *  for them. A load that came back empty turns the card into a leaf. */
+  const expandable = useMemo(() => {
+    const ids = new Set(hasChildren);
+    if (loadChildren) {
+      for (const node of allNodes) {
+        if (loaded.has(node.id) || ids.has(node.id)) continue;
+        if (canLoadChildren ? canLoadChildren(node) : true) ids.add(node.id);
+      }
+    }
+    return ids;
+  }, [hasChildren, allNodes, loaded, loadChildren, canLoadChildren]);
+
+  // A restored or initially open lazy card has to fetch its children too —
+  // `expand` only covers the ones opened during this session.
+  useEffect(() => {
+    for (const id of expanded) if (!hasChildren.has(id)) startLoad(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  function remember(next: ExpandedState) {
+    persisted.current = next;
+    if (surface !== undefined) saveExpandedState(surface, next);
+  }
+
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
 
   const dimmedIds = useMemo(() => {
@@ -160,10 +215,17 @@ export function CanvasView({
   }
 
   /** Opens a node, and — the first time, if a loader was given — fetches its
-   *  children. A node with no children and no loader simply stays as it was. */
+   *  children. A leaf (no children, nothing to load) stays as it was. */
   function expand(id: string) {
+    if (!expandable.has(id)) return;
+    remember(withToggle(persisted.current, id, true));
     setExpanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    startLoad(id);
+  }
+
+  function startLoad(id: string) {
     const node = byId.get(id);
+    if (node && canLoadChildren && !canLoadChildren(node)) return;
     if (!node || !loadChildren || loaded.has(id) || loading.current.has(id)) return;
     loading.current.add(id);
     void loadChildren(node).then(
@@ -178,12 +240,31 @@ export function CanvasView({
   }
 
   function collapse(id: string) {
+    remember(withToggle(persisted.current, id, false));
     setExpanded((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
+  }
+
+  function toggle(id: string) {
+    if (expanded.has(id)) collapse(id);
+    else expand(id);
+  }
+
+  /** Only cards whose children are already known: a lazy card stays shut,
+   *  so this never fires a burst of timeline fetches. */
+  function expandAll() {
+    const ids = [...hasChildren];
+    remember({ open: ids, closed: [] });
+    setExpanded(new Set(ids));
+  }
+
+  function collapseAll() {
+    remember({ open: [], closed: [...new Set([...expandable, ...expanded])] });
+    setExpanded(new Set());
   }
 
   function siblingsOf(id: string): CanvasNode[] {
@@ -248,18 +329,20 @@ export function CanvasView({
         moveSibling(-1);
         break;
       case "ArrowRight":
-      case "Enter":
         event.preventDefault();
         if (selectedId === null) break;
-        // Always expand, even with no known children yet — a lazily loaded
-        // node (a thread, before its turns arrive) looks exactly like that
-        // until `loadChildren` resolves.
-        expand(selectedId);
-        if (event.key === "ArrowRight" && hasChildren.has(selectedId)) moveToFirstChild();
+        // The tree-view pattern: a closed card opens, an open one steps
+        // into its first child.
+        if (!expanded.has(selectedId)) expand(selectedId);
+        else moveToFirstChild();
+        break;
+      case "Enter":
+        event.preventDefault();
+        if (selectedId !== null && expandable.has(selectedId)) toggle(selectedId);
         break;
       case "ArrowLeft":
         event.preventDefault();
-        if (selectedId !== null && expanded.has(selectedId)) collapse(selectedId);
+        if (selectedId !== null && expanded.has(selectedId) && expandable.has(selectedId)) collapse(selectedId);
         else moveToParent();
         break;
       case "j":
@@ -318,6 +401,12 @@ export function CanvasView({
         <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
           {toolbar}
+          <button type="button" onClick={collapseAll} style={TOOLBAR_BUTTON}>
+            Collapse all
+          </button>
+          <button type="button" onClick={expandAll} style={TOOLBAR_BUTTON}>
+            Expand all
+          </button>
           <ColorModeToggle mode={colorMode} onToggle={toggleColorMode} />
         </div>
       </div>
@@ -335,6 +424,8 @@ export function CanvasView({
             ref={shellRef}
             nodes={allNodes}
             expanded={expanded}
+            expandable={expandable}
+            onToggle={toggle}
             edges={allEdges}
             frames={frames}
             selectedId={selectedId}
