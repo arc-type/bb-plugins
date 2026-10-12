@@ -214,6 +214,54 @@ describe("layoutTree", () => {
     });
   });
 
+  describe("selected-path edges (BBP-220)", () => {
+    it("highlights every tree edge from the root to a deeply nested selection, rest stays neutral", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step" }),
+        node("b", "a", { kind: "step" }),
+        node("c", "b", { kind: "step" }),
+        node("sibling", "a", { kind: "step" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run", "a", "b"]), [], undefined, "c");
+      const byTo = new Map(edges.map((edge) => [edge.to, edge]));
+      expect(byTo.get("a")!.state).toBe("selected-path");
+      expect(byTo.get("b")!.state).toBe("selected-path");
+      expect(byTo.get("c")!.state).toBe("selected-path");
+      expect(byTo.get("sibling")!.state).toBeUndefined();
+    });
+
+    it("negative: without a selection, no edge carries selected-path", () => {
+      const nodes = [node("run", null, { kind: "graph-run" }), node("a", "run", { kind: "step" })];
+      const { edges } = layoutTree(nodes, new Set(["run"]), [], undefined, null);
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("negative: a 'now' edge on the selected path is not degraded to selected-path", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step", status: "running" }),
+        node("b", "a", { kind: "step" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run", "a"]), [], undefined, "b");
+      const byTo = new Map(edges.map((edge) => [edge.to, edge]));
+      expect(byTo.get("a")!.state).toBe("now");
+      expect(byTo.get("b")!.state).toBe("selected-path");
+    });
+
+    it("negative: a relation edge never gets selected-path, even along the selection", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step" }),
+        node("b", "run", { kind: "step" }),
+      ];
+      const edges: CanvasEdge[] = [{ from: "a", to: "b", variant: "back", relation: true }];
+      const { edges: placed } = layoutTree(nodes, new Set(["run"]), edges, undefined, "b");
+      const relation = placed.find((edge) => edge.relation);
+      expect(relation!.state).toBeUndefined();
+    });
+  });
+
   describe("frames (BBP-165)", () => {
     function frameNodes(): CanvasNode[] {
       return [

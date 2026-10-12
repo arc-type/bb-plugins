@@ -7,6 +7,7 @@
 // tree read left to right (agents → project → crew → member → …), not a
 // flow chart. Siblings (several members, several run steps) stack as rows
 // within their shared column.
+import { selectedPathEdges } from "./selected-path";
 import type { CanvasEdge, CanvasEdgeState, CanvasFrame, CanvasNode } from "./types";
 import { sizeOf, TIER_SIZE } from "./tiers";
 
@@ -77,12 +78,17 @@ export type TreeLayout = {
  * messages); the parent/child line for every visible node is drawn
  * automatically and needs no entry here. An edge touching a node that is not
  * currently visible is dropped along with it.
+ *
+ * `selectedId` (BBP-220) highlights the flow edges from the root down to it
+ * with `"selected-path"`, unless a given edge is already `"now"` — a running
+ * child takes precedence over the selection.
  */
 export function layoutTree(
   nodes: readonly CanvasNode[],
   expanded: ReadonlySet<string>,
   edges: readonly CanvasEdge[] = [],
   frames?: readonly CanvasFrame[],
+  selectedId?: string | null,
 ): TreeLayout {
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
@@ -178,10 +184,11 @@ export function layoutTree(
     });
   }
 
+  const onSelectedPath = selectedPathEdges(selectedId ?? null, parentIdOf);
   const flowEdges: PlacedEdge[] = order.flatMap((id) => {
     const parentId = parentIdOf.get(id)!;
     if (parentId === null) return [];
-    return [flowEdge(placed.get(parentId)!, placed.get(id)!, byId.get(id)!)];
+    return [flowEdge(placed.get(parentId)!, placed.get(id)!, byId.get(id)!, onSelectedPath.has(id))];
   });
 
   const declaredEdges: PlacedEdge[] = edges.flatMap((edge) => {
@@ -255,18 +262,19 @@ function placeFrames(
  *  draws the plain neutral line like anything else — "taken" is gone
  *  (BBP-214 stage 1): a line to a `done` step must not look like ongoing
  *  activity. */
-function flowEdgeState(child: CanvasNode): CanvasEdgeState | undefined {
-  return child.status === "running" ? "now" : undefined;
+function flowEdgeState(child: CanvasNode, onSelectedPath: boolean): CanvasEdgeState | undefined {
+  if (child.status === "running") return "now";
+  return onSelectedPath ? "selected-path" : undefined;
 }
 
-function flowEdge(from: PlacedNode, to: PlacedNode, toNode: CanvasNode): PlacedEdge {
+function flowEdge(from: PlacedNode, to: PlacedNode, toNode: CanvasNode, onSelectedPath: boolean): PlacedEdge {
   const fromX = from.x + from.width;
   const fromY = from.y + from.height / 2;
   const toX = to.x;
   const toY = to.y + to.height / 2;
   const midX = (fromX + toX) / 2;
   const path = [`M ${fromX} ${fromY}`, `C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`].join(" ");
-  const state = flowEdgeState(toNode);
+  const state = flowEdgeState(toNode, onSelectedPath);
   return { from: from.id, to: to.id, variant: "flow", path, label: "", isBack: false, ...(state ? { state } : {}) };
 }
 

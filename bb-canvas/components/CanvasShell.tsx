@@ -336,7 +336,10 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
 ) {
   const [hostRef, themeMode] = useHostColorMode();
   const flow = useReactFlow();
-  const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
+  const layout = useMemo(
+    () => layoutTree(nodes, expanded, edges, frames, selectedId),
+    [nodes, expanded, edges, frames, selectedId],
+  );
   const { flowNodes, flowEdges } = useMemo(
     () =>
       toFlow(layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads),
