@@ -156,4 +156,69 @@ describe("SearchableMultiSelect", () => {
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
     expect(screen.getByRole("checkbox", { name: "Beta" })).toBeTruthy();
   });
+
+  it("ArrowDown moves from the search field onto the first row, then on through the list", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBe(document.activeElement);
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "ArrowDown" });
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBe(document.activeElement);
+  });
+
+  it("ArrowUp moves back up the list and stops at the top row", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Beta" }), { key: "ArrowUp" });
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBe(document.activeElement);
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "ArrowUp" });
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBe(document.activeElement);
+  });
+
+  it("navigates the frozen order, not a re-sorted one, while arrowing through matches", () => {
+    const onChange = vi.fn();
+    render(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p3"]} onChange={onChange} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    // Gamma is pinned above the divider; Alpha and Beta follow below it.
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    expect(screen.getByRole("checkbox", { name: "Gamma" })).toBe(document.activeElement);
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Gamma" }), { key: "ArrowDown" });
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBe(document.activeElement);
+  });
+
+  it("Space toggles the active row", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: " " });
+    expect(onChange).toHaveBeenLastCalledWith(["p1"]);
+  });
+
+  it("Enter toggles the active row", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "Enter" });
+    expect(onChange).toHaveBeenLastCalledWith(["p1"]);
+  });
+
+  it("does not let ArrowDown, Space or Enter reach the canvas's own shortcuts", () => {
+    const canvasShortcut = vi.fn();
+    render(
+      <div onKeyDown={canvasShortcut}>
+        <SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: " " });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "Enter" });
+    expect(canvasShortcut).not.toHaveBeenCalled();
+  });
 });

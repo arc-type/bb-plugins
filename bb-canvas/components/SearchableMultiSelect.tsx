@@ -49,6 +49,7 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   const [frozenOrder, setFrozenOrder] = useState<readonly SearchableMultiSelectOption[]>(options);
   const root = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const itemRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [place, setPlace] = useState<{ offset: number; width: number } | null>(null);
 
   // Measured on open: the canvas may sit in a slim panel, and the button's
@@ -96,6 +97,15 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   );
   const matchingIds = frozenOrder.filter(matches).map((option) => option.id);
   const noMatches = normalizedQuery !== "" && checkedBlock.length === 0 && remaining.length === 0;
+  const visibleOptions = [...checkedBlock, ...remaining];
+  itemRefs.current = [];
+
+  const moveActive = (delta: number) => {
+    const current = itemRefs.current.findIndex((el) => el === document.activeElement);
+    const next = current === -1 ? (delta > 0 ? 0 : itemRefs.current.length - 1) : current + delta;
+    const clamped = Math.max(0, Math.min(itemRefs.current.length - 1, next));
+    itemRefs.current[clamped]?.focus();
+  };
 
   return (
     <div
@@ -106,6 +116,15 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
         if (event.key === "Escape") {
           if (query !== "") setQuery("");
           else setOpen(false);
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          moveActive(event.key === "ArrowDown" ? 1 : -1);
+        } else if (event.key === " " || event.key === "Enter") {
+          const active = document.activeElement;
+          if (active instanceof HTMLInputElement && active.type === "checkbox") {
+            event.preventDefault();
+            active.click();
+          }
         }
         event.stopPropagation();
       }}
@@ -228,6 +247,9 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
               {checkedBlock.map((option) => (
                 <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
                   <input
+                    ref={(el) => {
+                      itemRefs.current[visibleOptions.indexOf(option)] = el;
+                    }}
                     type="checkbox"
                     aria-label={option.name}
                     checked={selected.includes(option.id)}
@@ -242,6 +264,9 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
               {remaining.map((option) => (
                 <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
                   <input
+                    ref={(el) => {
+                      itemRefs.current[visibleOptions.indexOf(option)] = el;
+                    }}
                     type="checkbox"
                     aria-label={option.name}
                     checked={selected.includes(option.id)}
