@@ -201,7 +201,7 @@ export type OverviewDto = z.infer<typeof overviewSchema>;
 const canvasStatus = z.enum(["idle", "running", "waiting", "done", "failed", "escalated"]);
 const canvasNodeSchema = z.object({
   id: z.string(),
-  kind: z.enum(["agents", "project", "crew", "member", "graph-run", "step", "thread", "turn", "tool-call", "subagent"]),
+  kind: z.enum(["agents", "project", "crew", "member", "graph-run", "step", "thread", "turn", "tool-call", "subagent", "system-event"]),
   label: z.string(),
   status: canvasStatus.optional(),
   parentId: z.string().nullable(),

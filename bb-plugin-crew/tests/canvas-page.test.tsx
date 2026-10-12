@@ -75,6 +75,49 @@ describe("crew's canvas page", () => {
     expect(await screen.findByRole("button", { name: new RegExp("^Ship it — ") })).toBeTruthy();
   });
 
+  it("shows the thread's real title on its card once loaded (BBP-206)", async () => {
+    canvasPanel({
+      sdk: {
+        projects: { list: async () => [{ id: "p1", name: "Shop" }] },
+        threads: {
+          get: async () => ({
+            title: "Fix login bug",
+            status: "idle",
+            providerId: "claude-code",
+            createdAt: 0,
+            updatedAt: 0,
+          }),
+        },
+      },
+    });
+    expect(await screen.findByRole("button", { name: new RegExp("^Fix login bug — ") })).toBeTruthy();
+  });
+
+  it("falls back to the first user message when the thread has no title (BBP-206)", async () => {
+    canvasPanel({
+      sdk: {
+        projects: { list: async () => [{ id: "p1", name: "Shop" }] },
+        threads: {
+          get: async () => ({ title: null, status: "idle", providerId: "claude-code", createdAt: 0, updatedAt: 0 }),
+          timeline: async () => ({ rows: [{ id: "r1", kind: "conversation", role: "user", text: "Add dark mode" }] }),
+        },
+      },
+    });
+    expect(await screen.findByRole("button", { name: new RegExp("^Add dark mode — ") })).toBeTruthy();
+  });
+
+  it("wires onOpenAtRow to open the thread (BB can't yet address one exact row)", async () => {
+    const timeline = async () => ({
+      rows: [{ id: "r1", kind: "work", workKind: "tool", toolName: "Bash", sourceSeqStart: 5 }],
+    });
+    const slot = canvasPanel({ sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { timeline } } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Bash — ") }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in thread" }));
+    expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "t1" });
+  });
+
   // BBP-179 acceptance regression: a real SDK timeline response nests a
   // turn's work rows under `children`, and a delegation (subagent) row
   // nests its own rows under `childRows` — not the shallow
@@ -131,6 +174,40 @@ describe("crew's canvas page", () => {
     expect(screen.queryByRole("button", { name: new RegExp("^Read") })).toBeNull();
   });
 
+  // BBP-206 R3: enrichTurnNodes used to run only in the page-level poll
+  // effect, over `layer.nodes` — but a turn node never lives there, only in
+  // CanvasView's own `loaded` state once its thread is expanded, so the
+  // first line never had anything to enrich and the card stayed
+  // "Turn · n steps" forever. Fixed by enriching inside loadChildren, right
+  // when the thread's own expansion creates the turn node — no user action
+  // on the turn itself required.
+  it("a turn's card shows its first line as soon as its thread is expanded, with no turn-level interaction (BBP-206 R3)", async () => {
+    const timeline = async () => ({
+      rows: [
+        {
+          id: "turn-1",
+          kind: "turn",
+          turnId: "turn-1",
+          status: "completed",
+          summaryCount: 1,
+          sourceSeqStart: 10,
+          sourceSeqEnd: 20,
+          children: null,
+        },
+      ],
+    });
+    const timelineTurnSummaryDetails = async () => ({
+      rows: [{ id: "c1", kind: "conversation", role: "user", text: "Fix the login bug" }],
+    });
+    canvasPanel({
+      sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { timeline, timelineTurnSummaryDetails } },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: new RegExp("^Fix the login bug — Turn · 1 step") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^Turn · 1 step") })).toBeNull();
+  });
+
   // BBP-196 Teil A: the real SDK never nests a turn row's steps under
   // `children` (that field is always `null`) — they are fetched lazily via
   // `timelineTurnSummaryDetails`, the same lazy mechanism threads already use.
@@ -164,7 +241,14 @@ describe("crew's canvas page", () => {
     fireEvent.click(turnCard);
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
     expect(await screen.findByRole("button", { name: new RegExp("^Bash") })).toBeTruthy();
-    expect(calls).toEqual([{ threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" }]);
+    // Twice with the same coordinates: once eagerly when the thread's own
+    // loadChildren creates this turn node (BBP-206 R3's enrichTurnNodes call,
+    // looking for a firstLine — this fixture's steps have none, so the label
+    // stays "Turn · 1 step"), and once when the user actually opens it.
+    expect(calls).toEqual([
+      { threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" },
+      { threadId: "t1", turnId: "turn-1", sourceSeqStart: "10", sourceSeqEnd: "20" },
+    ]);
   });
 
   // Negative case: a turn without steps gets no chevron, so it never calls

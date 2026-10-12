@@ -12,7 +12,8 @@ export type CanvasNodeKind =
   | "thread"
   | "turn"
   | "tool-call"
-  | "subagent";
+  | "subagent"
+  | "system-event";
 
 export type CanvasStatus = "idle" | "running" | "waiting" | "done" | "failed" | "escalated";
 
@@ -93,10 +94,44 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   step: ["nodeId", "attempts"],
   // `state` is the thread's own BB status, loaded on selection; the node-level
   // pill is the status of whatever the thread hangs under, not the thread.
-  thread: ["title", "state", "provider", "model", "turns", "created", "updated", "threadId"],
-  turn: ["rowId"],
-  "tool-call": ["status", "summary"],
+  thread: ["title", "state", "provider", "model", "turns", "created", "updated"],
+  turn: ["from", "firstLine", "summaryCount", "text"],
+  "tool-call": [
+    "toolName",
+    "command",
+    "toolArgs",
+    "path",
+    "changeKind",
+    "diffStats",
+    "cwd",
+    // The less common workKinds' own content (search, web, plan, approval,
+    // form, question, workflow): what the call was about, not a hidden detail.
+    "query",
+    "mode",
+    "queries",
+    "url",
+    "prompt",
+    "explanation",
+    "steps",
+    "approvalKind",
+    "extensionKind",
+    "title",
+    "questions",
+    "workflowName",
+    "taskType",
+    "summary",
+    "lifecycle",
+    "outputPreview",
+    "error",
+    "stdout",
+    "stderr",
+    "exitCode",
+    "duration",
+    "startedAt",
+    "completedAt",
+  ],
   subagent: ["status", "summary"],
+  "system-event": ["detail", "oldParent", "newParent"],
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -123,34 +158,102 @@ const FIELD_LABELS: Record<string, string> = {
   turns: "Turns",
   created: "Created",
   updated: "Updated",
+  firstLine: "First line",
+  toolName: "Tool",
+  command: "Command",
+  toolArgs: "Input",
+  outputPreview: "Output",
+  exitCode: "Exit code",
+  duration: "Duration",
+  startedAt: "Started",
+  completedAt: "Completed",
+  detail: "Detail",
+  oldParent: "Old parent",
+  newParent: "New parent",
+  titles: "Events",
+  path: "Path",
+  changeKind: "Change",
+  diffStats: "Diff",
+  cwd: "Directory",
+  stdout: "Stdout",
+  stderr: "Stderr",
+  sourceSeq: "Source seq",
+  sourceSeqStart: "Source seq start",
+  sourceSeqEnd: "Source seq end",
+  seq: "Seq",
+  turnId: "Turn",
+  kind: "Row kind",
+  workKind: "Work kind",
+  from: "From",
+  text: "Message",
+  summaryCount: "Steps",
+  query: "Query",
+  mode: "Mode",
+  queries: "Queries",
+  url: "URL",
+  prompt: "Prompt",
+  error: "Error",
+  explanation: "Plan",
+  approvalKind: "Approval",
+  extensionKind: "Extension",
+  questions: "Questions",
+  workflowName: "Workflow",
+  taskType: "Task type",
+  lifecycle: "State",
 };
+
+/** Ids and sequence numbers the mapping needs but a reader does not: shown
+ *  only behind the sidebar's collapsed "Debug" toggle, unless a kind curates
+ *  one (a graph run's `threadId`, say). */
+const TECHNICAL_KEYS: ReadonlySet<string> = new Set([
+  "rowId",
+  "kind",
+  "sourceSeq",
+  "sourceSeqStart",
+  "sourceSeqEnd",
+  "seq",
+  "threadId",
+  "turnId",
+  "workKind",
+  // A step's raw provider status ("completed", "error") — the card's status
+  // pill already says it; a kind that means it (subagent) curates it.
+  "status",
+]);
 
 function fieldLabel(key: string): string {
   if (FIELD_LABELS[key]) return FIELD_LABELS[key];
   return key.length > 0 ? key[0].toUpperCase() + key.slice(1) : key;
 }
 
+/** An array value (e.g. a bundled system-event's `titles`) renders one
+ *  entry per line — `String(value)` would otherwise comma-join it. */
+function fieldValue(value: unknown): string {
+  return Array.isArray(value) ? value.map(String).join("\n") : String(value);
+}
+
 /** Splits a node's `meta` into the fields its kind curates (in the kind's
  *  own order) and everything left over, for the sidebar's main body versus
- *  its collapsed "Details" block. A missing, `null`, or `undefined` value is
+ *  its collapsed "Details" block, with technical ids split off into
+ *  `debug` for the "Debug" toggle. A missing, `null`, or `undefined` value is
  *  dropped rather than shown as `"null"`. */
 export function curateMeta(
   kind: CanvasNodeKind,
   meta: Record<string, unknown> | undefined,
-): { curated: CuratedField[]; details: CuratedField[] } {
+): { curated: CuratedField[]; details: CuratedField[]; debug: CuratedField[] } {
   const entries = meta ?? {};
   const curatedKeys = CURATED_KEYS[kind] ?? [];
   const curated: CuratedField[] = [];
   for (const key of curatedKeys) {
     const value = entries[key];
     if (value === undefined || value === null) continue;
-    curated.push({ label: fieldLabel(key), value: String(value) });
+    curated.push({ label: fieldLabel(key), value: fieldValue(value) });
   }
   const curatedKeySet = new Set(curatedKeys);
   const details: CuratedField[] = [];
+  const debug: CuratedField[] = [];
   for (const [key, value] of Object.entries(entries)) {
     if (curatedKeySet.has(key) || value === undefined || value === null) continue;
-    details.push({ label: fieldLabel(key), value: String(value) });
+    (TECHNICAL_KEYS.has(key) ? debug : details).push({ label: fieldLabel(key), value: fieldValue(value) });
   }
-  return { curated, details };
+  return { curated, details, debug };
 }

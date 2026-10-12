@@ -396,4 +396,15 @@ describe("CanvasView sidebar action wiring (BBP-185)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
     expect(onOpenThread).toHaveBeenCalledWith("th1");
   });
+
+  it("forwards onOpenAtRow to the Sidebar and calls it with the selected node's threadId and sourceSeq", () => {
+    const onOpenAtRow = vi.fn();
+    const toolCallNode: CanvasNode[] = [
+      { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { threadId: "th1", sourceSeq: 12 } },
+    ];
+    render(<CanvasView nodes={toolCallNode} initialExpanded={new Set()} onOpenAtRow={onOpenAtRow} />);
+    fireEvent.click(card(/^Bash/));
+    fireEvent.click(screen.getByRole("button", { name: "Open in thread" }));
+    expect(onOpenAtRow).toHaveBeenCalledWith("th1", 12);
+  });
 });

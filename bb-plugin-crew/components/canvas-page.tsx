@@ -3,7 +3,7 @@
 // `server.ts`. Graph Studio's own copy (bb-plugin-graph-studio/components/
 // canvas-page.tsx) pulls crew's layer in through RPC and is the one page
 // visible whenever both plugins are installed.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { ProjectFilter } from "../vendor/bb-canvas/components/ProjectFilter";
@@ -16,7 +16,16 @@ import {
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
-import { threadNodeFor, timelineToCanvas, turnDetailsToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import {
+  enrichThreadNodes,
+  enrichTurnNodes,
+  threadNodeFor,
+  timelineToCanvas,
+  turnDetailsToCanvas,
+  type ThreadTitlePort,
+  type TimelineRowLike,
+  type TurnFirstLinePort,
+} from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
 import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
@@ -29,6 +38,56 @@ function withThreadNodes(nodes: readonly CanvasNode[]): CanvasNode[] {
     return thread ? [thread] : [];
   });
   return [...nodes, ...threads];
+}
+
+/** Builds the port `enrichThreadNodes` needs from the SDK the page already
+ *  has — the first user message is only ever fetched for a thread with no
+ *  title of its own. */
+function threadTitlePort(sdk: ReturnType<typeof useSdk>): ThreadTitlePort {
+  return {
+    get: async (threadId) => (await sdk.threads.get({ threadId })) as unknown as ThreadLike,
+    firstUserMessage: async (threadId) => {
+      const response = await sdk.threads.timeline({ threadId });
+      const rows = response.rows as unknown as readonly { kind: string; role?: string; text?: string }[];
+      return rows.find((row) => row.kind === "conversation" && row.role === "user")?.text;
+    },
+  };
+}
+
+/** Builds the port `enrichTurnNodes` needs: the same lazy fetch
+ *  `loadChildren` uses to expand a turn on click, just triggered eagerly so
+ *  a turn's card shows its first line without waiting for that (BBP-206 R2b). */
+function turnFirstLinePort(sdk: ReturnType<typeof useSdk>): TurnFirstLinePort {
+  return {
+    turnDetails: async (turnId, threadId, sourceSeqStart, sourceSeqEnd) => {
+      const response = await sdk.threads.timelineTurnSummaryDetails({
+        threadId,
+        turnId,
+        sourceSeqStart: String(sourceSeqStart),
+        sourceSeqEnd: String(sourceSeqEnd),
+      });
+      return { rows: response.rows as unknown as readonly TimelineRowLike[] };
+    },
+  };
+}
+
+/** Carries a thread node's own enrichment (title/state/provider) over from
+ *  the previous poll's result onto this poll's freshly built node of the
+ *  same id — a poll rebuilds every node from scratch, so without this every
+ *  thread is re-fetched every 5s (`POLL_MS`) forever, rather than once.
+ *  `enrichThreadNodes`'s own already-enriched check (state/provider present)
+ *  would skip the re-fetch regardless, but carrying the result over here
+ *  means the title is on screen immediately, not just after this poll's
+ *  fetch resolves. (A turn's first line has no page-level equivalent of this
+ *  — see `loadChildren`'s own `enrichTurnNodes` call instead.) */
+function carryOverEnrichment(freshNodes: readonly CanvasNode[], previous: readonly CanvasNode[]): CanvasNode[] {
+  const previousById = new Map(previous.map((node) => [node.id, node]));
+  return freshNodes.map((node) => {
+    if (node.kind !== "thread") return node;
+    const known = previousById.get(node.id);
+    if (!known || (known.meta?.state === undefined && known.meta?.provider === undefined)) return node;
+    return { ...node, label: known.label, meta: { ...node.meta, ...known.meta } };
+  });
 }
 
 type Layer = {
@@ -85,6 +144,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   // Every crew frame is editable — there is no notion yet of a crew the
   // current user may only view (BBP-170 WI6).
   const editableFrameIds = useMemo(() => new Set((layer?.frames ?? []).map((frame) => frame.id)), [layer]);
+  // The last fully-known node list, kept outside state so `load` can read it
+  // synchronously on the very next poll without becoming an effect
+  // dependency (BBP-206 R3) — see `carryOverEnrichment`.
+  const enrichedNodesRef = useRef<readonly CanvasNode[]>([]);
 
   const choose = (ids: string[]) => {
     setSelected(ids);
@@ -117,6 +180,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     // very first load (still `null`) hits that branch. A poll likewise swaps
     // the layer in place, so the view keeps its selection, cards and
     // viewport (BBP-200).
+    enrichedNodesRef.current = [];
     const labels = new Map(projects.map((project) => [project.id, project.name]));
     const load = (initial: boolean) =>
       Promise.all(
@@ -142,14 +206,23 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
               frames.push(frame);
             }
           }
+          const nodes = carryOverEnrichment(withThreadNodes(page.nodes), enrichedNodesRef.current);
+          enrichedNodesRef.current = nodes;
           setLayer({
-            nodes: withThreadNodes(page.nodes),
+            nodes,
             edges: [...page.edges],
             expanded: new Set(page.expanded),
             frames,
             frameProjects,
           });
           setError(null);
+          // Thread title/state/provider only — a turn's first line is
+          // enriched in `loadChildren` instead, the moment its node exists
+          // (BBP-206 R3); this page-level pass never sees turn nodes at all.
+          void enrichThreadNodes(page.nodes, nodes, threadTitlePort(sdk)).then((afterThreads) => {
+            enrichedNodesRef.current = afterThreads;
+            if (!cancelled) setLayer((prev) => (prev ? { ...prev, nodes: afterThreads } : prev));
+          });
         },
         (cause: unknown) => {
           // A failed poll keeps the last good tree on screen; only the
@@ -164,7 +237,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       stopPolling();
     };
     // `shownKey` stands in for `shown`, which is a fresh array on every filter change.
-  }, [rpc, shownKey, visible]);
+  }, [rpc, sdk, shownKey, visible]);
 
   if (visible === null) return null;
   if (!visible) {
@@ -213,7 +286,14 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
           const threadId = node.meta?.threadId;
           if (typeof threadId !== "string") return { nodes: [] };
           const response = await sdk.threads.timeline({ threadId });
-          return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+          const result = timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+          // A turn row never carries its own first line on this page (BBP-206
+          // R3: turn `children` is always null here); enrich it the moment
+          // its node is created. A page-level poll pass can't do this — turn
+          // nodes live only in CanvasView's own `loaded` state once expanded,
+          // never in `layer.nodes`, so it would never find any to enrich.
+          const nodes = await enrichTurnNodes(result.nodes, turnFirstLinePort(sdk));
+          return { ...result, nodes };
         }
         if (node.kind === "turn") {
           const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};
@@ -231,7 +311,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
             sourceSeqStart: String(sourceSeqStart),
             sourceSeqEnd: String(sourceSeqEnd),
           });
-          return turnDetailsToCanvas(node.id, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+          return turnDetailsToCanvas(node.id, { rows: response.rows as unknown as readonly TimelineRowLike[] }, threadId);
         }
         return { nodes: [] };
       }}
@@ -249,6 +329,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       }
       toolbar={<ProjectFilter projects={projects} selected={selected} onChange={choose} />}
       onOpenThread={(threadId) => navigate.toThread(threadId)}
+      // BB's navigate API has no way yet to open a thread scrolled to a
+      // specific row (BBP-206); this opens the thread itself, the closest
+      // `onOpenAtRow` can get until the SDK can address one.
+      onOpenAtRow={(threadId) => navigate.toThread(threadId)}
       onOpenCrew={(crew) => {
         // BBP-49/185: the thread side panel first, as the crew surfaces do;
         // a surface with none falls back to the nav panel.
