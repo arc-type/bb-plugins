@@ -14,7 +14,7 @@ describe("crewCanvasLayer", () => {
       member({ address: "dev@trio", key: "dev", activity: "needs-you" }),
     ]);
     expect(layer.nodes).toEqual([
-      { id: "crew:trio", kind: "crew", label: "trio", status: "running", parentId: "project:p1", meta: { crew: "trio", status: "running", members: 2, lead: "lead" } },
+      { id: "crew:trio", kind: "crew", label: "trio", status: "running", parentId: "project:p1", meta: { crew: "trio", status: "running", members: 2, lead: "lead", active: 1 } },
       { id: "member:lead@trio", kind: "member", label: "lead", status: "running", parentId: "crew:trio", frameId: "frame:trio",
         meta: { address: "lead@trio", role: "Leads", lead: true, threadId: "t1", activity: "working" } },
       { id: "member:dev@trio", kind: "member", label: "dev", status: "waiting", parentId: "crew:trio", frameId: "frame:trio",
@@ -31,6 +31,44 @@ describe("crewCanvasLayer", () => {
     const layer = crewCanvasLayer("p1", [{ name: "old", status: "stopped" }], [member({ crew: "old", address: "a@old", activity: "unknown" })]);
     expect(layer.nodes[1]!.status).toBeUndefined();
     expect(layer.expanded).toEqual([]);
+  });
+
+  describe("crew status reflects member activity, not the plugin's own lifecycle (BBP-214 stage 1)", () => {
+    it("negative: a running crew with only idle members shows no status (not 'running')", () => {
+      const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], [
+        member({ address: "lead@trio", key: "lead", lead: true, activity: "idle" }),
+        member({ address: "dev@trio", key: "dev", activity: "idle" }),
+      ]);
+      expect(layer.nodes[0]!.status).toBeUndefined();
+      expect(layer.nodes[0]!.meta).toMatchObject({ active: 0 });
+    });
+
+    it("a running crew with one working member shows 'running' and counts it in meta.active", () => {
+      const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], [
+        member({ address: "lead@trio", key: "lead", lead: true, activity: "idle" }),
+        member({ address: "dev@trio", key: "dev", activity: "working" }),
+      ]);
+      expect(layer.nodes[0]!.status).toBe("running");
+      expect(layer.nodes[0]!.meta).toMatchObject({ active: 1 });
+    });
+
+    it("a running crew with a member waiting on input shows 'waiting', not 'running'", () => {
+      const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], [
+        member({ address: "dev@trio", key: "dev", activity: "needs-you" }),
+      ]);
+      expect(layer.nodes[0]!.status).toBe("waiting");
+    });
+
+    it("a degraded crew always shows 'failed', a stopped one always 'idle', regardless of members", () => {
+      const degraded = crewCanvasLayer("p1", [{ name: "trio", status: "degraded" }], [
+        member({ address: "dev@trio", key: "dev", activity: "working" }),
+      ]);
+      expect(degraded.nodes[0]!.status).toBe("failed");
+      const stopped = crewCanvasLayer("p1", [{ name: "trio", status: "stopped" }], [
+        member({ address: "dev@trio", key: "dev", activity: "working" }),
+      ]);
+      expect(stopped.nodes[0]!.status).toBe("idle");
+    });
   });
 
   describe("links (BBP-170)", () => {
@@ -59,7 +97,7 @@ describe("crewCanvasLayer", () => {
 describe("crewCanvasLayer sidebar fields (BBP-179 acceptance)", () => {
   it("leaves out the lead when the crew has none, and counts zero members", () => {
     const layer = crewCanvasLayer("p1", [{ name: "solo", status: "stopped" }], []);
-    expect(layer.nodes[0]!.meta).toEqual({ crew: "solo", status: "stopped", members: 0 });
+    expect(layer.nodes[0]!.meta).toEqual({ crew: "solo", status: "stopped", members: 0, active: 0 });
   });
 });
 
