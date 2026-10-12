@@ -40,8 +40,8 @@ describe("curateMeta", () => {
   });
 
   it("returns no curated fields and no details for an empty or absent meta", () => {
-    expect(curateMeta("thread", undefined)).toEqual({ curated: [], details: [] });
-    expect(curateMeta("thread", {})).toEqual({ curated: [], details: [] });
+    expect(curateMeta("thread", undefined)).toEqual({ curated: [], details: [], debug: [] });
+    expect(curateMeta("thread", {})).toEqual({ curated: [], details: [], debug: [] });
   });
 
   it("curates a thread node's SDK details in reading order (BBP-179 acceptance)", () => {
@@ -56,7 +56,7 @@ describe("curateMeta", () => {
       title: "Fix login",
     });
     expect(curated.map((field) => field.label)).toEqual([
-      "Title", "Status", "Provider", "Model", "Turns", "Created", "Updated", "Thread",
+      "Title", "Status", "Provider", "Model", "Turns", "Created", "Updated",
     ]);
     expect(details).toEqual([]);
   });
@@ -76,8 +76,8 @@ describe("curateMeta", () => {
   });
 
   it("shows only the thread fields that are present, without empty rows", () => {
-    const { curated } = curateMeta("thread", { threadId: "thr_1", model: null });
-    expect(curated).toEqual([{ label: "Thread", value: "thr_1" }]);
+    const { curated } = curateMeta("thread", { title: "Fix login", model: null });
+    expect(curated).toEqual([{ label: "Title", value: "Fix login" }]);
   });
 
   it("curates a system-event node's detail", () => {
@@ -99,14 +99,6 @@ describe("curateMeta", () => {
     expect(details).toEqual([{ label: "Events", value: "event 1\nevent 2" }]);
   });
 
-  it("curates a turn node's first line alongside its row id", () => {
-    const { curated } = curateMeta("turn", { rowId: "r1", firstLine: "Add dark mode" });
-    expect(curated).toEqual([
-      { label: "Row", value: "r1" },
-      { label: "First line", value: "Add dark mode" },
-    ]);
-  });
-
   it("curates a tool-call node's expanded fields", () => {
     const { curated } = curateMeta("tool-call", {
       toolName: "Bash",
@@ -119,6 +111,41 @@ describe("curateMeta", () => {
     });
     expect(curated.map((field) => field.label)).toEqual([
       "Tool", "Command", "Output", "Exit code", "Duration", "Started", "Completed",
+    ]);
+  });
+
+  it("moves technical fields out of Details into debug (BBP-206 R2c)", () => {
+    const { curated, details, debug } = curateMeta("tool-call", {
+      rowId: "r1",
+      kind: "work",
+      sourceSeq: 12,
+      sourceSeqStart: 10,
+      sourceSeqEnd: 20,
+      seq: 3,
+      threadId: "th1",
+      turnId: "tu1",
+      toolName: "Bash",
+      extra: "x",
+    });
+    expect(curated).toEqual([{ label: "Tool", value: "Bash" }]);
+    expect(details).toEqual([{ label: "Extra", value: "x" }]);
+    expect(debug.map((field) => field.value)).toEqual(["r1", "work", "12", "10", "20", "3", "th1", "tu1"]);
+  });
+
+  it("keeps a turn's and thread's ids in debug, not curated", () => {
+    expect(curateMeta("turn", { rowId: "r1", firstLine: "Hi" }).curated).toEqual([{ label: "First line", value: "Hi" }]);
+    const thread = curateMeta("thread", { threadId: "th1", title: "T" });
+    expect(thread.curated).toEqual([{ label: "Title", value: "T" }]);
+    expect(thread.debug).toEqual([{ label: "Thread", value: "th1" }]);
+  });
+
+  it("labels the file-change and command fields", () => {
+    const { curated } = curateMeta("tool-call", { cwd: "/repo", path: "/repo/a.ts", changeKind: "update", diffStats: "+14 -0" });
+    expect(curated).toEqual([
+      { label: "Path", value: "/repo/a.ts" },
+      { label: "Change", value: "update" },
+      { label: "Diff", value: "+14 -0" },
+      { label: "Directory", value: "/repo" },
     ]);
   });
 });

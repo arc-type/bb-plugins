@@ -285,4 +285,19 @@ describe("Sidebar resize handle", () => {
     render(<Sidebar node={node} onClose={vi.fn()} />);
     expect(width()).toBe(320);
   });
+
+  it("hides technical fields behind a collapsed Debug toggle (BBP-206 R2c)", () => {
+    const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { toolName: "Bash", rowId: "r1", kind: "work" } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByText("Details")).toBeNull();
+    const debug = screen.getByText("Debug").closest("details") as HTMLDetailsElement;
+    expect(debug.open).toBe(false);
+    expect(within(debug).getByText("r1")).toBeTruthy();
+  });
+
+  it("shows no Debug toggle without technical fields", () => {
+    const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { toolName: "Bash" } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByText("Debug")).toBeNull();
+  });
 });

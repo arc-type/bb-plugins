@@ -92,9 +92,24 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   step: ["nodeId", "attempts"],
   // `state` is the thread's own BB status, loaded on selection; the node-level
   // pill is the status of whatever the thread hangs under, not the thread.
-  thread: ["title", "state", "provider", "model", "turns", "created", "updated", "threadId"],
-  turn: ["rowId", "firstLine"],
-  "tool-call": ["toolName", "command", "toolArgs", "outputPreview", "exitCode", "duration", "startedAt", "completedAt"],
+  thread: ["title", "state", "provider", "model", "turns", "created", "updated"],
+  turn: ["firstLine"],
+  "tool-call": [
+    "toolName",
+    "command",
+    "toolArgs",
+    "path",
+    "changeKind",
+    "diffStats",
+    "cwd",
+    "outputPreview",
+    "stdout",
+    "stderr",
+    "exitCode",
+    "duration",
+    "startedAt",
+    "completedAt",
+  ],
   subagent: ["status", "summary"],
   "system-event": ["detail", "oldParent", "newParent"],
 };
@@ -136,7 +151,33 @@ const FIELD_LABELS: Record<string, string> = {
   oldParent: "Old parent",
   newParent: "New parent",
   titles: "Events",
+  path: "Path",
+  changeKind: "Change",
+  diffStats: "Diff",
+  cwd: "Directory",
+  stdout: "Stdout",
+  stderr: "Stderr",
+  sourceSeq: "Source seq",
+  sourceSeqStart: "Source seq start",
+  sourceSeqEnd: "Source seq end",
+  seq: "Seq",
+  turnId: "Turn",
+  kind: "Row kind",
 };
+
+/** Ids and sequence numbers the mapping needs but a reader does not: shown
+ *  only behind the sidebar's collapsed "Debug" toggle, unless a kind curates
+ *  one (a graph run's `threadId`, say). */
+const TECHNICAL_KEYS: ReadonlySet<string> = new Set([
+  "rowId",
+  "kind",
+  "sourceSeq",
+  "sourceSeqStart",
+  "sourceSeqEnd",
+  "seq",
+  "threadId",
+  "turnId",
+]);
 
 function fieldLabel(key: string): string {
   if (FIELD_LABELS[key]) return FIELD_LABELS[key];
@@ -151,12 +192,13 @@ function fieldValue(value: unknown): string {
 
 /** Splits a node's `meta` into the fields its kind curates (in the kind's
  *  own order) and everything left over, for the sidebar's main body versus
- *  its collapsed "Details" block. A missing, `null`, or `undefined` value is
+ *  its collapsed "Details" block, with technical ids split off into
+ *  `debug` for the "Debug" toggle. A missing, `null`, or `undefined` value is
  *  dropped rather than shown as `"null"`. */
 export function curateMeta(
   kind: CanvasNodeKind,
   meta: Record<string, unknown> | undefined,
-): { curated: CuratedField[]; details: CuratedField[] } {
+): { curated: CuratedField[]; details: CuratedField[]; debug: CuratedField[] } {
   const entries = meta ?? {};
   const curatedKeys = CURATED_KEYS[kind] ?? [];
   const curated: CuratedField[] = [];
@@ -167,9 +209,10 @@ export function curateMeta(
   }
   const curatedKeySet = new Set(curatedKeys);
   const details: CuratedField[] = [];
+  const debug: CuratedField[] = [];
   for (const [key, value] of Object.entries(entries)) {
     if (curatedKeySet.has(key) || value === undefined || value === null) continue;
-    details.push({ label: fieldLabel(key), value: fieldValue(value) });
+    (TECHNICAL_KEYS.has(key) ? debug : details).push({ label: fieldLabel(key), value: fieldValue(value) });
   }
-  return { curated, details };
+  return { curated, details, debug };
 }
