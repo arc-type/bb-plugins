@@ -85,13 +85,6 @@ describe("CanvasShell", () => {
     expect(card.className).toContain("bb-canvas-pulse");
   });
 
-  it("tints a neutral card by kind when colorMode is 'type'", () => {
-    render(
-      <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} colorMode="type" />,
-    );
-    const card = screen.getByRole("button", { name: new RegExp("^steps-impl — ") });
-    expect(card.style.border).not.toContain("var(--border)");
-  });
 });
 
 describe("CanvasShell frames (BBP-165)", () => {

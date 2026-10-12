@@ -3,23 +3,17 @@
 // field and the others do not — one shape, and the kind says itself through
 // the label and the icon slot the caller fills in.
 //
-// Status always wins the border: a failed or needs-input card must never
-// blend into the background, in either colour mode (BBP-146). Type colour is
-// the quieter signal underneath it, for a reader who wants to scan "what
-// kind of thing is this" before "is it in trouble".
+// Colour means state, nothing else (BBP-214): a neutral card outside an
+// error/running/waiting state never carries a colour of its own. `kind` is
+// kept only for the caller's icon and the card's ARIA label, not the border.
 import type { ReactNode } from "react";
 import type { CanvasNodeKind, CanvasStatus } from "../lib/types";
-
-export type NodeCardColorMode = "status" | "type";
 
 export type NodeCardProps = {
   label: string;
   subtitle?: string;
   status?: CanvasStatus;
   kind?: CanvasNodeKind;
-  /** "status" (default) leaves a neutral card outside an error/running
-   *  state; "type" tints that same neutral card by `kind` instead. */
-  colorMode?: NodeCardColorMode;
   /** A single-colour line icon, left of the label. */
   icon?: ReactNode;
   selected?: boolean;
@@ -36,23 +30,6 @@ export type NodeCardProps = {
    *  simply has nothing — the destructive border wins even over a neutral
    *  `status`, and clicking the card (or its chevron) retries. */
   loadFailed?: boolean;
-};
-
-/** One fixed accent per kind — not derived from the id, unlike aside's
- *  per-project badge colours: every card of one kind should read the same
- *  everywhere, not get its own hash. */
-const KIND_COLOR: Record<CanvasNodeKind, string> = {
-  agents: "#64748b",
-  project: "#2563eb",
-  crew: "#7c3aed",
-  member: "#0d9488",
-  "graph-run": "#ea580c",
-  step: "#0891b2",
-  thread: "#db2777",
-  turn: "#65a30d",
-  "tool-call": "#d97706",
-  subagent: "#4f46e5",
-  "system-event": "#64748b",
 };
 
 const AMBER = "var(--warning)";
@@ -82,14 +59,9 @@ function ensurePulseStyles(): void {
 
 type Border = { border: string; pulse: boolean };
 
-/** Status beats type beats neutral — an error or a running card must read
- *  the same regardless of which colour mode the toolbar is set to. */
-function borderFor(
-  status: CanvasStatus | undefined,
-  kind: CanvasNodeKind | undefined,
-  colorMode: NodeCardColorMode,
-  loadFailed: boolean,
-): Border {
+/** Only a state colours the border — a neutral card (idle, done, or no
+ *  status at all) always gets the same plain line, regardless of `kind`. */
+function borderFor(status: CanvasStatus | undefined, loadFailed: boolean): Border {
   if (loadFailed || status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
   // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
   // state that needs the human — it must not read weaker than "running".
@@ -98,7 +70,6 @@ function borderFor(
   if (status === "running") {
     return { border: `1.5px solid var(--primary)`, pulse: true };
   }
-  if (colorMode === "type" && kind) return { border: `1px solid ${KIND_COLOR[kind]}`, pulse: false };
   return { border: `1px solid var(--border)`, pulse: false };
 }
 
@@ -106,8 +77,6 @@ export function NodeCard({
   label,
   subtitle,
   status,
-  kind,
-  colorMode = "status",
   icon,
   selected = false,
   onClick,
@@ -116,7 +85,7 @@ export function NodeCard({
   loadFailed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
-  const { border, pulse } = borderFor(status, kind, colorMode, loadFailed);
+  const { border, pulse } = borderFor(status, loadFailed);
   const errorText = loadFailed ? "Could not load activity" : undefined;
   const effectiveSubtitle = errorText ?? subtitle;
   const card = (

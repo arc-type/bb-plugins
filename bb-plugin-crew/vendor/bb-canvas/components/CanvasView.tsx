@@ -7,7 +7,6 @@ import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
 import { Breadcrumb } from "./Breadcrumb";
 import { Sidebar } from "./Sidebar";
 import { SearchBox } from "./SearchBox";
-import { ColorModeToggle, type ColorMode } from "./ColorModeToggle";
 import { layoutTree } from "../lib/layout";
 import {
   loadExpandedState,
@@ -19,7 +18,6 @@ import {
 import { loadRelations, outgoingRelations, relationsView, saveRelations } from "../lib/relations";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
-const COLOR_MODE_KEY = "bb-canvas:colour-mode";
 const TOOLBAR_BUTTON = {
   padding: "2px 8px",
   border: "1px solid var(--border)",
@@ -42,25 +40,6 @@ const EMPTY_DIMMED: ReadonlySet<string> = new Set();
  *  (BBP-173). Tall enough to show a handful of cards, short enough to not
  *  force scroll in a host that does size its container normally. */
 const MIN_HEIGHT = 320;
-
-/** Never throws: a private-browsing tab, a full quota, or an environment
- *  with no `localStorage` at all must fall back to the default, not crash
- *  the canvas. */
-function loadColorMode(): ColorMode {
-  try {
-    return localStorage.getItem(COLOR_MODE_KEY) === "type" ? "type" : "status";
-  } catch {
-    return "status";
-  }
-}
-
-function saveColorMode(mode: ColorMode): void {
-  try {
-    localStorage.setItem(COLOR_MODE_KEY, mode);
-  } catch {
-    // Not persisted this time; the toggle still works for the rest of the session.
-  }
-}
 
 /** What loading a node's children hands back — a thread's turns, typically. */
 export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly CanvasEdge[] };
@@ -158,7 +137,6 @@ export function CanvasView({
   // retry (clicking the card again) resolves, so the error never outlives
   // the state that caused it.
   const [failedLoads, setFailedLoads] = useState<ReadonlySet<string>>(new Set());
-  const [colorMode, setColorMode] = useState<ColorMode>(() => loadColorMode());
   const [showRelations, setShowRelations] = useState(() => loadRelations(surface));
   // Only one frame editable at a time (BBP-166): entering a second frame's
   // edit mode without an `Escape` first is a no-op, not a silent switch.
@@ -185,14 +163,6 @@ export function CanvasView({
     setFitRequest((count) => count + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
-
-  function toggleColorMode() {
-    setColorMode((prev) => {
-      const next = prev === "status" ? "type" : "status";
-      saveColorMode(next);
-      return next;
-    });
-  }
 
   const allNodes = useMemo(
     () => [...nodes, ...[...loaded.values()].flatMap((result) => result.nodes)],
@@ -290,11 +260,6 @@ export function CanvasView({
     for (const frame of frames) if (frame.id !== editingFrameId) ids.add(frame.id);
     return ids;
   }, [editingFrameId, visible, frames]);
-
-  // Edit mode forces "type" so the edited layer's own kinds read clearly,
-  // without touching the user's saved status/type preference — `Escape`
-  // hands control straight back to `colorMode` below.
-  const effectiveColorMode = editingFrameId !== null ? "type" : colorMode;
 
   function enterEditMode() {
     if (editingFrameId !== null) return; // nested edit attempt: ignored, not switched.
@@ -557,7 +522,6 @@ export function CanvasView({
               Relations
             </button>
           ) : null}
-          <ColorModeToggle mode={colorMode} onToggle={toggleColorMode} />
         </div>
       </div>
       {searchOpen ? (
@@ -581,7 +545,6 @@ export function CanvasView({
             frames={frames}
             selectedId={selectedId}
             onSelect={select}
-            colorMode={effectiveColorMode}
             dimmedIds={dimmedIds}
             failedLoads={failedLoads}
           />

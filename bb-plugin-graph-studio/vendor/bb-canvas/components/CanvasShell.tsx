@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutTree, type PlacedEdge, type TreeLayout } from "../lib/layout";
-import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
+import { NodeCard, type NodeCardProps } from "./NodeCard";
 import { Frame, type FrameProps } from "./Frame";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
@@ -206,10 +206,6 @@ export type CanvasShellProps = {
   /** Node and frame ids outside the frame being edited (BBP-166) — faded,
    *  locked, no `onSelect`. */
   dimmedIds?: ReadonlySet<string>;
-  /** "status" (default) borders a card by its run state; "type" tints a
-   *  neutral card by `kind` instead. An error or needs-input border always
-   *  wins over either. */
-  colorMode?: NodeCardColorMode;
   /** Nodes whose lazy load failed (BBP-179) — shown as a visible error on
    *  the card instead of an empty one, and retried on the next toggle. */
   failedLoads?: ReadonlySet<string>;
@@ -250,7 +246,6 @@ function toFlow(
   frames: readonly CanvasFrame[],
   selectedId: string | null | undefined,
   onSelect: ((id: string) => void) | undefined,
-  colorMode: NodeCardColorMode,
   dimmedIds: ReadonlySet<string>,
   expanded: ReadonlySet<string>,
   expandable: ReadonlySet<string>,
@@ -271,7 +266,6 @@ function toFlow(
       icon: <KindIcon kind={node.kind} />,
       status: node.status,
       kind: node.kind,
-      colorMode,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
       dimmed: dimmedIds.has(node.id),
@@ -334,7 +328,6 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     frames = [],
     selectedId,
     onSelect,
-    colorMode: cardColorMode = "status",
     dimmedIds = EMPTY_DIMMED,
     failedLoads = EMPTY_DIMMED,
     className,
@@ -346,8 +339,8 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
   const { flowNodes, flowEdges } = useMemo(
     () =>
-      toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads),
-    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
+      toFlow(layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads),
+    [layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
 
   const reducedMotion = usePrefersReducedMotion();

@@ -69,19 +69,9 @@ describe("NodeCard status border (BBP-146)", () => {
     expect(screen.getByRole("button").className).not.toContain("bb-canvas-pulse");
   });
 
-  it("stays neutral by default even with a kind, in status colour mode", () => {
+  it("stays neutral regardless of kind — colour means state only (BBP-219)", () => {
     render(<NodeCard label="x" kind="member" />);
     expect(screen.getByRole("button").style.border).toContain("var(--border)");
-  });
-
-  it("tints a neutral card by kind in type colour mode", () => {
-    render(<NodeCard label="x" kind="member" colorMode="type" />);
-    expect(screen.getByRole("button").style.border).not.toContain("var(--border)");
-  });
-
-  it("keeps the error border even in type colour mode — status always wins", () => {
-    render(<NodeCard label="x" kind="member" status="failed" colorMode="type" />);
-    expect(screen.getByRole("button").style.border).toContain("var(--destructive)");
   });
 
   it("shows a visible error instead of its subtitle when loadFailed is set", () => {
@@ -90,8 +80,8 @@ describe("NodeCard status border (BBP-146)", () => {
     expect(screen.queryByText("Thread · 3 turns")).toBeNull();
   });
 
-  it("gives a failed card the destructive border, even in type colour mode", () => {
-    render(<NodeCard label="Thread" kind="thread" colorMode="type" loadFailed />);
+  it("gives a failed card the destructive border regardless of kind", () => {
+    render(<NodeCard label="Thread" kind="thread" loadFailed />);
     expect(screen.getByRole("button").style.border).toContain("var(--destructive)");
   });
 

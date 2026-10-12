@@ -125,7 +125,7 @@ describe("ProjectFilter dropdown", () => {
 });
 
 describe("CanvasView toolbar slot", () => {
-  it("renders page controls beside the colour toggle", async () => {
+  it("renders the page's own toolbar slot", async () => {
     const { CanvasView } = await import("@/components/CanvasView");
     render(
       <CanvasView
@@ -134,7 +134,6 @@ describe("CanvasView toolbar slot", () => {
       />,
     );
     expect(screen.getByRole("button", { name: /Projects: All/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Colour:/ })).toBeTruthy();
   });
 
   it("renders no project filter when the page passes none", async () => {
