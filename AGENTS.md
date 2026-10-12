@@ -104,6 +104,10 @@ approved the ticket — never a direct push.
 checkout, after a `FACTORY_DRY_RUN=1` tick, with a commit in the `.bb` repo
 naming the ticket key. Crews never change `.bb/` themselves (see BBP-98).
 
+**Release tags**: release tags (`<plugin>/vX.Y.Z`) are set and pushed only
+after the customer's explicit approval. A push to `main` is a development
+state, not a release.
+
 ## Measure, do not estimate
 
 Numbers about this repository — test counts, line counts, versions — are to be
