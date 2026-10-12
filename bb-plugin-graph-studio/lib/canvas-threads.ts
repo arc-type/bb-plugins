@@ -631,7 +631,8 @@ export async function enrichTurnNodes(nodes: readonly CanvasNode[], port: TurnFi
         if (!line) return;
         byId.set(node.id, {
           ...node,
-          label: `${truncate(line, 48)} · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
+          // The step count is already the card's subtitle ("Turn · n steps").
+          label: truncate(line, 48),
           meta: { ...node.meta, firstLine: truncate(line, 120) },
         });
       } catch {

@@ -204,6 +204,36 @@ function FieldList({ fields }: { fields: { label: string; value: string }[] }) {
   );
 }
 
+/** A bundle's entries (each thought's text, each event's title) as their own
+ *  readable items, separated, each long one behind its own "more" — not one
+ *  run-together blob in the collapsed Details (BBP-206 R3 design). */
+function EntryList({ title, entries }: { title: string; entries: readonly string[] }) {
+  return (
+    <section aria-label={title} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionHeading>{`${title} (${entries.length})`}</SectionHeading>
+      <ol style={{ margin: 0, padding: 0, listStyle: "none", fontSize: 12, lineHeight: 1.5 }}>
+        {entries.map((entry, index) => (
+          <li
+            key={index}
+            style={{
+              padding: "8px 0",
+              borderTop: index === 0 ? "none" : "1px solid var(--border)",
+              overflowWrap: "anywhere",
+              whiteSpace: "pre-line",
+            }}
+          >
+            <FieldValue value={entry} />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry !== "") : [];
+}
+
 export type SidebarProps = {
   node: CanvasNode;
   onClose: () => void;
@@ -234,7 +264,11 @@ function numberMeta(node: CanvasNode, key: string): number | undefined {
 }
 
 export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect }: SidebarProps) {
-  const { curated, details, debug } = curateMeta(node.kind, node.meta);
+  const { curated, details: allDetails, debug } = curateMeta(node.kind, node.meta);
+  // A bundle's `titles` render as their own list below, not again in Details.
+  const entries = stringList(node.meta?.titles);
+  const details = entries.length > 0 ? allDetails.filter((field) => field.label !== "Events") : allDetails;
+  const entriesTitle = /\bthoughts?\b/.test(node.label) ? "Thoughts" : "Events";
   const runId = onOpenRun ? stringMeta(node, "runId") : undefined;
   const crew = onOpenCrew ? stringMeta(node, "crew") : undefined;
   const atRowThreadId = onOpenAtRow ? stringMeta(node, "threadId") : undefined;
@@ -380,6 +414,7 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, on
           <FieldList fields={curated} />
         </section>
       ) : null}
+      {entries.length > 0 ? <EntryList title={entriesTitle} entries={entries} /> : null}
       {relations.length > 0 ? (
         <section aria-label="Relations" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {relations.map((group) => (

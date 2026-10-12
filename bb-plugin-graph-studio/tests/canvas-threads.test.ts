@@ -770,7 +770,7 @@ describe("enrichTurnNodes (BBP-206 R2b)", () => {
       }),
     };
     const [node] = await enrichTurnNodes([turnNode], port);
-    expect(node.label).toBe("Fix the login bug · 9 steps");
+    expect(node.label).toBe("Fix the login bug");
     expect(node.meta).toMatchObject({ firstLine: "Fix the login bug" });
   });
 
@@ -899,7 +899,7 @@ describe("BBP-206 R2b acceptance: real timeline fixtures", () => {
       turnDetails: async () => ({ rows: [fixtures.conversationUser as TimelineRowLike, fixtures.conversationAssistant as TimelineRowLike] }),
     };
     const [enriched] = await enrichTurnNodes(nodes, port);
-    expect(enriched.label).toMatch(/^\[crew\] Kickoff brief for steps-impl@factory-1 · 9 steps$/);
+    expect(enriched.label).toMatch(/^\[crew\] Kickoff brief for steps-impl@factory-1$/);
     expect(enriched.meta!.firstLine).toContain("[crew] Kickoff brief for steps-impl@factory-1");
   });
 });

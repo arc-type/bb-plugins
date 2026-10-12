@@ -204,7 +204,7 @@ describe("crew's canvas page", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: new RegExp("^Fix the login bug · 1 step") })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Fix the login bug — Turn · 1 step") })).toBeTruthy();
     expect(screen.queryByRole("button", { name: new RegExp("^Turn · 1 step") })).toBeNull();
   });
 

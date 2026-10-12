@@ -192,6 +192,14 @@ describe("Sidebar actions", () => {
     expect(screen.getByText("npm test").closest("code")).not.toBeNull();
   });
 
+  it("lists a thought bundle's texts as separate items, not in Details", () => {
+    const node: CanvasNode = { id: "t", kind: "system-event", label: "2 thoughts · 4.0s", parentId: null, meta: { titles: ["First idea", "Second idea"] } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    const list = screen.getByRole("region", { name: "Thoughts" });
+    expect(list.querySelectorAll("li")).toHaveLength(2);
+    expect(screen.queryByText("Details")).toBeNull();
+  });
+
   it("shows no action buttons at all when no callback is given", () => {
     const node: CanvasNode = {
       id: "r1",
