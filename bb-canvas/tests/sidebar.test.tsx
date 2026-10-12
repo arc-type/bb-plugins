@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Sidebar } from "@/components/Sidebar";
 import type { CanvasNode } from "@/lib/types";
 
@@ -11,22 +11,62 @@ describe("Sidebar", () => {
     const node: CanvasNode = { id: "m1", kind: "member", label: "orch-lead", parentId: null };
     render(<Sidebar node={node} onClose={vi.fn()} />);
     expect(screen.getByText("orch-lead")).toBeTruthy();
-    expect(screen.getByText("member")).toBeTruthy();
+    expect(screen.getByText("Member")).toBeTruthy();
   });
 
-  it("lists every meta field", () => {
+  it("shows a status pill with the node's status, capitalized", () => {
+    const node: CanvasNode = { id: "c1", kind: "crew", label: "factory-1", status: "running", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.getByText("Running")).toBeTruthy();
+  });
+
+  it("shows no status pill when status is absent", () => {
+    const node: CanvasNode = { id: "m1", kind: "member", label: "orch-lead", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByText("Idle")).toBeNull();
+  });
+
+  it("shows a crew node's curated fields, not the raw meta dump", () => {
     const node: CanvasNode = {
-      id: "m1",
-      kind: "member",
-      label: "orch-lead",
+      id: "c1",
+      kind: "crew",
+      label: "factory-1",
       parentId: null,
-      meta: { role: "lead", crew: "factory-1" },
+      meta: { crew: "factory-1", status: "running" },
     };
     render(<Sidebar node={node} onClose={vi.fn()} />);
-    expect(screen.getByText("role")).toBeTruthy();
-    expect(screen.getByText("lead")).toBeTruthy();
-    expect(screen.getByText("crew")).toBeTruthy();
-    expect(screen.getByText("factory-1")).toBeTruthy();
+    expect(screen.getAllByText("Crew").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("factory-1").length).toBeGreaterThan(0);
+  });
+
+  it("puts a field the kind does not curate into the collapsed Details block", () => {
+    const node: CanvasNode = {
+      id: "c1",
+      kind: "crew",
+      label: "factory-1",
+      parentId: null,
+      meta: { crew: "factory-1", mystery: "x" },
+    };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    const details = screen.getByText("Details").closest("details") as HTMLDetailsElement;
+    expect(details).toBeTruthy();
+    expect(details.open).toBe(false);
+    expect(within(details).getByText("Mystery")).toBeTruthy();
+    expect(within(details).getByText("x")).toBeTruthy();
+    // The curated field must not also leak into Details.
+    expect(within(details).queryByText("factory-1")).toBeNull();
+  });
+
+  it("shows no Details block when every field is curated", () => {
+    const node: CanvasNode = {
+      id: "c1",
+      kind: "crew",
+      label: "factory-1",
+      parentId: null,
+      meta: { crew: "factory-1" },
+    };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByText("Details")).toBeNull();
   });
 
   it("calls onClose when its close button is pressed", () => {
@@ -35,6 +75,57 @@ describe("Sidebar", () => {
     render(<Sidebar node={node} onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "Close details" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Sidebar actions", () => {
+  it("shows Open thread only when meta.threadId exists, and calls onOpenThread with it", () => {
+    const onOpenThread = vi.fn();
+    const node: CanvasNode = { id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "th1" } };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenThread={onOpenThread} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
+    expect(onOpenThread).toHaveBeenCalledWith("th1");
+  });
+
+  it("shows no Open thread button when meta.threadId is absent", () => {
+    const node: CanvasNode = { id: "c1", kind: "crew", label: "factory-1", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Open thread" })).toBeNull();
+  });
+
+  it("shows Open run only when meta.runId exists, and calls onOpenRun with it", () => {
+    const onOpenRun = vi.fn();
+    const node: CanvasNode = { id: "r1", kind: "graph-run", label: "Run", parentId: null, meta: { runId: "run1" } };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenRun={onOpenRun} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }));
+    expect(onOpenRun).toHaveBeenCalledWith("run1");
+  });
+
+  it("shows no Open run button when meta.runId is absent", () => {
+    const node: CanvasNode = { id: "s1", kind: "step", label: "Step", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenRun={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Open run" })).toBeNull();
+  });
+
+  it("shows Open crew only when meta.crew exists, and calls onOpenCrew with it", () => {
+    const onOpenCrew = vi.fn();
+    const node: CanvasNode = { id: "c1", kind: "crew", label: "factory-1", parentId: null, meta: { crew: "factory-1" } };
+    render(<Sidebar node={node} onClose={vi.fn()} onOpenCrew={onOpenCrew} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open crew" }));
+    expect(onOpenCrew).toHaveBeenCalledWith("factory-1");
+  });
+
+  it("shows no action buttons at all when no callback is given", () => {
+    const node: CanvasNode = {
+      id: "r1",
+      kind: "graph-run",
+      label: "Run",
+      parentId: null,
+      meta: { runId: "run1", threadId: "th1" },
+    };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Open thread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open run" })).toBeNull();
   });
 });
 

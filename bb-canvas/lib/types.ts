@@ -63,3 +63,68 @@ export type CanvasEdge = {
   count?: number;
   state?: CanvasEdgeState;
 };
+
+export type CuratedField = { label: string; value: string };
+
+/** The `meta` keys worth their own row in the sidebar, per kind, in display
+ *  order. Everything else a provider put in `meta` — and every curated key a
+ *  provider happened not to set — falls into the collapsed "Details" block
+ *  instead of the raw dump this replaces (BBP-185). A kind's node-level
+ *  `status` already has its own pill in the header, so it is curated only
+ *  for `tool-call`/`subagent`, whose nodes carry no top-level `status`. */
+const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
+  crew: ["crew"],
+  member: ["address", "role", "lead", "activity"],
+  "graph-run": ["runId", "graphId", "threadId"],
+  step: ["nodeId", "attempts"],
+  thread: ["threadId"],
+  turn: ["rowId"],
+  "tool-call": ["status", "summary"],
+  subagent: ["status", "summary"],
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  threadId: "Thread",
+  runId: "Run",
+  graphId: "Graph",
+  crew: "Crew",
+  status: "Status",
+  role: "Role",
+  lead: "Lead",
+  activity: "Activity",
+  address: "Address",
+  nodeId: "Node",
+  attempts: "Attempts",
+  rowId: "Row",
+  summary: "Summary",
+};
+
+function fieldLabel(key: string): string {
+  if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+  return key.length > 0 ? key[0].toUpperCase() + key.slice(1) : key;
+}
+
+/** Splits a node's `meta` into the fields its kind curates (in the kind's
+ *  own order) and everything left over, for the sidebar's main body versus
+ *  its collapsed "Details" block. A missing, `null`, or `undefined` value is
+ *  dropped rather than shown as `"null"`. */
+export function curateMeta(
+  kind: CanvasNodeKind,
+  meta: Record<string, unknown> | undefined,
+): { curated: CuratedField[]; details: CuratedField[] } {
+  const entries = meta ?? {};
+  const curatedKeys = CURATED_KEYS[kind] ?? [];
+  const curated: CuratedField[] = [];
+  for (const key of curatedKeys) {
+    const value = entries[key];
+    if (value === undefined || value === null) continue;
+    curated.push({ label: fieldLabel(key), value: String(value) });
+  }
+  const curatedKeySet = new Set(curatedKeys);
+  const details: CuratedField[] = [];
+  for (const [key, value] of Object.entries(entries)) {
+    if (curatedKeySet.has(key) || value === undefined || value === null) continue;
+    details.push({ label: fieldLabel(key), value: String(value) });
+  }
+  return { curated, details };
+}

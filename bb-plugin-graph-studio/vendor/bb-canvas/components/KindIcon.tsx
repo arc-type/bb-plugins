@@ -24,7 +24,7 @@ export function KindIcon({ kind }: { kind: CanvasNodeKind }) {
   );
 }
 
-const KIND_LABEL: Record<CanvasNodeKind, string> = {
+export const KIND_LABEL: Record<CanvasNodeKind, string> = {
   agents: "Agents",
   project: "Project",
   crew: "Crew",

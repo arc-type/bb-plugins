@@ -7,6 +7,7 @@ import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import { useOpenRun } from "./run-card";
 import type { rpcContract } from "../server";
 
 /** Every member/run node gets its bound thread as a (collapsed) child —
@@ -61,6 +62,8 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const sdk = useSdk();
   const ctx = useBbContext();
+  const navigate = useBbNavigate();
+  const openRun = useOpenRun();
   // BBP-173: on the nav-panel route the host passes no projectId (measured in
   // BB), so the project also travels as the first subPath segment.
   const projectId = ctx.projectId ?? (subPath.split("/").find((part) => part.length > 0) ?? null);
@@ -116,6 +119,14 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
         if (typeof threadId !== "string") return { nodes: [] };
         const response = await sdk.threads.timeline({ threadId });
         return timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
+      }}
+      onOpenThread={(threadId) => navigate.toThread(threadId)}
+      onOpenRun={(runId) => openRun(runId)}
+      onOpenCrew={(crew) => {
+        // BBP-49/185: the thread side panel first, as the crew surfaces do;
+        // a surface with none falls back to the nav panel.
+        const opened = navigate.openThreadPanel({ actionId: "crew", title: `Crew ${crew}`, params: { crew, projectId } });
+        if (!opened) navigate.toPluginPanel("crews");
       }}
       className="h-full"
     />

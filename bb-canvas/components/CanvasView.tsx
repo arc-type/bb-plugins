@@ -61,6 +61,11 @@ export type CanvasViewProps = {
    * already in `nodes` (crew, graph-run, …) need none of this.
    */
   loadChildren?: (node: CanvasNode) => Promise<LoadedChildren>;
+  /** Passed straight through to the `Sidebar`'s own action buttons (BBP-185) —
+   *  absent here means absent there, so no dead link ever renders. */
+  onOpenThread?: (threadId: string) => void;
+  onOpenRun?: (runId: string) => void;
+  onOpenCrew?: (crew: string) => void;
   className?: string;
 };
 
@@ -76,6 +81,9 @@ export function CanvasView({
   renderFrameEditor,
   initialExpanded,
   loadChildren,
+  onOpenThread,
+  onOpenRun,
+  onOpenCrew,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded ?? []));
@@ -341,7 +349,15 @@ export function CanvasView({
         {editingFrameId !== null
           ? (renderFrameEditor?.(editingFrameId) ?? null)
           : selected
-            ? <Sidebar node={selected} onClose={() => select(null)} />
+            ? (
+                <Sidebar
+                  node={selected}
+                  onClose={() => select(null)}
+                  onOpenThread={onOpenThread}
+                  onOpenRun={onOpenRun}
+                  onOpenCrew={onOpenCrew}
+                />
+              )
             : null}
       </div>
     </div>

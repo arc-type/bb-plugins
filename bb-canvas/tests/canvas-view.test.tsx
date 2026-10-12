@@ -296,3 +296,16 @@ describe("CanvasView lazy children", () => {
     expect(loadChildren).toHaveBeenCalledOnce();
   });
 });
+
+describe("CanvasView sidebar action wiring (BBP-185)", () => {
+  it("forwards onOpenThread to the Sidebar and calls it with the selected node's threadId", () => {
+    const onOpenThread = vi.fn();
+    const threadNode: CanvasNode[] = [
+      { id: "t1", kind: "thread", label: "Thread", parentId: null, meta: { threadId: "th1" } },
+    ];
+    render(<CanvasView nodes={threadNode} initialExpanded={new Set()} onOpenThread={onOpenThread} />);
+    fireEvent.click(card(/^Thread/));
+    fireEvent.click(screen.getByRole("button", { name: "Open thread" }));
+    expect(onOpenThread).toHaveBeenCalledWith("th1");
+  });
+});
