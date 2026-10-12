@@ -301,7 +301,7 @@ export async function runCli(
           }
           case "done":
             if (!id) return fail("Usage: bb crew work done <id> [note…]");
-            return line(service.queue.done(crew, human, id, rest.join(" ")));
+            return line(await service.queue.done(crew, human, id, rest.join(" ")));
           case "fail":
             if (!id || rest.length === 0) return fail("Usage: bb crew work fail <id> <reason…>");
             return line(service.queue.fail(crew, human, id, rest.join(" ")));

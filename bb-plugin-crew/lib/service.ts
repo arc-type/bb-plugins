@@ -124,7 +124,6 @@ export function createCrewService(deps: ServiceDeps) {
     capacity: async () => ({ limit: (await limit()).limit, running: await deps.port.runningCount() }),
   });
   const shortId = deps.newShortId;
-  const queue = createQueue({ store, models, delivery, now: deps.now, newId: shortId ? () => shortId("wi") : undefined });
   const channel = createChannel({ store, delivery, newId: shortId ? () => shortId("cm") : undefined });
   const dependencies = createDependencies({ store, models, delivery, tasks: deps.tasks ?? null });
   const integration = createIntegration({
@@ -134,11 +133,13 @@ export function createCrewService(deps: ServiceDeps) {
     delivery,
     git: deps.git ?? createLocalGit(),
     remote: deps.remoteGit,
+    now: deps.now,
     newId: shortId ? () => shortId("mr") : undefined,
     onMerged: async () => {
       await dependencies.poll({ onlyMerged: true });
     },
   });
+  const queue = createQueue({ store, models, delivery, integration, now: deps.now, newId: shortId ? () => shortId("wi") : undefined });
   /**
    * BBP-87: a member's open human question is stale once the crew's own task
    * is done — there is no per-question task link (`MessageRow` has none), so

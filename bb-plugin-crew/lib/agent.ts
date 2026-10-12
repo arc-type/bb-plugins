@@ -392,7 +392,7 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
     description: "Close a work item as done, with a closure note.",
     parameters: z.object({ id: z.string().min(1).max(64), note: z.string().max(4000).default("") }),
     presentation: { label: { pending: "Closing work item", completed: "Closed work item" }, icon: { glyph: "CircleCheck" } },
-    execute: (params, ctx) => withSelf(async (self) => formatWorkItem(work.done(self.crew, actor(self), params.id, params.note), addressOf))(params, ctx),
+    execute: (params, ctx) => withSelf(async (self) => formatWorkItem(await work.done(self.crew, actor(self), params.id, params.note), addressOf))(params, ctx),
   });
 
   bb.agents.registerTool({

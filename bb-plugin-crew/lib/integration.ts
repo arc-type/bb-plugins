@@ -40,9 +40,10 @@ export interface GitBackend {
   /**
    * Run the checks command in the worktree. `ok` = exit 0. `env` = the
    * command itself could not run (exit 126/127, or it timed out/was
-   * killed) — distinct from `failed`, a real red check.
+   * killed) — distinct from `failed`, a real red check. `code` is the raw
+   * exit code (killed runs report 1), used for the done gate's log.
    */
-  checks(cwd: string, command: string): Promise<{ kind: "ok" | "failed" | "env"; output: string }>;
+  checks(cwd: string, command: string): Promise<{ kind: "ok" | "failed" | "env"; code: number; output: string }>;
   /** Merge `branch` into `base`; never leaves a half-done merge behind. */
   merge(cwd: string, branch: string, base: string, message: string): Promise<MergeOutcome>;
   /** Rebase the worktree's branch onto `base`; on conflict the rebase is aborted. */
@@ -104,9 +105,9 @@ export function createLocalGit(run: Run = runProcess): GitBackend {
     async checks(cwd, command) {
       const result = await run([command], cwd, { shell: true, timeoutMs: 10 * 60_000 });
       const output = tail(stripAnsi(`${result.stdout}${result.stderr}`.trim()));
-      if (result.code === 0) return { kind: "ok", output };
+      if (result.code === 0) return { kind: "ok", code: result.code, output };
       const env = result.killed === true || result.code === 126 || result.code === 127;
-      return { kind: env ? "env" : "failed", output };
+      return { kind: env ? "env" : "failed", code: result.code, output };
     },
     async merge(cwd, branch, base, message) {
       const target = await worktreeWith(cwd, base);
@@ -182,6 +183,7 @@ export type IntegrationDeps = {
   /** A merge landed: dependencies waiting for `merged` are checked right away. */
   onMerged?: (merge: MergeRequestRow) => Promise<void>;
   newId?: () => string;
+  now?: () => number;
 };
 
 export type Integration = ReturnType<typeof createIntegration>;
@@ -189,9 +191,15 @@ export const AWAITING_HUMAN = ["open", "returned"] as const;
 /** Consecutive red-check rejections for one crew before it escalates to the human. */
 export const REJECT_LIMIT = 3;
 
+/** One `gates.done` command's outcome, in the order it ran. */
+export type GateStep = { command: string; kind: "ok" | "failed" | "env"; code: number; durationMs: number; output: string };
+/** `ok`: every command was green. Red: aborted at the first non-ok command; `steps` holds everything run up to and including it. */
+export type GateOutcome = { ok: true; steps: GateStep[] } | { ok: false; steps: GateStep[] };
+
 export function createIntegration(deps: IntegrationDeps) {
   const { store, port, models, delivery } = deps;
   const remote = deps.remote ?? unavailableRemoteGit;
+  const now = deps.now ?? Date.now;
   // Hosts do not move: an environment's host and the server's host are cached once known.
   const hostByEnvironment = new Map<string, string>();
   let localHost: string | null = null;
@@ -461,6 +469,25 @@ export function createIntegration(deps: IntegrationDeps) {
       return after;
     },
 
+    /**
+     * `gates.done`: run `commands` in order in the member's own worktree,
+     * aborting at the first non-ok one. Remote host or missing worktree
+     * throws instead of skipping the gate (BBP-176): there is no bypass.
+     */
+    async runDoneGate(member: MemberRow, commands: readonly string[]): Promise<GateOutcome> {
+      const env = await locate(member);
+      if (!env?.path) throw new AddressError("your worktree is unknown; the done gate cannot run");
+      const git = await gitFor(env);
+      const steps: GateStep[] = [];
+      for (const command of commands) {
+        const startedAt = now();
+        const result = await git.checks(env.path, command);
+        steps.push({ command, kind: result.kind, code: result.code, durationMs: now() - startedAt, output: result.output });
+        if (result.kind !== "ok") return { ok: false, steps };
+      }
+      return { ok: true, steps };
+    },
+
     /** Rebase the member's worktree onto the base. A conflict aborts the rebase and puts the member on Needs you. */
     async rebase(member: MemberRow): Promise<RebaseOutcome & { base: string }> {
       const crew = store.getCrew(member.crewId)!;
@@ -517,7 +544,9 @@ export function createFakeGit() {
     // Non-zero by default: a freshly requested merge has unmerged commits.
     aheadCount: 1 as number | null,
     isDirty: false,
-    checksResult: { kind: "ok", output: "ok" } as { kind: "ok" | "failed" | "env"; output: string },
+    checksResult: { kind: "ok", code: 0, output: "ok" } as { kind: "ok" | "failed" | "env"; code: number; output: string },
+    // Consumed in call order, one per `checks` call; falls back to `checksResult` once empty — for gate tests that need a different result per command.
+    checksResults: [] as { kind: "ok" | "failed" | "env"; code: number; output: string }[],
     mergeResult: { ok: true, commit: "abc1234def" } as MergeOutcome,
     rebaseResult: { ok: true, head: "fff000" } as RebaseOutcome,
     count: (method: string) => calls.filter((call) => call.method === method).length,
@@ -535,7 +564,7 @@ export function createFakeGit() {
     },
     async checks(...args: [string, string]) {
       calls.push({ method: "checks", args });
-      return fake.checksResult;
+      return fake.checksResults.shift() ?? fake.checksResult;
     },
     async merge(...args: [string, string, string, string]) {
       calls.push({ method: "merge", args });

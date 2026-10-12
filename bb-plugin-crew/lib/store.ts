@@ -1034,7 +1034,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
     /** One state change plus its transition row, atomically. */
     transitionWork(
       id: string,
-      patch: { state: WorkState; owner?: string | null; closureNote?: string | null; bumpEpoch?: boolean },
+      patch: { state: WorkState; owner?: string | null; closureNote?: string | null; bumpEpoch?: boolean; keepStateSince?: boolean },
       actor: string,
       note: string | null,
     ): WorkItemRow {
@@ -1048,7 +1048,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
           patch.owner === undefined ? before.ownerMember : patch.owner,
           patch.closureNote === undefined ? before.closureNote : patch.closureNote,
           patch.bumpEpoch ? 1 : 0,
-          at,
+          patch.keepStateSince ? before.stateSince : at,
           at,
           id,
         );

@@ -7,6 +7,7 @@
 // runs — the sweep is idempotent and safe to call every minute or twice.
 import { randomBytes } from "node:crypto";
 import { AddressError, type Delivery, type Sender } from "./delivery";
+import type { Integration } from "./integration";
 import type { CrewModels } from "./policy";
 import { followUpMinutes, TIERS, type Tier } from "./spec";
 import type { CrewRow, MemberRow, Store, WorkItemRow, WorkState } from "./store";
@@ -20,6 +21,7 @@ export type QueueDeps = {
   store: Store;
   models: CrewModels;
   delivery: Delivery;
+  integration: Integration;
   now?: () => number;
   newId?: () => string;
 };
@@ -48,9 +50,14 @@ export function dueRung(item: WorkItemRow, periodMs: number, lastRung: number, n
 }
 
 export function createQueue(deps: QueueDeps) {
-  const { store, models, delivery } = deps;
+  const { store, models, delivery, integration } = deps;
   const now = deps.now ?? Date.now;
   const newId = deps.newId ?? (() => `wi_${randomBytes(4).toString("hex")}`);
+
+  /** The member's own `gates.done` commands, resolved member ?? group ?? crew; `[]` when the gate is off or unknown. */
+  function doneGate(crew: CrewRow, member: MemberRow): string[] {
+    return models(crew).members.find((entry) => entry.key === member.key)?.gates ?? [];
+  }
 
   function memberByKey(crew: CrewRow, key: string): MemberRow {
     const member = store.listMembers(crew.id).find((entry) => entry.key === key || entry.address === key);
@@ -146,11 +153,33 @@ export function createQueue(deps: QueueDeps) {
       return after;
     },
 
-    done(crew: CrewRow, actor: Actor, id: string, note: string): WorkItemRow {
+    /**
+     * Close a work item. A member actor runs their resolved `gates.done`
+     * commands first (BBP-176): a red one keeps the item claimed with the
+     * failing command, exit code, duration and output logged, then throws so
+     * the member sees it. The human — always through the CLI — is the
+     * override: no gate runs for `{ kind: "human" }`.
+     */
+    async done(crew: CrewRow, actor: Actor, id: string, note: string): Promise<WorkItemRow> {
       const item = requireItem(crew, id);
       requireOpen(item);
       requireOwnerOrLead(item, actor);
-      return store.transitionWork(id, { state: "done", closureNote: note || null }, actorName(actor), note || null);
+      if (actor.kind !== "member") {
+        return store.transitionWork(id, { state: "done", closureNote: note || null }, actorName(actor), note || null);
+      }
+      const gate = doneGate(crew, actor.member);
+      if (gate.length === 0) {
+        return store.transitionWork(id, { state: "done", closureNote: note || null }, actorName(actor), note || null);
+      }
+      const outcome = await integration.runDoneGate(actor.member, gate);
+      if (!outcome.ok) {
+        const failed = outcome.steps.at(-1)!;
+        const transitionNote = `Gate red: ${failed.command}\nexit ${failed.code} (${failed.kind}), ${failed.durationMs}ms\n${failed.output}`;
+        store.transitionWork(id, { state: "claimed", keepStateSince: true }, actorName(actor), transitionNote);
+        throw new AddressError(`gate failed: ${failed.command} (exit ${failed.code})\n${failed.output}`);
+      }
+      const summary = `Gate green: ${outcome.steps.map((step) => step.command).join(", ")}`;
+      return store.transitionWork(id, { state: "done", closureNote: note || null }, actorName(actor), [note, summary].filter(Boolean).join("\n"));
     },
 
     fail(crew: CrewRow, actor: Actor, id: string, reason: string): WorkItemRow {

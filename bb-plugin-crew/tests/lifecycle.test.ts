@@ -36,7 +36,7 @@ describe("snapshot and restore", () => {
     await service.stop(store.getCrew(crew.id)!, { archive: true });
     expect([...t.port.threads.values()].every((entry) => entry.archived)).toBe(true);
     // After the snapshot someone closes an item: restore puts it back.
-    service.queue.done(crew, t.human, open.id, "closed by mistake");
+    await service.queue.done(crew, t.human, open.id, "closed by mistake");
 
     t.thread(threads["dev-impl"]!).interactions.length = 0;
     const report = await service.lifecycle.restore(id);
