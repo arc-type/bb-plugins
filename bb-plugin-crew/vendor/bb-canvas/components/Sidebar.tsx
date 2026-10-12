@@ -36,10 +36,10 @@ function saveWidth(width: number): void {
 const STATUS_COLOR: Record<CanvasStatus, string> = {
   idle: "var(--muted-foreground)",
   running: "var(--primary)",
-  waiting: "#d97706",
+  waiting: "var(--warning)",
   done: "var(--muted-foreground)",
   failed: "var(--destructive)",
-  escalated: "#d97706",
+  escalated: "var(--warning)",
 };
 
 function StatusPill({ status }: { status: CanvasStatus }) {
@@ -48,14 +48,19 @@ function StatusPill({ status }: { status: CanvasStatus }) {
     <span
       style={{
         display: "inline-flex",
-        alignSelf: "start",
-        marginTop: 2,
-        padding: "1px 6px",
+        alignItems: "center",
+        flexShrink: 0,
+        height: 18,
+        padding: "0 7px",
         borderRadius: 999,
         fontSize: 10,
         fontWeight: 600,
+        letterSpacing: "0.02em",
         color,
-        border: `1px solid ${color}`,
+        // A tint of the status colour, not a bare outline: it keeps the pill
+        // legible on both themes without a hex value per theme.
+        background: `color-mix(in oklab, ${color} 12%, transparent)`,
+        border: `1px solid color-mix(in oklab, ${color} 45%, transparent)`,
       }}
     >
       {status[0].toUpperCase() + status.slice(1)}
@@ -63,9 +68,68 @@ function StatusPill({ status }: { status: CanvasStatus }) {
   );
 }
 
+/** Inline because bb-canvas cannot import BB's Button: the same tokens, the
+ *  same 28 px height, and a focus ring from `:focus-visible` in SIDEBAR_CSS. */
+const ACTION_STYLE = {
+  display: "inline-flex",
+  alignItems: "center",
+  height: 28,
+  padding: "0 10px",
+  borderRadius: 6,
+  border: "1px solid var(--border)",
+  background: "var(--card)",
+  color: "var(--foreground)",
+  fontSize: 12,
+  fontWeight: 500,
+  cursor: "pointer",
+} as const;
+
+const SIDEBAR_STYLE_ID = "bb-canvas-sidebar-styles";
+
+/** Hover and focus states need real selectors; injected once, like the
+ *  pulse in NodeCard. */
+const SIDEBAR_CSS = `
+  .bb-canvas-action:hover { background: var(--muted); }
+  .bb-canvas-action:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .bb-canvas-resize::after {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+    background: transparent; transition: background 120ms ease-out;
+  }
+  .bb-canvas-resize:hover::after { background: var(--border); width: 2px; left: 2px; }
+  .bb-canvas-resize:focus-visible { outline: none; }
+  .bb-canvas-resize:focus-visible::after, .bb-canvas-resize:active::after {
+    background: var(--primary); width: 2px; left: 2px;
+  }
+`;
+
+function ensureSidebarStyles(): void {
+  if (typeof document === "undefined" || document.getElementById(SIDEBAR_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = SIDEBAR_STYLE_ID;
+  style.textContent = SIDEBAR_CSS;
+  document.head.appendChild(style);
+}
+
+function SectionHeading({ children }: { children: string }) {
+  return (
+    <h3
+      style={{
+        margin: 0,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: "var(--muted-foreground)",
+      }}
+    >
+      {children}
+    </h3>
+  );
+}
+
 function FieldList({ fields }: { fields: { label: string; value: string }[] }) {
   return (
-    <dl style={{ margin: 0, fontSize: 12, display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 8px" }}>
+    <dl style={{ margin: 0, fontSize: 12, display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 12px", lineHeight: 1.4 }}>
       {fields.map((field) => (
         <div key={field.label} style={{ display: "contents" }}>
           <dt style={{ color: "var(--muted-foreground)" }}>{field.label}</dt>
@@ -102,6 +166,7 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => saveWidth(width), [width]);
+  useEffect(ensureSidebarStyles, []);
 
   useEffect(() => {
     // The handle sits on the left edge, so moving the pointer left widens.
@@ -145,10 +210,13 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
         width,
         flexShrink: 0,
         borderLeft: "1px solid var(--border)",
-        padding: 12,
+        padding: "14px 16px",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: 16,
+        overflowY: "auto",
+        background: "var(--background)",
+        color: "var(--foreground)",
       }}
     >
       <div
@@ -161,38 +229,67 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
         tabIndex={0}
         onMouseDown={startDrag}
         onKeyDown={onKeyDown}
-        style={{ position: "absolute", left: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize" }}
+        className="bb-canvas-resize"
+        style={{ position: "absolute", left: -4, top: 0, bottom: 0, width: 8, cursor: "col-resize", zIndex: 1 }}
       />
-      <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "start", gap: 8, minWidth: 0 }}>
-          <span aria-hidden style={{ display: "flex", flexShrink: 0, marginTop: 2, color: "var(--muted-foreground)" }}>
-            <KindIcon kind={node.kind} />
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: "anywhere" }}>{node.label}</div>
-            <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{KIND_LABEL[node.kind]}</div>
+      <header style={{ display: "flex", alignItems: "start", gap: 10 }}>
+        <span
+          aria-hidden
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            width: 28,
+            height: 28,
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+            color: "var(--muted-foreground)",
+          }}
+        >
+          <KindIcon kind={node.kind} />
+        </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{KIND_LABEL[node.kind]}</span>
+            {node.status ? <StatusPill status={node.status} /> : null}
           </div>
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, lineHeight: 1.3, overflowWrap: "anywhere" }}>
+            {node.label}
+          </h2>
         </div>
-        <button type="button" aria-label="Close details" onClick={onClose} style={{ cursor: "pointer", flexShrink: 0 }}>
-          ×
+        <button
+          type="button"
+          aria-label="Close details"
+          onClick={onClose}
+          className="bb-canvas-action"
+          style={{ ...ACTION_STYLE, justifyContent: "center", width: 28, padding: 0, border: "none", background: "transparent", color: "var(--muted-foreground)" }}
+        >
+          <svg aria-hidden width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
         </button>
-      </div>
-      {node.status ? <StatusPill status={node.status} /> : null}
-      {curated.length > 0 ? <FieldList fields={curated} /> : null}
+      </header>
+      {curated.length > 0 ? (
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <SectionHeading>{KIND_LABEL[node.kind]}</SectionHeading>
+          <FieldList fields={curated} />
+        </section>
+      ) : null}
       {hasActions ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {threadId !== undefined ? (
-            <button type="button" onClick={() => onOpenThread?.(threadId)} style={{ cursor: "pointer", fontSize: 12 }}>
+            <button type="button" onClick={() => onOpenThread?.(threadId)} className="bb-canvas-action" style={ACTION_STYLE}>
               Open thread
             </button>
           ) : null}
           {runId !== undefined ? (
-            <button type="button" onClick={() => onOpenRun?.(runId)} style={{ cursor: "pointer", fontSize: 12 }}>
+            <button type="button" onClick={() => onOpenRun?.(runId)} className="bb-canvas-action" style={ACTION_STYLE}>
               Open run
             </button>
           ) : null}
           {crew !== undefined ? (
-            <button type="button" onClick={() => onOpenCrew?.(crew)} style={{ cursor: "pointer", fontSize: 12 }}>
+            <button type="button" onClick={() => onOpenCrew?.(crew)} className="bb-canvas-action" style={ACTION_STYLE}>
               Open crew
             </button>
           ) : null}
@@ -200,8 +297,19 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
       ) : null}
       {details.length > 0 ? (
         <details>
-          <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--muted-foreground)" }}>Details</summary>
-          <div style={{ marginTop: 6 }}>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "var(--muted-foreground)",
+            }}
+          >
+            Details
+          </summary>
+          <div style={{ marginTop: 8 }}>
             <FieldList fields={details} />
           </div>
         </details>

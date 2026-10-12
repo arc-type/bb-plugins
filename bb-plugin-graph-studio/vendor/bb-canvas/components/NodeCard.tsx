@@ -49,7 +49,7 @@ const KIND_COLOR: Record<CanvasNodeKind, string> = {
   subagent: "#4f46e5",
 };
 
-const AMBER = "#d97706";
+const AMBER = "var(--warning)";
 
 const PULSE_CLASS = "bb-canvas-pulse";
 const STYLE_ID = "bb-canvas-node-card-styles";
@@ -211,10 +211,14 @@ export function NodeCard({
           minWidth: 20,
           padding: "0 4px",
           borderRadius: 10,
-          border: "1px solid var(--border)",
+          // Collapsed with children is the state to notice, so it gets the
+          // foreground ink; open chevrons stay quiet.
+          border: `1px solid ${count !== null ? "var(--muted-foreground)" : "var(--border)"}`,
           background: "var(--card)",
-          color: "var(--muted-foreground)",
+          color: count !== null ? "var(--foreground)" : "var(--muted-foreground)",
           fontSize: 10,
+          fontWeight: count !== null ? 600 : 400,
+          fontVariantNumeric: "tabular-nums",
           lineHeight: 1,
           cursor: dimmed ? "default" : "pointer",
           opacity: dimmed ? 0.35 : 1,
