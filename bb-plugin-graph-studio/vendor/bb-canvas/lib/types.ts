@@ -11,7 +11,8 @@ export type CanvasNodeKind =
   | "step"
   | "thread"
   | "turn"
-  | "tool-call";
+  | "tool-call"
+  | "subagent";
 
 export type CanvasStatus = "idle" | "running" | "waiting" | "done" | "failed" | "escalated";
 
