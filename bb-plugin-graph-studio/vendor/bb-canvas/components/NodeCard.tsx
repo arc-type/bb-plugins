@@ -8,7 +8,7 @@
 // kept only for the caller's icon and the card's ARIA label, not the border.
 import type { ReactNode } from "react";
 import type { CanvasNodeKind, CanvasStatus } from "../lib/types";
-import { TIER_OF } from "../lib/tiers";
+import { TIER_OF, TIER_TYPOGRAPHY, type Tier } from "../lib/tiers";
 
 export type NodeCardProps = {
   label: string;
@@ -58,24 +58,44 @@ function ensurePulseStyles(): void {
   document.head.appendChild(style);
 }
 
-type Border = { border: string; pulse: boolean };
+type Visual = { border: string; pulse: boolean; background: string; radius: number };
+
+const CARD_RADIUS: Record<Tier, number> = { group: 0, card: 8, row: 6 };
+
+/** A 15%-opacity wash of a status colour over the row's own fill — a plain
+ *  border reads too thin at 26px tall, so a row that needs the human also
+ *  gets a tinted background, not just an outline. */
+function tint(color: string): string {
+  return `color-mix(in oklab, ${color} 15%, var(--muted))`;
+}
 
 /** Only a state colours the border — a neutral card (idle, done, or no
  *  status at all) always gets the same plain line, regardless of `kind`. A
  *  group-tier node (agents/project/crew, BBP-221) is a headerless header row
  *  and never borders at all, whatever its status — it does not pulse either,
- *  the same accent a border would otherwise carry. */
-function borderFor(status: CanvasStatus | undefined, kind: CanvasNodeKind | undefined, loadFailed: boolean): Border {
-  if (kind !== undefined && TIER_OF[kind] === "group") return { border: "none", pulse: false };
-  if (loadFailed || status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
+ *  the same accent a border would otherwise carry. A row-tier node (step,
+ *  tool-call, …, BBP-223) borders only for waiting/failed/loadFailed, each
+ *  paired with a tinted fill so the state still reads at its compact height;
+ *  anything else stays the plain `var(--muted)` fill, no border — a running
+ *  row is already shown by its incoming edge's "now" state. */
+function visualFor(status: CanvasStatus | undefined, tier: Tier, loadFailed: boolean): Visual {
+  const radius = CARD_RADIUS[tier];
+  if (tier === "group") return { border: "none", pulse: false, background: "var(--card)", radius };
+  const failed = loadFailed || status === "failed";
+  if (tier === "row") {
+    if (failed) return { border: `1.5px solid var(--destructive)`, pulse: false, background: tint("var(--destructive)"), radius };
+    if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false, background: tint(AMBER), radius };
+    return { border: "none", pulse: false, background: "var(--muted)", radius };
+  }
+  if (failed) return { border: `1.5px solid var(--destructive)`, pulse: false, background: "var(--card)", radius };
   // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
   // state that needs the human — it must not read weaker than "running".
-  if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false };
-  if (status === "escalated") return { border: `1.5px solid ${AMBER}`, pulse: false };
+  if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false, background: "var(--card)", radius };
+  if (status === "escalated") return { border: `1.5px solid ${AMBER}`, pulse: false, background: "var(--card)", radius };
   if (status === "running") {
-    return { border: `1.5px solid var(--primary)`, pulse: true };
+    return { border: `1.5px solid var(--primary)`, pulse: true, background: "var(--card)", radius };
   }
-  return { border: `1px solid var(--border)`, pulse: false };
+  return { border: `1px solid var(--border)`, pulse: false, background: "var(--card)", radius };
 }
 
 export function NodeCard({
@@ -91,9 +111,16 @@ export function NodeCard({
   loadFailed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
-  const { border, pulse } = borderFor(status, kind, loadFailed);
+  const tier: Tier = kind !== undefined ? TIER_OF[kind] : "card";
+  const typo = TIER_TYPOGRAPHY[tier];
+  const { border, pulse, background, radius } = visualFor(status, tier, loadFailed);
   const errorText = loadFailed ? "Could not load activity" : undefined;
   const effectiveSubtitle = errorText ?? subtitle;
+  // Group: the counter rides beside the title, no second line — 28px has
+  // room for one. Card: counter/subtitle sits on its own line below. Row:
+  // no secondary text at all, however compact its title already is.
+  const showInline = tier === "group" && Boolean(effectiveSubtitle);
+  const showBelow = tier === "card" && Boolean(effectiveSubtitle);
   const card = (
     <button
       type="button"
@@ -108,12 +135,12 @@ export function NodeCard({
         gap: 8,
         width: "100%",
         height: "100%",
-        padding: "6px 10px",
-        borderRadius: 10,
+        padding: tier === "card" ? "6px 10px" : "0 10px",
+        borderRadius: radius,
         border,
         outline: selected ? "2px solid var(--primary)" : "none",
         outlineOffset: 1,
-        background: "var(--card)",
+        background,
         color: "var(--foreground)",
         textAlign: "left",
         cursor: dimmed ? "default" : "pointer",
@@ -131,20 +158,49 @@ export function NodeCard({
           {icon}
         </span>
       ) : null}
-      <span style={{ display: "flex", minWidth: 0, flexDirection: "column", flex: 1 }}>
+      <span
+        style={{
+          display: "flex",
+          minWidth: 0,
+          flexDirection: tier === "card" ? "column" : "row",
+          alignItems: tier === "card" ? undefined : "baseline",
+          gap: tier === "group" ? 6 : undefined,
+          flex: 1,
+        }}
+      >
         <span
+          title={label}
           style={{
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            fontSize: 12,
-            fontWeight: 600,
+            fontSize: typo.titleSize,
+            fontWeight: typo.titleWeight,
+            minWidth: tier === "row" ? 0 : undefined,
+            flex: tier === "row" ? 1 : undefined,
           }}
         >
           {label}
         </span>
-        {effectiveSubtitle ? (
+        {showInline ? (
           <span
+            title={effectiveSubtitle}
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              fontSize: typo.subSize,
+              fontWeight: typo.subWeight,
+              color: "var(--muted-foreground)",
+            }}
+          >
+            {effectiveSubtitle}
+          </span>
+        ) : null}
+        {showBelow ? (
+          <span
+            title={effectiveSubtitle}
             style={{
               display: "flex",
               alignItems: "center",
@@ -152,7 +208,8 @@ export function NodeCard({
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
-              fontSize: 11,
+              fontSize: typo.subSize,
+              fontWeight: typo.subWeight,
               color: errorText ? "var(--destructive)" : "var(--muted-foreground)",
             }}
           >
