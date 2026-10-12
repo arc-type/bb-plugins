@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POLL_MS, startVisiblePoll } from "../lib/visible-poll";
+import { POLL_MS, startVisiblePoll } from "@/lib/visible-poll";
 
 afterEach(() => vi.useRealTimers());
 
