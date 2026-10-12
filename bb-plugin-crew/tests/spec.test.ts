@@ -186,6 +186,57 @@ describe("crew file validation", () => {
     it("positive: no full member needs no confirmation", () => expect(codes(base())).not.toContain("full-unconfirmed"));
   });
 
+  describe("gates.done needs confirmation", () => {
+    const withGate = () => {
+      const spec = base();
+      spec.groups[1]!.members[0]!.gates = { done: ["npm test"] };
+      return spec;
+    };
+    it("negative: a gate without confirmation", () => expect(codes(withGate())).toContain("gates-unconfirmed"));
+    it("positive: a gate with confirmation", () => expect(codes(withGate(), { confirmGates: true })).not.toContain("gates-unconfirmed"));
+    it("positive: no gate needs no confirmation", () => expect(codes(base())).not.toContain("gates-unconfirmed"));
+    it("positive: an empty gate needs no confirmation", () => {
+      const spec = base();
+      spec.groups[1]!.members[0]!.gates = { done: [] };
+      expect(codes(spec)).not.toContain("gates-unconfirmed");
+    });
+  });
+
+  describe("gates.done inheritance", () => {
+    it("member gate replaces group and crew gates", () => {
+      const spec = base();
+      spec.gates = { done: ["crew check"] };
+      spec.groups[1]!.gates = { done: ["group check"] };
+      spec.groups[1]!.members[0]!.gates = { done: ["member check"] };
+      const member = validateCrew(spec, { confirmGates: true }).members.find((m) => m.key === "dev-owner")!;
+      expect(member.gates).toEqual(["member check"]);
+    });
+    it("group gate replaces crew gate and is used when the member has none", () => {
+      const spec = base();
+      spec.gates = { done: ["crew check"] };
+      spec.groups[1]!.gates = { done: ["group check"] };
+      const member = validateCrew(spec, { confirmGates: true }).members.find((m) => m.key === "dev-owner")!;
+      expect(member.gates).toEqual(["group check"]);
+    });
+    it("crew gate is used when neither group nor member has one", () => {
+      const spec = base();
+      spec.gates = { done: ["crew check"] };
+      const member = validateCrew(spec, { confirmGates: true }).members.find((m) => m.key === "dev-owner")!;
+      expect(member.gates).toEqual(["crew check"]);
+    });
+    it("member gates: [] turns the gate off for that member even though the group has one", () => {
+      const spec = base();
+      spec.groups[1]!.gates = { done: ["group check"] };
+      spec.groups[1]!.members[0]!.gates = { done: [] };
+      const member = validateCrew(spec, { confirmGates: true }).members.find((m) => m.key === "dev-owner")!;
+      expect(member.gates).toEqual([]);
+    });
+    it("no gates at any level resolves to []", () => {
+      const member = validateCrew(base(), { confirmGates: true }).members.find((m) => m.key === "dev-owner")!;
+      expect(member.gates).toEqual([]);
+    });
+  });
+
   describe("instruction limit", () => {
     it("positive: short instructions fit", () => expect(codes(base())).not.toContain("instructions-too-long"));
     it("negative: inherited instructions push the member over the limit", () => {
