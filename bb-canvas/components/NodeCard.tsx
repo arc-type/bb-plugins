@@ -80,7 +80,8 @@ function tint(color: string): string {
  *  row is already shown by its incoming edge's "now" state. */
 function visualFor(status: CanvasStatus | undefined, tier: Tier, loadFailed: boolean): Visual {
   const radius = CARD_RADIUS[tier];
-  if (tier === "group") return { border: "none", pulse: false, background: "var(--card)", radius };
+  // Transparent: a header row sits on the canvas, not on a card-coloured block.
+  if (tier === "group") return { border: "none", pulse: false, background: "transparent", radius };
   const failed = loadFailed || status === "failed";
   if (tier === "row") {
     if (failed) return { border: `1.5px solid var(--destructive)`, pulse: false, background: tint("var(--destructive)"), radius };
@@ -138,8 +139,10 @@ export function NodeCard({
         padding: tier === "card" ? "6px 10px" : "0 10px",
         borderRadius: radius,
         border,
-        outline: selected ? "2px solid var(--primary)" : "none",
-        outlineOffset: 1,
+        // --ring, the same ink as the selected-path edge, so ring and path read
+        // as one selection rather than as another "running" accent.
+        outline: selected ? "2px solid var(--ring)" : "none",
+        outlineOffset: 2,
         background,
         color: "var(--foreground)",
         textAlign: "left",
@@ -250,18 +253,8 @@ export function NodeCard({
         >
           <path d="M3.5 8.5l3 3 6-7" />
         </svg>
-      ) : status ? (
-        <span
-          aria-hidden
-          title={status}
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            flexShrink: 0,
-            background: "var(--muted-foreground)",
-          }}
-        />
+      ) : tier !== "group" && status ? (
+        <StatusGlyph status={loadFailed ? "failed" : status} />
       ) : null}
     </button>
   );
@@ -324,5 +317,56 @@ export function NodeCard({
         {count !== null ? <span>{count}</span> : null}
       </button>
     </div>
+  );
+}
+
+const GLYPH_PATHS: Partial<Record<CanvasStatus, { color: string; d: string[] }>> = {
+  failed: { color: "var(--destructive)", d: ["M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5z", "M8 5v3.5M8 11h.01"] },
+  waiting: { color: AMBER, d: ["M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5z", "M8 4.75V8l2.25 1.5"] },
+  escalated: { color: AMBER, d: ["M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5z", "M8 4.75V8l2.25 1.5"] },
+};
+
+/** The state, said once more at the trailing edge in its own colour: a dot
+ *  for running, a line icon for failed/waiting, nothing for idle. Groups
+ *  never get one — they carry no state colour at all. */
+function StatusGlyph({ status }: { status: CanvasStatus }) {
+  if (status === "running") {
+    return (
+      <span
+        aria-hidden
+        data-bb-status-glyph="running"
+        title="running"
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: "var(--primary)",
+          boxShadow: "0 0 0 3px color-mix(in oklab, var(--primary) 25%, transparent)",
+        }}
+      />
+    );
+  }
+  const glyph = GLYPH_PATHS[status];
+  if (!glyph) return null;
+  return (
+    <svg
+      aria-hidden
+      data-bb-status-glyph={status}
+      width={13}
+      height={13}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke={glyph.color}
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <title>{status}</title>
+      {glyph.d.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
   );
 }

@@ -200,3 +200,38 @@ describe("NodeCard keyframes injection", () => {
     expect(document.querySelectorAll("#bb-canvas-node-card-styles")).toHaveLength(1);
   });
 });
+
+describe("NodeCard status glyph and selection ring (BBP-224 design pass)", () => {
+  it.each([
+    ["running", "running"],
+    ["failed", "failed"],
+    ["waiting", "waiting"],
+  ] as const)("shows a %s glyph in its state colour", (status, glyph) => {
+    const { container } = render(<NodeCard label="x" kind="thread" status={status} />);
+    expect(container.querySelector(`[data-bb-status-glyph="${glyph}"]`)).toBeTruthy();
+  });
+
+  it("negative: idle and done draw no state glyph, a group never does", () => {
+    const { container, rerender } = render(<NodeCard label="x" kind="thread" status="idle" />);
+    expect(container.querySelector("[data-bb-status-glyph]")).toBeNull();
+    rerender(<NodeCard label="x" kind="thread" status="done" />);
+    expect(container.querySelector("[data-bb-status-glyph]")).toBeNull();
+    rerender(<NodeCard label="x" kind="crew" status="running" />);
+    expect(container.querySelector("[data-bb-status-glyph]")).toBeNull();
+  });
+
+  it("a load failure shows the failed glyph even on a neutral status", () => {
+    const { container } = render(<NodeCard label="x" kind="thread" status="idle" loadFailed />);
+    expect(container.querySelector('[data-bb-status-glyph="failed"]')).toBeTruthy();
+  });
+
+  it("selection uses the --ring ink of the selected-path edge", () => {
+    render(<NodeCard label="x" selected />);
+    expect(screen.getByRole("button").style.outline).toContain("var(--ring)");
+  });
+
+  it("a group sits transparent on the canvas", () => {
+    render(<NodeCard label="bb-plugins" kind="project" />);
+    expect(screen.getByRole("button").style.background).toBe("transparent");
+  });
+});
