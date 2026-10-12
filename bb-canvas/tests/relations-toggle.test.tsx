@@ -52,6 +52,13 @@ describe("Relations toggle", () => {
     expect(toggle().getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("looks pressed only while on, so the state is visible in the toolbar itself", () => {
+    view();
+    expect(toggle().getAttribute("style")).not.toContain("var(--primary)");
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("style")).toContain("var(--primary)");
+  });
+
   it("a selected member shows its relations highlighted even with the toggle off", () => {
     view();
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "ArrowDown" });

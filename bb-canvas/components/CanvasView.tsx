@@ -29,6 +29,14 @@ const TOOLBAR_BUTTON = {
   fontSize: 11,
   cursor: "pointer",
 } as const;
+// Without a visible pressed state the toggle looked the same on and off —
+// the user could only tell from the canvas whether it had taken.
+const RELATIONS_OFF = { ...TOOLBAR_BUTTON, display: "flex" as const, alignItems: "center" as const, gap: 6 };
+const RELATIONS_ON = {
+  ...RELATIONS_OFF,
+  borderColor: "var(--primary)",
+  background: "color-mix(in srgb, var(--primary) 16%, var(--card))",
+};
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
 /** Floor height so the canvas stays usable even with no sized ancestor
  *  (BBP-173). Tall enough to show a handful of cards, short enough to not
@@ -56,6 +64,7 @@ function saveColorMode(mode: ColorMode): void {
 
 /** What loading a node's children hands back — a thread's turns, typically. */
 export type LoadedChildren = { nodes: readonly CanvasNode[]; edges?: readonly CanvasEdge[] };
+
 
 export type CanvasViewProps = {
   nodes: readonly CanvasNode[];
@@ -494,7 +503,28 @@ export function CanvasView({
             Expand all
           </button>
           {hasRelations ? (
-            <button type="button" onClick={toggleRelations} aria-pressed={showRelations} style={TOOLBAR_BUTTON}>
+            <button
+              type="button"
+              onClick={toggleRelations}
+              aria-pressed={showRelations}
+              title="Show every member's assigns_to / escalates_to links"
+              style={showRelations ? RELATIONS_ON : RELATIONS_OFF}
+            >
+              <svg
+                aria-hidden
+                width={12}
+                height={12}
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="4" cy="4" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <path d="M6 4h2.5a3.5 3.5 0 0 1 3.5 3.5V10" strokeDasharray="2 2" />
+              </svg>
               Relations
             </button>
           ) : null}
