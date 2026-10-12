@@ -13,11 +13,13 @@ beforeAll(async () => {
 });
 afterEach(cleanup);
 
-function canvasPanel(overrides: { rpc?: Record<string, unknown>; sdk?: Record<string, unknown> } = {}) {
+function canvasPanel(
+  overrides: { rpc?: Record<string, unknown>; sdk?: Record<string, unknown>; projectId?: string | null; subPath?: string } = {},
+) {
   const panel = app.navPanels.find((entry) => entry.id === "canvas")!;
   return renderSlot(
     panel,
-    {},
+    { subPath: overrides.subPath ?? "" },
     {
       rpc: {
         canvasLayer: () => ({
@@ -39,7 +41,7 @@ function canvasPanel(overrides: { rpc?: Record<string, unknown>; sdk?: Record<st
         }),
         ...overrides.rpc,
       },
-      context: { projectId: "p1", threadId: null },
+      context: { projectId: overrides.projectId === undefined ? "p1" : overrides.projectId, threadId: null },
       ...(overrides.sdk ? { sdk: overrides.sdk as never } : {}),
     },
   );
@@ -63,9 +65,19 @@ describe("the canvas page", () => {
     expect(await screen.findByRole("button", { name: new RegExp("^Please fix the bug — ") })).toBeTruthy();
   });
 
-  it("shows a message instead of a canvas when no project is open", () => {
-    const panel = app.navPanels.find((entry) => entry.id === "canvas")!;
-    renderSlot(panel, {}, { rpc: { canvasLayer: () => ({ crew: true, nodes: [], edges: [], expanded: [] }) }, context: { projectId: null, threadId: null } });
-    expect(screen.getByText("Open a project to see its canvas.")).toBeTruthy();
+  // BBP-173, measured in BB: on the nav-panel route `/plugins/<id>/canvas`
+  // the host's context carries no projectId, even when opened from a project.
+  it("takes the project from the subPath when the host context has none", async () => {
+    canvasPanel({ projectId: null, subPath: "p1" });
+    expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
+  });
+
+  it("negative: no project anywhere → a project picker that deep-links into the canvas, no empty page", async () => {
+    const slot = canvasPanel({
+      projectId: null,
+      sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }] } },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Blog" }));
+    expect(slot.navigateCalls).toEqual([{ method: "toPluginPanel", path: "canvas", options: { subPath: "p2" } }]);
   });
 });

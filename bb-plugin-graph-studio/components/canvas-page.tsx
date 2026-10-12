@@ -3,7 +3,7 @@
 // Studio owns this page whenever it is active — see `app.tsx` — and pulls
 // crew's layer in through the `canvasLayer` RPC, server-side.
 import { useEffect, useState } from "react";
-import { useBbContext, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
+import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
@@ -19,11 +19,49 @@ function withThreadNodes(nodes: readonly CanvasNode[]): CanvasNode[] {
   return [...nodes, ...threads];
 }
 
-export function CanvasPage() {
+/** Projects to pick from when neither the host nor the URL names one. */
+function ProjectPicker() {
+  const sdk = useSdk();
+  const navigate = useBbNavigate();
+  const [projects, setProjects] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    sdk.projects.list().then(
+      (list) => {
+        if (!cancelled) setProjects(list.map((project) => ({ id: project.id, name: project.name ?? project.id })));
+      },
+      () => {
+        if (!cancelled) setProjects([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [sdk]);
+  return (
+    <div className="flex flex-col items-start gap-2 p-4 text-sm">
+      <p className="text-muted-foreground">Pick a project to see its canvas.</p>
+      {(projects ?? []).map((project) => (
+        <button
+          key={project.id}
+          type="button"
+          className="rounded-md px-2 py-1 hover:bg-muted"
+          onClick={() => navigate.toPluginPanel("canvas", { subPath: project.id })}
+        >
+          {project.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const sdk = useSdk();
   const ctx = useBbContext();
-  const projectId = ctx.projectId ?? null;
+  // BBP-173: on the nav-panel route the host passes no projectId (measured in
+  // BB), so the project also travels as the first subPath segment.
+  const projectId = ctx.projectId ?? (subPath.split("/").find((part) => part.length > 0) ?? null);
   const [layer, setLayer] = useState<{ nodes: CanvasNode[]; edges: CanvasEdge[]; expanded: Set<string> } | null>(
     null,
   );
@@ -53,7 +91,7 @@ export function CanvasPage() {
   }, [rpc, projectId]);
 
   if (projectId === null) {
-    return <div className="p-4 text-sm text-muted-foreground">Open a project to see its canvas.</div>;
+    return <ProjectPicker />;
   }
   if (error) {
     return <div className="p-4 text-sm text-destructive">Canvas not available: {error}</div>;
