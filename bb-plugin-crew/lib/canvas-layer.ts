@@ -6,7 +6,7 @@
 // pulls this layer in; crew shows it itself only while graph-studio is not.
 import type { CanvasLayer } from "../vendor/bb-canvas/lib/layer";
 import { projectNodeId } from "../vendor/bb-canvas/lib/layer";
-import type { CanvasEdge, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
+import type { CanvasEdge, CanvasFrame, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
 import { crewLayers, pathBetween, placeLayers, type CrewMemberRef } from "./canvas-layout";
 import type { MemberInfo } from "./contract";
 import type { CrewStatus } from "./store";
@@ -78,9 +78,7 @@ export function crewCanvasLayer(
   return layer;
 }
 
-// Mirrors bb-canvas's CanvasFrame (BBP-165) until the vendor copy is synced.
-export type CrewCanvasFrame = { id: string; parentId: string | null; label?: string };
-export type CrewTopology = { frames: CrewCanvasFrame[]; nodes: (CanvasNode & { frameId: string })[]; edges: CanvasEdge[] };
+export type CrewTopology = { frames: CanvasFrame[]; nodes: (CanvasNode & { frameId: string })[]; edges: CanvasEdge[] };
 
 export const crewFrameId = (crew: string): string => `frame:${crew}`;
 

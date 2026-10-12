@@ -7,7 +7,7 @@
 // tree read left to right (agents → project → crew → member → …), not a
 // flow chart. Siblings (several members, several run steps) stack as rows
 // within their shared column.
-import type { CanvasEdge, CanvasEdgeState, CanvasNode } from "./types";
+import type { CanvasEdge, CanvasEdgeState, CanvasFrame, CanvasNode } from "./types";
 
 export const NODE_WIDTH = 180;
 export const NODE_HEIGHT = 64;
@@ -16,6 +16,8 @@ export const ROW_GAP = 16;
 export const MARGIN = 24;
 /** How far a back edge's arc bows out past the right edge of its column. */
 const BACK_EDGE_LANE = 32;
+/** Space between a frame's box and the cards it encloses. */
+export const FRAME_PADDING = 16;
 
 export type PlacedNode = {
   id: string;
@@ -40,11 +42,24 @@ export type PlacedEdge = {
   state?: CanvasEdgeState;
 };
 
+/** A frame's bounding box: the padded rectangle around its member cards. */
+export type PlacedFrame = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type TreeLayout = {
   positions: PlacedNode[];
   edges: PlacedEdge[];
   width: number;
   height: number;
+  /** Only present when a `frames` argument was given — absent, not empty, so
+   *  a caller that never passed frames sees exactly the shape it did before
+   *  BBP-165 (negative criterion 1). */
+  frames?: PlacedFrame[];
 };
 
 /**
@@ -61,6 +76,7 @@ export function layoutTree(
   nodes: readonly CanvasNode[],
   expanded: ReadonlySet<string>,
   edges: readonly CanvasEdge[] = [],
+  frames?: readonly CanvasFrame[],
 ): TreeLayout {
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
@@ -150,7 +166,51 @@ export function layoutTree(
   const width = MARGIN * 2 + (maxColumn + 1) * NODE_WIDTH + maxColumn * COLUMN_GAP + BACK_EDGE_LANE;
   const height = MARGIN * 2 + maxRow * (NODE_HEIGHT + ROW_GAP) - (maxRow > 0 ? ROW_GAP : 0) + NODE_HEIGHT;
 
-  return { positions: [...placed.values()], edges: [...flowEdges, ...declaredEdges], width, height };
+  const layout: TreeLayout = {
+    positions: [...placed.values()],
+    edges: [...flowEdges, ...declaredEdges],
+    width,
+    height,
+  };
+  if (frames === undefined) return layout;
+  return { ...layout, frames: placeFrames(frames, nodes, placed) };
+}
+
+/** A frame with no visible member node is dropped rather than drawn with an
+ *  empty or default-sized box — a collapsed crew must not leave a stray
+ *  rectangle behind. */
+function placeFrames(
+  frames: readonly CanvasFrame[],
+  nodes: readonly CanvasNode[],
+  placed: Map<string, PlacedNode>,
+): PlacedFrame[] {
+  const membersOf = new Map<string, PlacedNode[]>();
+  for (const node of nodes) {
+    if (!node.frameId) continue;
+    const placedNode = placed.get(node.id);
+    if (!placedNode) continue;
+    const list = membersOf.get(node.frameId) ?? [];
+    list.push(placedNode);
+    membersOf.set(node.frameId, list);
+  }
+
+  return frames.flatMap((frame) => {
+    const members = membersOf.get(frame.id);
+    if (!members || members.length === 0) return [];
+    const minX = Math.min(...members.map((m) => m.x));
+    const minY = Math.min(...members.map((m) => m.y));
+    const maxX = Math.max(...members.map((m) => m.x + m.width));
+    const maxY = Math.max(...members.map((m) => m.y + m.height));
+    return [
+      {
+        id: frame.id,
+        x: minX - FRAME_PADDING,
+        y: minY - FRAME_PADDING,
+        width: maxX - minX + FRAME_PADDING * 2,
+        height: maxY - minY + FRAME_PADDING * 2,
+      },
+    ];
+  });
 }
 
 /** A tree line's state follows the child it leads to, not a declared edge —

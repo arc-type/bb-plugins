@@ -26,6 +26,19 @@ export type CanvasNode = {
    *  take the rest of the tree down with it. */
   parentId: string | null;
   meta?: Record<string, unknown>;
+  /** The frame this node's card sits inside, if any (BBP-165). */
+  frameId?: string;
+};
+
+/**
+ * A visual grouping drawn behind a set of nodes — e.g. a crew's lead and
+ * members — rather than a property of a single node. `parentId` nests one
+ * frame inside another; `null` roots it, the same convention as `CanvasNode`.
+ */
+export type CanvasFrame = {
+  id: string;
+  parentId: string | null;
+  label?: string;
 };
 
 export type CanvasEdgeVariant = "flow" | "back" | "message";
