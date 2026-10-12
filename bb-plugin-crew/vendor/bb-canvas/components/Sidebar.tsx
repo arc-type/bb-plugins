@@ -5,7 +5,7 @@
 // lazily load into this same slot.
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { clampWidth, DEFAULT_WIDTH, fitWidth, maxWidthFor, MIN_WIDTH } from "../lib/clampWidth";
-import { curateMeta, type CanvasNode, type CanvasStatus } from "../lib/types";
+import { curateMeta, type CanvasNode, type CuratedField, type CanvasStatus } from "../lib/types";
 import type { RelationGroup } from "../lib/relations";
 import { KindIcon, KIND_LABEL } from "./KindIcon";
 
@@ -234,7 +234,7 @@ function numberMeta(node: CanvasNode, key: string): number | undefined {
 }
 
 export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect }: SidebarProps) {
-  const { curated, details } = curateMeta(node.kind, node.meta);
+  const { curated, details, debug } = curateMeta(node.kind, node.meta);
   const runId = onOpenRun ? stringMeta(node, "runId") : undefined;
   const crew = onOpenCrew ? stringMeta(node, "crew") : undefined;
   const atRowThreadId = onOpenAtRow ? stringMeta(node, "threadId") : undefined;
@@ -426,25 +426,31 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, on
           ) : null}
         </div>
       ) : null}
-      {details.length > 0 ? (
-        <details>
-          <summary
-            style={{
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: "var(--muted-foreground)",
-            }}
-          >
-            Details
-          </summary>
-          <div style={{ marginTop: 8 }}>
-            <FieldList fields={details} />
-          </div>
-        </details>
-      ) : null}
+      {details.length > 0 ? <Collapsed title="Details" fields={details} /> : null}
+      {debug.length > 0 ? <Collapsed title="Debug" fields={debug} /> : null}
     </aside>
+  );
+}
+
+/** A closed-by-default block of fields under an uppercase summary. */
+function Collapsed({ title, fields }: { title: string; fields: CuratedField[] }) {
+  return (
+    <details>
+      <summary
+        style={{
+          cursor: "pointer",
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          color: "var(--muted-foreground)",
+        }}
+      >
+        {title}
+      </summary>
+      <div style={{ marginTop: 8 }}>
+        <FieldList fields={fields} />
+      </div>
+    </details>
   );
 }

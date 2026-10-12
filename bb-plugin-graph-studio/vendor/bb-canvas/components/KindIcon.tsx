@@ -49,7 +49,16 @@ const CHILD_NOUN: Partial<Record<CanvasNodeKind, [string, string]>> = {
  *  that tells it apart from its siblings ("Crew · 9 members", "Member ·
  *  claude-opus-5-5"). Everything else lives in the sidebar. */
 export function describeNode(kind: CanvasNodeKind, childCount: number, meta?: Record<string, unknown>): string {
+  if (kind === "thread") {
+    const facts = [meta?.state, meta?.provider].filter((value): value is string => typeof value === "string" && value !== "");
+    return facts.length > 0 ? facts.join(" · ") : KIND_LABEL.thread;
+  }
   const parts = [KIND_LABEL[kind]];
+  // An enriched turn's label is its first line, so the step count moves here.
+  const steps = meta?.summaryCount;
+  if (kind === "turn" && typeof steps === "number" && typeof meta?.firstLine === "string" && meta.firstLine !== "") {
+    parts.push(`${steps} ${steps === 1 ? "step" : "steps"}`);
+  }
   const noun = CHILD_NOUN[kind];
   if (noun && childCount > 0) parts.push(`${childCount} ${childCount === 1 ? noun[0] : noun[1]}`);
   const model = typeof meta?.model === "string" ? meta.model.split("/").pop() : undefined;

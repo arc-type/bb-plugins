@@ -39,4 +39,22 @@ describe("KindIcon", () => {
     expect(path).toBeTruthy();
     expect(describeNode("system-event", 0)).toBe("System event");
   });
+
+  it("describes a thread by its state and provider (BBP-206 R2c)", () => {
+    expect(describeNode("thread", 0, { state: "idle", provider: "pi" })).toBe("idle · pi");
+    expect(describeNode("thread", 0, { provider: "pi" })).toBe("pi");
+    expect(describeNode("thread", 0, { state: "", provider: undefined })).toBe("Thread");
+    expect(describeNode("thread", 0)).toBe("Thread");
+  });
+
+  it("describes a turn by its step count once its label is the first line", () => {
+    expect(describeNode("turn", 0, { summaryCount: 9, firstLine: "Add dark mode" })).toBe("Turn · 9 steps");
+    expect(describeNode("turn", 0, { summaryCount: 1, firstLine: "Hi" })).toBe("Turn · 1 step");
+    // Not enriched yet: the label still reads "Turn · n steps", no repeat.
+    expect(describeNode("turn", 0, { summaryCount: 9 })).toBe("Turn");
+  });
+
+  it("describes a tool call as a tool call", () => {
+    expect(describeNode("tool-call", 0, { toolName: "Bash" })).toBe("Tool call");
+  });
 });
