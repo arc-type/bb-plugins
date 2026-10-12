@@ -315,6 +315,39 @@ describe("CanvasView lazy children", () => {
     expect(errorSpy.mock.calls[0]).toContain(error);
     errorSpy.mockRestore();
   });
+
+  it("shows a visible error on the card when loadChildren fails, not just a silent empty card", async () => {
+    const loadChildren = vi.fn(async () => {
+      throw new Error("timeline fetch failed");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />);
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    expect(await screen.findByText("Could not load activity")).toBeTruthy();
+    vi.restoreAllMocks();
+  });
+
+  it("retries the load when the failed card is clicked again", async () => {
+    const loadChildren = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timeline fetch failed"))
+      .mockResolvedValueOnce({
+        nodes: [{ id: "m1:turn-1", kind: "turn" as const, label: "Turn 1", parentId: "m1" }],
+      });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} loadChildren={loadChildren} />);
+    const root = document.querySelector("[data-canvas-view]")!;
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    await screen.findByText("Could not load activity");
+    fireEvent.click(card(new RegExp("^orch-lead — ")));
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: /^Turn 1 — / })).toBeTruthy();
+    expect(screen.queryByText("Could not load activity")).toBeNull();
+    expect(loadChildren).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
 });
 
 describe("CanvasView sidebar action wiring (BBP-185)", () => {

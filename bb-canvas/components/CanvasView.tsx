@@ -125,6 +125,10 @@ export function CanvasView({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [loaded, setLoaded] = useState<ReadonlyMap<string, LoadedChildren>>(new Map());
+  // BBP-179: a thread whose `loadChildren` rejected — cleared the moment a
+  // retry (clicking the card again) resolves, so the error never outlives
+  // the state that caused it.
+  const [failedLoads, setFailedLoads] = useState<ReadonlySet<string>>(new Set());
   const [colorMode, setColorMode] = useState<ColorMode>(() => loadColorMode());
   // Only one frame editable at a time (BBP-166): entering a second frame's
   // edit mode without an `Escape` first is a no-op, not a silent switch.
@@ -240,14 +244,22 @@ export function CanvasView({
       (result) => {
         loading.current.delete(id);
         setLoaded((prev) => new Map(prev).set(id, result));
+        setFailedLoads((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
       },
       (error: unknown) => {
         loading.current.delete(id);
         // BBP-179: a rejected load used to vanish — the card just stayed
         // empty, indistinguishable from "this thread genuinely has no
-        // turns". Surfacing it here at least makes a real failure
-        // diagnosable from the console, rather than silently uncountable.
+        // turns". Surfacing it here, and as a visible error on the card
+        // itself (NodeCard's `loadFailed`), makes a real failure
+        // diagnosable instead of silently uncountable.
         console.error(`bb-canvas: failed to load children for node "${id}"`, error);
+        setFailedLoads((prev) => new Set(prev).add(id));
       },
     );
   }
@@ -263,6 +275,13 @@ export function CanvasView({
   }
 
   function toggle(id: string) {
+    // A failed load already left the node "expanded" with nothing to show;
+    // toggling it again must retry, not collapse it right back to looking
+    // like a leaf with no error.
+    if (failedLoads.has(id)) {
+      startLoad(id);
+      return;
+    }
     if (expanded.has(id)) collapse(id);
     else expand(id);
   }
@@ -445,6 +464,7 @@ export function CanvasView({
             onSelect={select}
             colorMode={effectiveColorMode}
             dimmedIds={dimmedIds}
+            failedLoads={failedLoads}
           />
         </div>
         {editingFrameId !== null

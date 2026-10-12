@@ -84,6 +84,27 @@ describe("NodeCard status border (BBP-146)", () => {
     expect(screen.getByRole("button").style.border).toContain("var(--destructive)");
   });
 
+  it("shows a visible error instead of its subtitle when loadFailed is set", () => {
+    render(<NodeCard label="Thread" subtitle="Thread · 3 turns" loadFailed />);
+    expect(screen.getByText("Could not load activity")).toBeTruthy();
+    expect(screen.queryByText("Thread · 3 turns")).toBeNull();
+  });
+
+  it("gives a failed card the destructive border, even in type colour mode", () => {
+    render(<NodeCard label="Thread" kind="thread" colorMode="type" loadFailed />);
+    expect(screen.getByRole("button").style.border).toContain("var(--destructive)");
+  });
+
+  it("folds the error into the accessible name, so a retry click has a distinct target", () => {
+    render(<NodeCard label="Thread" loadFailed />);
+    expect(screen.getByRole("button", { name: "Thread — Could not load activity" })).toBeTruthy();
+  });
+
+  it("shows no error state when loadFailed is absent", () => {
+    render(<NodeCard label="Thread" subtitle="Thread · 3 turns" />);
+    expect(screen.queryByText("Could not load activity")).toBeNull();
+  });
+
   it("injects its keyframes once, no matter how many cards render", () => {
     render(
       <>

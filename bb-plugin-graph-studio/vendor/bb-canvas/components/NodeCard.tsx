@@ -31,6 +31,11 @@ export type NodeCardProps = {
   /** A card that can open gets a chevron beside it (BBP-183); a leaf gets
    *  none. Collapsed, the chevron also carries the child count. */
   expander?: { expanded: boolean; childCount: number; onToggle: () => void };
+  /** A lazy load that failed (BBP-179): replaces the subtitle with a visible
+   *  "Could not load activity" instead of leaving the card looking like it
+   *  simply has nothing — the destructive border wins even over a neutral
+   *  `status`, and clicking the card (or its chevron) retries. */
+  loadFailed?: boolean;
 };
 
 /** One fixed accent per kind — not derived from the id, unlike aside's
@@ -78,8 +83,13 @@ type Border = { border: string; pulse: boolean };
 
 /** Status beats type beats neutral — an error or a running card must read
  *  the same regardless of which colour mode the toolbar is set to. */
-function borderFor(status: CanvasStatus | undefined, kind: CanvasNodeKind | undefined, colorMode: NodeCardColorMode): Border {
-  if (status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
+function borderFor(
+  status: CanvasStatus | undefined,
+  kind: CanvasNodeKind | undefined,
+  colorMode: NodeCardColorMode,
+  loadFailed: boolean,
+): Border {
+  if (loadFailed || status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
   // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
   // state that needs the human — it must not read weaker than "running".
   if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false };
@@ -102,13 +112,16 @@ export function NodeCard({
   onClick,
   dimmed = false,
   expander,
+  loadFailed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
-  const { border, pulse } = borderFor(status, kind, colorMode);
+  const { border, pulse } = borderFor(status, kind, colorMode, loadFailed);
+  const errorText = loadFailed ? "Could not load activity" : undefined;
+  const effectiveSubtitle = errorText ?? subtitle;
   const card = (
     <button
       type="button"
-      aria-label={subtitle ? `${label} — ${subtitle}` : label}
+      aria-label={effectiveSubtitle ? `${label} — ${effectiveSubtitle}` : label}
       aria-pressed={selected}
       aria-disabled={dimmed}
       onClick={dimmed ? undefined : onClick}
@@ -154,17 +167,37 @@ export function NodeCard({
         >
           {label}
         </span>
-        {subtitle ? (
+        {effectiveSubtitle ? (
           <span
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               fontSize: 11,
-              color: "var(--muted-foreground)",
+              color: errorText ? "var(--destructive)" : "var(--muted-foreground)",
             }}
           >
-            {subtitle}
+            {errorText ? (
+              <svg
+                aria-hidden
+                width={10}
+                height={10}
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M8 2.5 1.5 13.5h13z" />
+                <path d="M8 6.5v3.5M8 12h.01" />
+              </svg>
+            ) : null}
+            {effectiveSubtitle}
           </span>
         ) : null}
       </span>
