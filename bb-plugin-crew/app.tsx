@@ -169,11 +169,51 @@ function HeaderContent() {
   // Every project's crews: the panel below shows one project, so the badge says where the rest are.
   const { errors, decisions } = useNeedsYou();
   return (
-    <NeedsYouBadge
-      errors={errors}
-      decisions={decisions}
-      title="Members that need you, across all projects — the project switch shows them per project"
-    />
+    <div className="flex items-center gap-2">
+      <CanvasEntry />
+      <NeedsYouBadge
+        errors={errors}
+        decisions={decisions}
+        title="Members that need you, across all projects — the project switch shows them per project"
+      />
+    </div>
+  );
+}
+
+/** BBP-179: the way into crew's own canvas, which has no nav entry (Graph
+ *  Studio owns "Activity Canvas"). Hidden while Graph Studio is active —
+ *  crews/canvas would only point there. */
+function CanvasEntry() {
+  const rpc = useRpcBridge();
+  const navigate = useBbNavigate();
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    rpc.call("canvasPage", {}).then(
+      (result) => !cancelled && setVisible(result.visible),
+      // Same fallback as the page: unsure about Graph Studio, offer the way in.
+      () => !cancelled && setVisible(true),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc]);
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => navigate.toPluginPanel("crews", { subPath: "canvas" })}
+      title="Crews and members as one navigation tree"
+      className="flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs text-foreground hover:bg-muted"
+    >
+      <svg aria-hidden width={12} height={12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="1.5" y="6" width="4" height="4" rx="1" />
+        <rect x="10.5" y="2" width="4" height="4" rx="1" />
+        <rect x="10.5" y="10" width="4" height="4" rx="1" />
+        <path d="M5.5 8h2.5M8 4v8M8 4h2.5M8 12h2.5" />
+      </svg>
+      Activity canvas
+    </button>
   );
 }
 
