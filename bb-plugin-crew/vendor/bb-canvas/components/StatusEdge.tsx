@@ -1,9 +1,11 @@
 // One edge component for the three shapes `layoutTree` draws: `flow` along
 // the tree, `back` bowing out to the right of its column, `message` as a
 // plain dashed line (its pulse and counter land later, once there is
-// traffic to show one for) — and, since BBP-146, the two states any `flow`
-// or `back` edge can carry: `taken` (solid primary) and `now` (the same,
-// with a dash that travels along it).
+// traffic to show one for) — and, since BBP-146, the one state any `flow`
+// or `back` edge can carry: `now` (solid primary with a dash that travels
+// along it). BBP-214 stage 1 removed the other state, `taken`: a finished or
+// failed child drew the same solid line as a running one, so completed work
+// looked indistinguishable from activity.
 //
 // A relation edge (BBP-202) shows its label only on hover or when its
 // selection highlights it, and dims when another node's relations are in
@@ -37,8 +39,7 @@ const NOW_CLASS = "bb-canvas-edge-now";
 const STYLE_ID = "bb-canvas-status-edge-styles";
 
 /** Injected once, module-wide — React has no `@keyframes`. Reduced motion
- *  keeps the dash (so "now" still reads differently from "taken") but drops
- *  the travel. */
+ *  keeps the dash but drops the travel animation. */
 function ensureNowStyles(): void {
   if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
@@ -54,7 +55,7 @@ function ensureNowStyles(): void {
 }
 
 function strokeFor(state: CanvasEdgeState | undefined, selected: boolean | undefined): { stroke: string; strokeWidth: number } {
-  if (state === "taken" || state === "now") return { stroke: "var(--primary)", strokeWidth: 2 };
+  if (state === "now") return { stroke: "var(--primary)", strokeWidth: 2 };
   return { stroke: selected ? "var(--primary)" : "var(--border)", strokeWidth: selected ? 2 : 1.5 };
 }
 

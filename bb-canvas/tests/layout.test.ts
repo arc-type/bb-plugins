@@ -127,13 +127,22 @@ describe("layoutTree", () => {
       expect(edges[0]!.state).toBeUndefined();
     });
 
-    it("marks a tree line 'taken' once its child has a status other than running", () => {
+    it("leaves a tree line to a done child neutral — 'taken' is gone (BBP-214 stage 1)", () => {
       const nodes = [
         node("run", null, { kind: "graph-run" }),
         node("a", "run", { kind: "step", status: "done" }),
       ];
       const { edges } = layoutTree(nodes, new Set(["run"]));
-      expect(edges[0]!.state).toBe("taken");
+      expect(edges[0]!.state).toBeUndefined();
+    });
+
+    it("negative: a failed child's tree line is neutral too, only 'running' lights the line", () => {
+      const nodes = [
+        node("run", null, { kind: "graph-run" }),
+        node("a", "run", { kind: "step", status: "failed" }),
+      ];
+      const { edges } = layoutTree(nodes, new Set(["run"]));
+      expect(edges[0]!.state).toBeUndefined();
     });
 
     it("marks a tree line 'now' while its child is running", () => {

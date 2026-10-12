@@ -216,16 +216,13 @@ function placeFrames(
 }
 
 /** A tree line's state follows the child it leads to, not a declared edge —
- *  there is no `CanvasEdge` for it to read one from. A child with no status
- *  was never attempted; `running` is "now"; anything else it already has a
- *  status for was attempted, so the line is "taken" — except `idle`, which is
- *  also what a `skipped` step maps to: routing did not go there. */
+ *  there is no `CanvasEdge` for it to read one from. Only a child that is
+ *  actually `running` lights the line up ("now"); a finished or failed child
+ *  draws the plain neutral line like anything else — "taken" is gone
+ *  (BBP-214 stage 1): a line to a `done` step must not look like ongoing
+ *  activity. */
 function flowEdgeState(child: CanvasNode): CanvasEdgeState | undefined {
-  // `idle` is a status, but nothing went there: an idle crew member must not
-  // light its line up like a step the run passed through, or every member
-  // list turns blue and the run's real path disappears in it.
-  if (child.status === undefined || child.status === "idle") return undefined;
-  return child.status === "running" ? "now" : "taken";
+  return child.status === "running" ? "now" : undefined;
 }
 
 function flowEdge(from: PlacedNode, to: PlacedNode, toNode: CanvasNode): PlacedEdge {
