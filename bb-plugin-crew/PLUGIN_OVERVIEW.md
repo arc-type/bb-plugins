@@ -79,7 +79,7 @@ Studio graph itself with `crew_graph_run`.
 
 ## Requirements and limits
 
-Requires BB 0.44 or later and Plugin SDK 0.5.29 or later. No extra service or
+Requires BB 0.44 or later and Plugin SDK 0.6.15 or later. No extra service or
 account; members run on the providers BB is already configured with.
 
 Merge, rebase and checks run git on the machine BB runs on. Worktrees on other

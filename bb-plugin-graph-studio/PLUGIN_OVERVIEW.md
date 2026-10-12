@@ -87,7 +87,7 @@ tools.
 
 ## Requirements
 
-Requires BB 0.42+ and Plugin SDK 0.5.29+. No extra service, account or API
+Requires BB 0.42+ and Plugin SDK 0.6.15+. No extra service, account or API
 key — runs use the providers BB already has.
 
 The Work templates run their steps on

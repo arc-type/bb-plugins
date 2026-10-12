@@ -33,7 +33,7 @@ bb plugin install git:https://github.com/sajov/bb-plugins.git \
   --subdirectory bb-plugin-crew
 ```
 
-Requires BB with plugin SDK 0.5.29 or newer.
+Requires BB with plugin SDK 0.6.15 or newer.
 
 ## A crew file
 
