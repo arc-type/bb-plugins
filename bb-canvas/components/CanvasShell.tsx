@@ -107,6 +107,7 @@ function CanvasFrameView({
 const NODE_TYPES = { canvasNode: CanvasNodeView, canvasFrame: CanvasFrameView };
 const EDGE_TYPES = { statusEdge: StatusEdge };
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
+const FIT_VIEW_OPTIONS = { padding: 0.08 };
 
 export type CanvasShellProps = {
   nodes: readonly CanvasNode[];
@@ -114,6 +115,9 @@ export type CanvasShellProps = {
   /** Cards that get a chevron (BBP-183); absent: none do. */
   expandable?: ReadonlySet<string>;
   onToggle?: (nodeId: string) => void;
+  /** Bump to re-fit the view to the whole tree — after Collapse all /
+   *  Expand all, whose new layout otherwise sits off screen (BBP-179). */
+  fitRequest?: number;
   edges?: readonly CanvasEdge[];
   frames?: readonly CanvasFrame[];
   selectedId?: string | null;
@@ -230,6 +234,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     expanded,
     expandable = EMPTY_DIMMED,
     onToggle,
+    fitRequest = 0,
     edges = [],
     frames = [],
     selectedId,
@@ -247,6 +252,14 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     () => toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle),
     [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle],
   );
+
+  useEffect(() => {
+    if (fitRequest === 0) return;
+    // A frame later: React Flow takes the new nodes into its store in its
+    // own effect, and fitting before that fits the old tree.
+    const frame = requestAnimationFrame(() => void flow.fitView(FIT_VIEW_OPTIONS));
+    return () => cancelAnimationFrame(frame);
+  }, [fitRequest, flow]);
 
   useImperativeHandle(
     handleRef,
@@ -277,7 +290,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         zoomOnScroll
         panOnScroll={false}
         fitView
-        fitViewOptions={{ padding: 0.08 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         // React Flow's default floor (0.5) is too high for a real tree: two
         // crews with ten members each no longer fit, so the start view and
         // `0` cut off the top instead of showing the whole tree.

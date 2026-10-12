@@ -11,9 +11,11 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 
 createServer(async (req, res) => {
-  const path = req.url === "/" ? "/index.html" : (req.url ?? "/index.html");
+  const url = req.url === "/" ? "/index.html" : (req.url ?? "/index.html");
+  // The query (`?width=370`) is for the page, not part of the file name.
+  const path = url.split("?")[0];
   try {
-    const body = await readFile(join(root, path.split("?")[0]));
+    const body = await readFile(join(root, path));
     res.writeHead(200, { "content-type": TYPES[extname(path)] ?? "application/octet-stream" });
     res.end(body);
   } catch {

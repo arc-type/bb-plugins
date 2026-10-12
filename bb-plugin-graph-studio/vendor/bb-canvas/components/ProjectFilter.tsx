@@ -1,6 +1,7 @@
 // The toolbar's project multi-select (BBP-181). Nothing ticked means all
 // projects, so the button never reads as an empty or broken filter.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { placePopover } from "../lib/popover";
 import type { ProjectOption } from "../lib/project-filter";
 
 export type ProjectFilterProps = {
@@ -8,6 +9,8 @@ export type ProjectFilterProps = {
   selected: readonly string[];
   onChange: (ids: string[]) => void;
 };
+
+const POPOVER_WIDTH = 240;
 
 function summary(projects: readonly ProjectOption[], selected: readonly string[]): string {
   const chosen = projects.filter((project) => selected.includes(project.id));
@@ -19,6 +22,17 @@ function summary(projects: readonly ProjectOption[], selected: readonly string[]
 export function ProjectFilter({ projects, selected, onChange }: ProjectFilterProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
+  const [place, setPlace] = useState<{ offset: number; width: number } | null>(null);
+
+  // Measured on open: the canvas may sit in a slim panel, and the button's
+  // spot in a wrapped toolbar is only known once laid out.
+  useLayoutEffect(() => {
+    if (!open || !root.current) return;
+    const anchor = root.current.getBoundingClientRect();
+    const canvas = root.current.closest("[data-canvas-view]")?.getBoundingClientRect();
+    const bounds = canvas && canvas.width > 0 ? canvas : { left: 0, right: window.innerWidth };
+    setPlace(placePopover(anchor, bounds, POPOVER_WIDTH));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -82,10 +96,11 @@ export function ProjectFilter({ projects, selected, onChange }: ProjectFilterPro
           aria-label="Projects"
           style={{
             position: "absolute",
-            right: 0,
+            left: place?.offset ?? 0,
             top: "calc(100% + 4px)",
             zIndex: 10,
-            minWidth: 200,
+            width: place?.width ?? POPOVER_WIDTH,
+            boxSizing: "border-box",
             maxHeight: 280,
             overflowY: "auto",
             padding: 4,
@@ -119,7 +134,7 @@ export function ProjectFilter({ projects, selected, onChange }: ProjectFilterPro
             projects.map((project) => (
               <label key={project.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
                 <input type="checkbox" checked={selected.includes(project.id)} onChange={() => toggle(project.id)} />
-                {project.name}
+                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{project.name}</span>
               </label>
             ))
           )}
