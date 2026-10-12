@@ -19,6 +19,7 @@ import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/li
 import { threadNodeFor, timelineToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
+import { startVisiblePoll } from "../lib/visible-poll";
 import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
 import type { rpcContract } from "../server";
 
@@ -109,46 +110,54 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   useEffect(() => {
     if (shown === null || projects === null || visible !== true) return;
     let cancelled = false;
+    // Only a new project set clears the page; a poll swaps the layer in
+    // place, so the view keeps its selection, cards and viewport (BBP-200).
     setLayer(null);
     const labels = new Map(projects.map((project) => [project.id, project.name]));
-    Promise.all(
-      shown.map((projectId) =>
-        rpc.call("canvasLayer", { projectId }).then((result) => ({ projectId, result })),
-      ),
-    ).then(
-      (results) => {
-        if (cancelled) return;
-        // Each project is its own root under `agents`; `mergeLayers` keeps
-        // the one `agents` node they all share.
-        const page = mergeLayers(
-          ...results.map(({ projectId, result }) =>
-            withRoots(projectId, labels.get(projectId) ?? projectId, { nodes: result.nodes, edges: result.edges, expanded: result.expanded }),
-          ),
-        );
-        const frameProjects = new Map<string, string>();
-        const frames: CanvasFrame[] = [];
-        for (const { projectId, result } of results) {
-          for (const frame of result.frames ?? []) {
-            if (frameProjects.has(frame.id)) continue;
-            frameProjects.set(frame.id, projectId);
-            frames.push(frame);
+    const load = (initial: boolean) =>
+      Promise.all(
+        shown.map((projectId) =>
+          rpc.call("canvasLayer", { projectId }).then((result) => ({ projectId, result })),
+        ),
+      ).then(
+        (results) => {
+          if (cancelled) return;
+          // Each project is its own root under `agents`; `mergeLayers` keeps
+          // the one `agents` node they all share.
+          const page = mergeLayers(
+            ...results.map(({ projectId, result }) =>
+              withRoots(projectId, labels.get(projectId) ?? projectId, { nodes: result.nodes, edges: result.edges, expanded: result.expanded }),
+            ),
+          );
+          const frameProjects = new Map<string, string>();
+          const frames: CanvasFrame[] = [];
+          for (const { projectId, result } of results) {
+            for (const frame of result.frames ?? []) {
+              if (frameProjects.has(frame.id)) continue;
+              frameProjects.set(frame.id, projectId);
+              frames.push(frame);
+            }
           }
-        }
-        setLayer({
-          nodes: withThreadNodes(page.nodes),
-          edges: [...page.edges],
-          expanded: new Set(page.expanded),
-          frames,
-          frameProjects,
-        });
-        setError(null);
-      },
-      (cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      },
-    );
+          setLayer({
+            nodes: withThreadNodes(page.nodes),
+            edges: [...page.edges],
+            expanded: new Set(page.expanded),
+            frames,
+            frameProjects,
+          });
+          setError(null);
+        },
+        (cause: unknown) => {
+          // A failed poll keeps the last good tree on screen; only the
+          // first load has nothing better to show than the error.
+          if (!cancelled && initial) setError(cause instanceof Error ? cause.message : String(cause));
+        },
+      );
+    void load(true);
+    const stopPolling = startVisiblePoll(() => void load(false));
     return () => {
       cancelled = true;
+      stopPolling();
     };
     // `shownKey` stands in for `shown`, which is a fresh array on every filter change.
   }, [rpc, shownKey, visible]);

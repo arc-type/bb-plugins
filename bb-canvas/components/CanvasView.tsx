@@ -204,6 +204,11 @@ export function CanvasView({
   }
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
+  // BBP-200: a poll can drop the selected node. Forgetting the id, not just
+  // hiding the sidebar, keeps it from coming back selected on a later poll.
+  useEffect(() => {
+    if (selectedId !== null && !byId.has(selectedId)) setSelectedId(null);
+  }, [byId, selectedId]);
   const selectedDetails = selected ? details.get(selected.id) : undefined;
   const sidebarNode = useMemo(
     () => (selected && selectedDetails ? { ...selected, meta: { ...selected.meta, ...selectedDetails } } : selected),

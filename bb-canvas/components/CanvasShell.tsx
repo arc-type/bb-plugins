@@ -22,6 +22,57 @@ import { Frame, type FrameProps } from "./Frame";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
+import { MOTION_CSS, MOTION_MS, planMotion } from "../lib/tree-motion";
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function usePrefersReducedMotion(): boolean {
+  const query = () => typeof matchMedia === "function" && matchMedia(REDUCED_MOTION_QUERY).matches;
+  const [reduced, setReduced] = useState(query);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const media = matchMedia(REDUCED_MOTION_QUERY);
+    const update = () => setReduced(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+/** The next nodes tagged for motion (BBP-200), plus the removed ones as
+ *  ghosts that fade out and are dropped after `MOTION_MS`. The diff is taken
+ *  against the nodes on screen when the set of ids last changed — the flow
+ *  nodes are rebuilt on every render (a selection, say), and diffing against
+ *  the last render would turn a just-entered node into a kept one at once. */
+function useNodeMotion(next: Node[], reducedMotion: boolean): Node[] {
+  const key = next.map((node) => node.id).join("\n");
+  const last = useRef<Node[] | null>(null);
+  const base = useRef<{ key: string; previous: Node[] | null }>({ key, previous: null });
+  if (base.current.key !== key) base.current = { key, previous: last.current };
+  const previous = base.current.previous;
+  const plan = useMemo(() => planMotion(previous, next, reducedMotion), [previous, next, reducedMotion]);
+  const [ghosts, setGhosts] = useState<Node[]>([]);
+  useEffect(() => {
+    last.current = next;
+  });
+  useEffect(() => {
+    // The cleanup below cancelled the previous fade's timer, so its ghosts
+    // go now rather than linger.
+    setGhosts(plan.exiting);
+    if (plan.exiting.length === 0) return;
+    const timer = setTimeout(() => setGhosts([]), MOTION_MS);
+    return () => clearTimeout(timer);
+    // Only a new id set starts a fade-out; `plan` is rebuilt on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return useMemo(() => {
+    if (reducedMotion || ghosts.length === 0) return plan.nodes;
+    const present = new Set(plan.nodes.map((node) => node.id));
+    // A ghost is gone from the tree: hidden from assistive tech and queries.
+    const fading = ghosts.filter((ghost) => !present.has(ghost.id)).map((ghost) => ({ ...ghost, domAttributes: { "aria-hidden": true } }));
+    return [...plan.nodes, ...fading];
+  }, [plan, ghosts, reducedMotion]);
+}
 
 /** React Flow's colour mode, read from the BB theme actually on screen —
  *  left at its default, React Flow paints white chrome inside a dark host. */
@@ -260,6 +311,9 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
 
+  const reducedMotion = usePrefersReducedMotion();
+  const animatedNodes = useNodeMotion(flowNodes, reducedMotion);
+
   useEffect(() => {
     if (fitRequest === 0) return;
     // A frame later: React Flow takes the new nodes into its store in its
@@ -280,8 +334,9 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
 
   return (
     <div ref={hostRef} className={className} style={{ width: "100%", height: "100%" }}>
+      <style>{MOTION_CSS}</style>
       <ReactFlow
-        nodes={flowNodes}
+        nodes={animatedNodes}
         edges={flowEdges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
@@ -298,6 +353,8 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         panOnScroll
         zoomOnPinch
         zoomActivationKeyCode={["Meta", "Control"]}
+        // Fits the first tree only: a later update (a poll, BBP-200) keeps
+        // the user's zoom and pan.
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         // React Flow's default floor (0.5) is too high for a real tree: two
