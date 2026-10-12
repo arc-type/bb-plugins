@@ -990,3 +990,46 @@ describe("timelineToCanvas: turn titles from the triggering request (BBP-228)", 
     expect(nodes[0]!.meta).not.toHaveProperty("firstLine");
   });
 });
+
+describe("BBP-228 acceptance: request-kind × provider fixture matrix", () => {
+  it("Claude Code, plain user message: card title is the request's own first line", () => {
+    const { nodes } = timelineToCanvas("thr_sytz3rn8g6", {
+      rows: [fixtures.ccConversationUserMessage as TimelineRowLike, fixtures.ccTurnUserMessage as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("Apply these skills first and work to what they …");
+    expect(nodes[0]!.meta!.firstLine).toBe("Apply these skills first and work to what they say: `tdd`, `codebase-design`.");
+  });
+
+  it("Claude Code, [bb system] message: card title strips the prefix", () => {
+    const { nodes } = timelineToCanvas("thr_rqqw5vi4yw", {
+      rows: [fixtures.ccConversationSystemMessage as TimelineRowLike, fixtures.ccTurnSystemMessage as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("Child thread updates:");
+  });
+
+  it("Pi, plain user message without turnId: assigned to the next turn by sourceSeqStart", () => {
+    const { nodes } = timelineToCanvas("thr_chzrjy3k4r", {
+      rows: [fixtures.piConversationUserMessage as TimelineRowLike, fixtures.piTurnUserMessage as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("Ticket https://gitlab.reuter365.net/eapp/eapp/-…");
+  });
+
+  it("Pi, crew kickoff message without turnId: translated the same way as Claude Code", () => {
+    const { nodes } = timelineToCanvas("thr_m5hdus9gv4", {
+      rows: [fixtures.piConversationCrewMessage as TimelineRowLike, fixtures.piTurnCrewMessage as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("Kickoff: steps-impl@pipeline");
+  });
+
+  it("Pi, [bb system] message without turnId: translated and assigned the same way as Claude Code", () => {
+    const { nodes } = timelineToCanvas("thr_rnty5wvb2j", {
+      rows: [fixtures.piConversationSystemMessage as TimelineRowLike, fixtures.piTurnSystemMessage as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("@thread:thr_2pse9tz7ku completed:");
+  });
+});
