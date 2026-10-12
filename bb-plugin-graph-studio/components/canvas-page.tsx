@@ -19,11 +19,13 @@ import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
 import {
   enrichThreadNodes,
+  enrichTurnNodes,
   threadNodeFor,
   timelineToCanvas,
   turnDetailsToCanvas,
   type ThreadTitlePort,
   type TimelineRowLike,
+  type TurnFirstLinePort,
 } from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { useOpenRun } from "./run-card";
@@ -49,6 +51,23 @@ function threadTitlePort(sdk: ReturnType<typeof useSdk>): ThreadTitlePort {
       const response = await sdk.threads.timeline({ threadId });
       const rows = response.rows as unknown as readonly { kind: string; role?: string; text?: string }[];
       return rows.find((row) => row.kind === "conversation" && row.role === "user")?.text;
+    },
+  };
+}
+
+/** Builds the port `enrichTurnNodes` needs: the same lazy fetch
+ *  `loadChildren` uses to expand a turn on click, just triggered eagerly so
+ *  a turn's card shows its first line without waiting for that (BBP-206 R2b). */
+function turnFirstLinePort(sdk: ReturnType<typeof useSdk>): TurnFirstLinePort {
+  return {
+    turnDetails: async (turnId, threadId, sourceSeqStart, sourceSeqEnd) => {
+      const response = await sdk.threads.timelineTurnSummaryDetails({
+        threadId,
+        turnId,
+        sourceSeqStart: String(sourceSeqStart),
+        sourceSeqEnd: String(sourceSeqEnd),
+      });
+      return { rows: response.rows as unknown as readonly TimelineRowLike[] };
     },
   };
 }
@@ -121,9 +140,15 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
             expanded: new Set(page.expanded),
           });
           setError(null);
-          void enrichThreadNodes(page.nodes, nodes, threadTitlePort(sdk)).then((enriched) => {
-            if (!cancelled) setLayer((prev) => (prev ? { ...prev, nodes: enriched } : prev));
-          });
+          // Sequential, not parallel: both resolve against the same `nodes`
+          // snapshot and each replaces the whole array in `setLayer` — run in
+          // parallel, whichever settles last would silently undo the other's
+          // enrichment.
+          void enrichThreadNodes(page.nodes, nodes, threadTitlePort(sdk))
+            .then((afterThreads) => enrichTurnNodes(afterThreads, turnFirstLinePort(sdk)))
+            .then((afterTurns) => {
+              if (!cancelled) setLayer((prev) => (prev ? { ...prev, nodes: afterTurns } : prev));
+            });
         },
         (cause: unknown) => {
           // A failed poll keeps the last good tree on screen; only the
