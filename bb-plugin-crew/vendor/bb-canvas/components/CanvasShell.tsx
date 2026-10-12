@@ -276,11 +276,32 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
 
-  // React Flow reads these only for its first fit, once the nodes are in.
   const startFit = useMemo(() => startFitOptions(nodes), [nodes]);
+  // Once the user has taken the viewport into their own hands — panned,
+  // zoomed, or asked for an explicit fit — the start fit must stop chasing
+  // the tree; from then on a layout change should leave the view alone.
+  const userInteracted = useRef(false);
+
+  // BBP-196: with a restored project filter and restored expanded threads/
+  // turns, their children arrive over several async `loadChildren` calls
+  // after mount, each one growing and re-centering the tree (`layoutTree`
+  // centers a parent on its children). React Flow's own `fitView` prop only
+  // fits once, against whichever node set was first in its store — stale the
+  // moment more nodes land, so the camera is left looking at empty space.
+  // Re-fitting to `startFit` on every `nodes` change — not just the first —
+  // keeps the start view matching the tree as it grows, until the user
+  // interacts.
+  useEffect(() => {
+    if (userInteracted.current) return;
+    // A frame later: React Flow takes the new nodes into its store in its
+    // own effect, and fitting before that fits the old tree.
+    const frame = requestAnimationFrame(() => void flow.fitView(startFit));
+    return () => cancelAnimationFrame(frame);
+  }, [startFit, flow]);
 
   useEffect(() => {
     if (fitRequest === 0) return;
+    userInteracted.current = true;
     // A frame later: React Flow takes the new nodes into its store in its
     // own effect, and fitting before that fits the old tree.
     const frame = requestAnimationFrame(() => void flow.fitView(FIT_VIEW_OPTIONS));
@@ -290,9 +311,18 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   useImperativeHandle(
     handleRef,
     () => ({
-      resetView: () => flow.fitView(),
-      zoomIn: () => flow.zoomIn(),
-      zoomOut: () => flow.zoomOut(),
+      resetView: () => {
+        userInteracted.current = true;
+        flow.fitView();
+      },
+      zoomIn: () => {
+        userInteracted.current = true;
+        flow.zoomIn();
+      },
+      zoomOut: () => {
+        userInteracted.current = true;
+        flow.zoomOut();
+      },
     }),
     [flow],
   );
@@ -315,8 +345,14 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         disableKeyboardA11y
         zoomOnScroll
         panOnScroll={false}
-        fitView
-        fitViewOptions={startFit}
+        // No `fitView` prop: it only fits once, against whichever nodes are
+        // first in React Flow's store. The effect above re-fits explicitly,
+        // on every nodes change, until the user takes over.
+        onMoveStart={(event) => {
+          // `event` is null for a programmatic move (our own `fitView`
+          // calls) and set for an actual user gesture (drag, wheel, pinch).
+          if (event) userInteracted.current = true;
+        }}
         // React Flow's default floor (0.5) is too high for a real tree: two
         // crews with ten members each no longer fit, so the start view and
         // `0` cut off the top instead of showing the whole tree.

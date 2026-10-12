@@ -1,10 +1,44 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { CanvasShell, colorLightness, START_MIN_ZOOM, startFitOptions } from "@/components/CanvasShell";
-import type { CanvasEdge, CanvasFrame, CanvasNode } from "@/lib/types";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 
-afterEach(cleanup);
+// BBP-196 fix: the start fit must keep chasing the tree across async growth
+// (restored filter + restored expanded threads/turns each arrive over
+// several `loadChildren` round-trips), not just fit once against whatever
+// React Flow's store happened to hold first. `fitView` itself cannot be
+// observed through the DOM in jsdom (the container always measures 0x0
+// here), so this wraps the real `useReactFlow` to record every `fitView`
+// call instead.
+const fitViewCalls: unknown[] = [];
+vi.mock("@xyflow/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@xyflow/react")>();
+  return {
+    ...actual,
+    useReactFlow: () => {
+      const real = actual.useReactFlow();
+      return {
+        ...real,
+        fitView: (options?: unknown) => {
+          fitViewCalls.push(options);
+          return real.fitView(options as never);
+        },
+      };
+    },
+  };
+});
+
+const { CanvasShell, colorLightness, START_MIN_ZOOM, startFitOptions } = await import("@/components/CanvasShell");
+const { CanvasView } = await import("@/components/CanvasView");
+type CanvasEdge = import("@/lib/types").CanvasEdge;
+type CanvasFrame = import("@/lib/types").CanvasFrame;
+type CanvasNode = import("@/lib/types").CanvasNode;
+type CanvasShellHandle = import("@/components/CanvasShell").CanvasShellHandle;
+
+afterEach(() => {
+  cleanup();
+  fitViewCalls.length = 0;
+});
 
 const nodes: CanvasNode[] = [
   { id: "crew", kind: "crew", label: "factory-1", parentId: null },
@@ -138,5 +172,71 @@ describe("startFitOptions (BBP-196)", () => {
   it("sets no fixed zoom: a small tree still fits larger than the floor", () => {
     const options = startFitOptions(tree) as Record<string, unknown>;
     expect(options.maxZoom).toBeUndefined();
+  });
+});
+
+// BBP-196 fix: a restored project filter plus restored expanded threads/turns
+// means the tree keeps growing for a while after mount — each `loadChildren`
+// resolution re-centers the layout (a parent sits centered on its children).
+// Regression for: the start view ended up empty because React Flow's own
+// `fitView` prop fit once, against the small initial tree, and never
+// refitted once the restored children arrived.
+describe("CanvasShell start-view refit across async growth (BBP-196)", () => {
+  const baseNodes: CanvasNode[] = [
+    { id: "root", kind: "agents", label: "bb", parentId: null },
+    { id: "project", kind: "project", label: "bb-plugins", parentId: "root" },
+    { id: "member", kind: "member", label: "a", parentId: "project" },
+    { id: "thread", kind: "thread", label: "Thread", parentId: "member", meta: { threadId: "t1" } },
+  ];
+
+  it("refits the start view once a restored thread's children arrive asynchronously", async () => {
+    let resolveLoad!: (value: { nodes: CanvasNode[] }) => void;
+    const loadChildren = () => new Promise<{ nodes: CanvasNode[] }>((resolve) => (resolveLoad = resolve));
+
+    render(
+      <CanvasView
+        nodes={baseNodes}
+        // A thread already expanded from a restored (persisted) state, like
+        // `localStorage` replaying a prior session's open nodes.
+        initialExpanded={new Set(["root", "project", "member", "thread"])}
+        loadChildren={loadChildren}
+        canLoadChildren={(node) => node.kind === "thread"}
+      />,
+    );
+
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+    const callsBeforeLoad = fitViewCalls.length;
+
+    resolveLoad({
+      nodes: [{ id: "turn-1", kind: "turn", label: "Turn · 1 step", parentId: "thread" }],
+    });
+
+    // The restored thread's turn lands after mount — the start view must
+    // chase it with another fit, not leave the camera on the pre-load tree.
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(callsBeforeLoad));
+  });
+
+  it("stops refitting once the user has taken the viewport into their own hands", async () => {
+    const ref = createRef<CanvasShellHandle>();
+    const { rerender } = render(
+      <CanvasShell ref={ref} nodes={baseNodes} expanded={new Set(["root", "project", "member"])} />,
+    );
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+
+    ref.current!.zoomIn();
+    const callsAfterInteraction = fitViewCalls.length;
+
+    // More nodes arrive later (e.g. the user expands something else by
+    // hand) — the start view must not yank a now-manually-positioned camera
+    // back to the "first level" framing.
+    rerender(
+      <CanvasShell
+        ref={ref}
+        nodes={[...baseNodes, { id: "thread", kind: "thread", label: "Thread", parentId: "member" }]}
+        expanded={new Set(["root", "project", "member", "thread"])}
+      />,
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(fitViewCalls.length).toBe(callsAfterInteraction);
   });
 });
