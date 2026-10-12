@@ -328,6 +328,75 @@ describe("the canvas page", () => {
     expect(await screen.findByText("No projects yet.")).toBeTruthy();
   });
 
+  // BBP-215: the real caller reloads the canvas layer (and remounts
+  // CanvasView via `key={shownKey}`) on every filter change, since the
+  // layer depends on which projects are shown. That must not tear the
+  // toolbar's SearchableMultiSelect down with it — the dropdown has to
+  // stay open, focused and keep its search text across checking two
+  // projects back to back.
+  it("the Projects dropdown stays open and focused while checking two projects back to back", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shop" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Blog — ") })).toBeNull());
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Blog" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy());
+    expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
+  });
+
+  // BBP-216: a search that matches nothing must say so and hide "Select all
+  // matches", while a project that's already checked stays visible under a
+  // "Selected" heading instead of vanishing or looking like a real match.
+  it("a search with no matches shows No matches and keeps a checked project under Selected", async () => {
+    // Shop is already checked (filter persisted from a prior visit) before
+    // the dropdown opens, so it's in the frozen checked block when typing starts.
+    localStorage.setItem("bb-canvas:project-filter", '["p1"]');
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Shop — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects: Shop/ }));
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByText("No matches")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select all matches" })).toBeNull();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Shop" })).toBeTruthy();
+  });
+
+  // BBP-216: Enter in the search field checks the first visible match, the
+  // same shortcut the toolbar advertises via arrow keys + Space/Enter.
+  it("Enter in the search field checks the first matching project", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "blo" } });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Shop — ") })).toBeNull());
+    expect(await screen.findByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+  });
+
+  // BBP-218: a project checked while the dropdown is already open must show
+  // up under "Selected" as soon as a search no longer matches it, not just
+  // ones that were already checked before the dropdown opened (BBP-216).
+  it("a project checked while open moves into Selected once the query no longer matches it", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Shop" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Blog — ") })).toBeNull());
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "blo" } });
+    expect(screen.queryByText("No matches")).toBeNull();
+    expect(screen.getByText("Selected")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Shop" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Blog" })).toBeTruthy();
+  });
+
   // BBP-197 fix 2: this is the page BB shows while Graph Studio is active,
   // so the live reload has to run here, not only on crew's hidden copy.
   describe("live updates", () => {
