@@ -11,3 +11,11 @@ works for locked skills. It does not work in follow-up messages.
 
 **Skill injection** — a plugin reads a skill's SKILL.md and puts its text into
 the agent's instructions instead of only naming the skill.
+
+**Done gate** — commands from the crew file (`gates.done`) that must all exit 0
+in the member's worktree before `crew_work_done` closes a work item. A red gate
+leaves the item claimed. Not the same as **checks**, which guard the merge of a
+crew branch into main.
+
+**Checks** — the crew's single command that must be green before the
+integrator merges a crew branch into main.

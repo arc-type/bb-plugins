@@ -34,7 +34,7 @@ export function createCrewModels(store: Store) {
     const hit = cache.get(key);
     if (hit) return hit;
     const file = store.crewFile(crew.id);
-    const validation = file ? validateCrew(file.yaml, { confirmFull: true }) : null;
+    const validation = file ? validateCrew(file.yaml, { confirmFull: true, confirmGates: true }) : null;
     const spec = validation?.spec ?? null;
     const model: CrewModel = {
       spec,

@@ -151,7 +151,7 @@ export function formatMessageLine(row: MessageRow): string {
  * Asks the human before a team change goes through (§4.6 `pendingInteraction`):
  * removing a member, or a new member with `full`. True = confirmed.
  */
-export type Confirm = (threadId: string, request: { title: string; kind: "remove-member" | "full-permissions"; detail: string }) => Promise<boolean>;
+export type Confirm = (threadId: string, request: { title: string; kind: "remove-member" | "full-permissions" | "gates-unconfirmed"; detail: string }) => Promise<boolean>;
 
 const LEAD_ONLY = "Only the lead of the crew changes the team.";
 
@@ -392,7 +392,7 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
     description: "Close a work item as done, with a closure note.",
     parameters: z.object({ id: z.string().min(1).max(64), note: z.string().max(4000).default("") }),
     presentation: { label: { pending: "Closing work item", completed: "Closed work item" }, icon: { glyph: "CircleCheck" } },
-    execute: (params, ctx) => withSelf(async (self) => formatWorkItem(work.done(self.crew, actor(self), params.id, params.note), addressOf))(params, ctx),
+    execute: (params, ctx) => withSelf(async (self) => formatWorkItem(await work.done(self.crew, actor(self), params.id, params.note), addressOf))(params, ctx),
   });
 
   bb.agents.registerTool({
@@ -568,7 +568,21 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
           });
           if (!confirmFull) return failure("The human declined permissions: full.");
         }
-        const outcome = await service.lifecycle.addMember(self.crew, { ...params }, { confirmFull });
+        let confirmGates = false;
+        try {
+          const outcome = await service.lifecycle.addMember(self.crew, { ...params }, { confirmFull });
+          return bounded(results(outcome.results));
+        } catch (error) {
+          if (!(error instanceof AddressError) || !error.message.includes("gates-unconfirmed")) throw error;
+          if (!options.confirm) return failure("The new crew file runs gates.done commands, which needs the human's confirmation, not available here. Ask the human to run bb crew add-member … --confirm-gates.");
+          confirmGates = await options.confirm(ctx.threadId, {
+            kind: "gates-unconfirmed",
+            title: `Add ${params.group}-${params.id} with gates.done commands?`,
+            detail: `${self.member.address} wants to add ${params.group}-${params.id}@${self.crew.name}; the crew file runs gates.done commands before closing work items.`,
+          });
+          if (!confirmGates) return failure("The human declined the gates.done commands.");
+        }
+        const outcome = await service.lifecycle.addMember(self.crew, { ...params }, { confirmFull, confirmGates });
         return bounded(results(outcome.results));
       })(params, ctx),
   });

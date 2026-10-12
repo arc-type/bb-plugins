@@ -54,8 +54,9 @@ export async function running(
   port: ReturnType<typeof setup>["port"],
   yaml = trioYaml(),
   status = "idle",
+  options: { confirmGates?: boolean } = {},
 ) {
-  const outcome = await service.apply(PROJECT, yaml);
+  const outcome = await service.apply(PROJECT, yaml, options);
   const threads: Record<string, string> = {};
   for (const result of outcome.results) {
     threads[result.key] = result.threadId!;

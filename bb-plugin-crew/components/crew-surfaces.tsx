@@ -168,7 +168,7 @@ export function ConfirmInteraction({ interaction, submit, cancel }: PluginPendin
   const payload = (interaction.payload ?? {}) as { kind?: unknown; title?: unknown; detail?: unknown };
   const title = typeof payload.title === "string" ? payload.title : interaction.title;
   const detail = typeof payload.detail === "string" ? payload.detail : "";
-  const danger = payload.kind === "full-permissions" || payload.kind === "remove-member";
+  const danger = payload.kind === "full-permissions" || payload.kind === "remove-member" || payload.kind === "gates-unconfirmed";
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card text-card-foreground p-3 text-sm" aria-label="Crew confirmation">
       <strong className={danger ? "text-destructive" : undefined}>{title}</strong>

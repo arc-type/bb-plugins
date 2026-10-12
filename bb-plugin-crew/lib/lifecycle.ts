@@ -44,9 +44,9 @@ export type LifecycleDeps = {
   delivery: Delivery;
   queue: Queue;
   /** The service's apply (it also records environments, directory notes, drains). */
-  apply: (projectId: string, yaml: string, options?: { confirmFull?: boolean }) => Promise<ApplyOutcome & { validation: Validation; limit: string }>;
+  apply: (projectId: string, yaml: string, options?: { confirmFull?: boolean; confirmGates?: boolean }) => Promise<ApplyOutcome & { validation: Validation; limit: string }>;
   plan: (projectId: string, yaml: string) => Promise<{ validation: Validation; items: PlanItem[] }>;
-  validate: (projectId: string, yaml: string, confirmFull?: boolean) => Promise<Validation>;
+  validate: (projectId: string, yaml: string, confirmFull?: boolean, confirmGates?: boolean) => Promise<Validation>;
   newId?: (prefix: "snap" | "ho") => string;
 };
 
@@ -179,7 +179,7 @@ export function createLifecycle(deps: LifecycleDeps) {
         messages.requeued.push(message.id);
       }
     }
-    const outcome = await deps.apply(crew.projectId, data.yaml, { confirmFull: true });
+    const outcome = await deps.apply(crew.projectId, data.yaml, { confirmFull: true, confirmGates: true });
     // A message that failed on a still-archived thread while apply ran gets one more try now.
     let retried = false;
     for (const message of data.messages) {
@@ -410,30 +410,30 @@ export function createLifecycle(deps: LifecycleDeps) {
     return file.yaml;
   }
 
-  async function checked(projectId: string, yaml: string, confirmFull: boolean): Promise<void> {
-    const validation = await deps.validate(projectId, yaml, confirmFull);
+  async function checked(projectId: string, yaml: string, confirmFull: boolean, confirmGates: boolean): Promise<void> {
+    const validation = await deps.validate(projectId, yaml, confirmFull, confirmGates);
     if (hasErrors(validation.problems)) {
       throw new AddressError(`The changed crew file has errors:\n${validation.problems.filter((p) => p.level === "error").map((p) => `- ${p.message}`).join("\n")}`);
     }
   }
 
-  async function addMember(crew: CrewRow, member: NewMember, options: { confirmFull?: boolean } = {}) {
+  async function addMember(crew: CrewRow, member: NewMember, options: { confirmFull?: boolean; confirmGates?: boolean } = {}) {
     const yaml = addMemberToFile(storedYaml(crew), member);
-    await checked(crew.projectId, yaml, options.confirmFull ?? false);
-    return deps.apply(crew.projectId, yaml, { confirmFull: options.confirmFull });
+    await checked(crew.projectId, yaml, options.confirmFull ?? false, options.confirmGates ?? false);
+    return deps.apply(crew.projectId, yaml, { confirmFull: options.confirmFull, confirmGates: options.confirmGates });
   }
 
   async function removeMember(crew: CrewRow, key: string) {
     const member = requireMember(crew, key);
     const yaml = removeMemberFromFile(storedYaml(crew), member.key);
-    await checked(crew.projectId, yaml, true);
-    return deps.apply(crew.projectId, yaml, { confirmFull: true });
+    await checked(crew.projectId, yaml, true, true);
+    return deps.apply(crew.projectId, yaml, { confirmFull: true, confirmGates: true });
   }
 
   /** Store an imported crew file (no threads touched) and return what apply would do. */
   async function importFile(projectId: string, yaml: string) {
-    const validation = await deps.validate(projectId, yaml, true);
-    if (!validation.spec || validation.problems.some((p) => p.level === "error" && p.code !== "full-unconfirmed")) {
+    const validation = await deps.validate(projectId, yaml, true, true);
+    if (!validation.spec || validation.problems.some((p) => p.level === "error" && p.code !== "full-unconfirmed" && p.code !== "gates-unconfirmed")) {
       return { crew: null, changed: false, validation, items: [] as PlanItem[] };
     }
     const { crew, changed } = store.saveCrewFile(projectId, validation.spec.name, yaml);

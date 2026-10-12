@@ -180,7 +180,7 @@ describe("integrator", () => {
 
   it("red checks (test failures): rejected, not returned, and the crew lead gets the log with 'fix, then crew_deliver again'", async () => {
     const red = await twoCrews({ integrator: true, alpha: { checks: "npm test" } });
-    red.git.checksResult = { kind: "failed", output: "1 failing" };
+    red.git.checksResult = { kind: "failed", code: 1, output: "1 failing" };
     const a = await red.service.integration.request(red.alpha.crew, "x");
     const afterRed = await red.service.integration.integratorMerge(a.merge.id, red.ops!.members["ops-int"]!);
     expect(afterRed).toMatchObject({ state: "rejected", checksOutput: "1 failing" });
@@ -198,7 +198,7 @@ describe("integrator", () => {
 
   it("environment errors (command not found, timeout) are reported as 'could not run', separate from failing tests", async () => {
     const env = await twoCrews({ integrator: true, alpha: { checks: "npm test" } });
-    env.git.checksResult = { kind: "env", output: "command not found" };
+    env.git.checksResult = { kind: "env", code: 127, output: "command not found" };
     const { merge } = await env.service.integration.request(env.alpha.crew, "x");
     const after = await env.service.integration.integratorMerge(merge.id, env.ops!.members["ops-int"]!);
     expect(after.state).toBe("rejected");
@@ -207,7 +207,7 @@ describe("integrator", () => {
 
   it("the 3rd red check in a row (same crew) returns to the human instead of rejecting again", async () => {
     const env = await twoCrews({ integrator: true, alpha: { checks: "npm test" } });
-    env.git.checksResult = { kind: "failed", output: "1 failing" };
+    env.git.checksResult = { kind: "failed", code: 1, output: "1 failing" };
     for (let i = 0; i < REJECT_LIMIT - 1; i += 1) {
       const { merge } = await env.service.integration.request(env.alpha.crew, "x");
       const after = await env.service.integration.integratorMerge(merge.id, env.ops!.members["ops-int"]!);

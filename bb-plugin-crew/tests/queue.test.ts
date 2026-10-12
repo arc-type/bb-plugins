@@ -47,7 +47,7 @@ describe("work items", () => {
     // The new owner is told, with the claim hint.
     expect(store.listMessages({ toMember: members["dev-review"]!.id }).at(-1)!.body).toContain(`crew_work_claim(id: "${created.id}")`);
     q.claim(crew, member("dev-review"), created.id);
-    const done = q.done(crew, member("dev-review"), created.id, "looks good");
+    const done = await q.done(crew, member("dev-review"), created.id, "looks good");
     expect(done).toMatchObject({ state: "done", closureNote: "looks good" });
     expect(store.listTransitions(created.id).map((t) => `${t.fromState ?? "-"}→${t.toState} ${t.actor}`)).toEqual([
       "-→open orch-lead@trio",
@@ -67,10 +67,10 @@ describe("work items", () => {
     expect(() => q.claim(crew, member("dev-review"), created.id)).toThrow("assigned to someone else");
     q.claim(crew, member("dev-impl"), created.id);
     expect(() => q.claim(crew, member("dev-review"), created.id)).toThrow("already claimed");
-    expect(() => q.done(crew, member("dev-review"), created.id, "")).toThrow("not yours");
+    await expect(q.done(crew, member("dev-review"), created.id, "")).rejects.toThrow("not yours");
     expect(() => q.fail(crew, member("dev-impl"), created.id, " ")).toThrow("needs a reason");
     q.fail(crew, member("dev-impl"), created.id, "blocked");
-    expect(() => q.done(crew, member("dev-impl"), created.id, "")).toThrow("is failed");
+    await expect(q.done(crew, member("dev-impl"), created.id, "")).rejects.toThrow("is failed");
     expect(() => q.create(crew, human, { title: " " })).toThrow("needs a title");
     expect(() => q.create(crew, human, { title: "x", owner: "dev-ghost" })).toThrow('No member "dev-ghost"');
     expect(() => q.claim(crew, human, created.id)).toThrow();
@@ -185,7 +185,7 @@ describe("follow-up rungs", () => {
     const claimed = service.queue.create(crew, human, { title: "a", owner: "dev-impl", tier: "p0", dueAt: Date.UTC(2030, 0, 1) });
     service.queue.claim(crew, member("dev-impl"), claimed.id);
     const closed = service.queue.create(crew, human, { title: "b", owner: "dev-impl", tier: "p0" });
-    service.queue.done(crew, member("dev-impl"), closed.id, "");
+    await service.queue.done(crew, member("dev-impl"), closed.id, "");
     advance(5 * MIN);
     expect(await service.followUps()).toEqual([]);
     service.queue.create(crew, human, { title: "c", tier: "p0" });

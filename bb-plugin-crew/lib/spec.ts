@@ -45,6 +45,9 @@ export const SERVICE_TIERS = ["default", "fast"] as const;
 const idSchema = z.string().trim().min(1).max(64);
 const permissionSchema = z.enum(PERMISSIONS);
 
+/** Commands `crew_work_done` runs before closing an item (§BBP-103). Crew → group → member replaces, never merges; `done: []` turns the gate off. */
+const gatesSchema = z.object({ done: z.array(z.string().trim().min(1)) }).strict();
+
 const memberSchema = z
   .object({
     id: idSchema,
@@ -68,6 +71,7 @@ const memberSchema = z
     integrator: z.boolean().optional(),
     /** First assignment in the kickoff brief; default is "wait for instructions". */
     kickoff: z.string().optional(),
+    gates: gatesSchema.optional(),
   })
   .strict();
 
@@ -81,6 +85,7 @@ const groupSchema = z
     model: z.string().min(1).optional(),
     permissions: permissionSchema.optional(),
     environment: environmentSchema.optional(),
+    gates: gatesSchema.optional(),
     members: z.array(memberSchema).min(1),
   })
   .strict();
@@ -116,6 +121,7 @@ export const crewSpecSchema = z
     baseBranch: z.string().trim().min(1).default("main"),
     /** Shell command run in the crew branch's worktree; "green" means exit code 0 (§3.9.1, local case). */
     checks: z.string().trim().min(1).optional(),
+    gates: gatesSchema.optional(),
     /** Minutes the lead may be busy before its deputy answers other crews (§3.9.4). */
     leadBusyTimeout: z.number().int().min(1).max(1440).default(10),
     /** Follow-up period per tier in minutes (§3.6); rung n fires after n periods. */
@@ -202,6 +208,8 @@ export type ResolvedMember = {
   deputy: string | null;
   integrator: boolean;
   kickoff: string | null;
+  /** Member ?? group ?? crew, replaced not merged; [] turns the gate off. */
+  gates: string[];
 };
 
 export type Problem = {
@@ -236,6 +244,8 @@ export type ValidateOptions = {
   graphs?: GraphsCatalog | null;
   /** `--confirm-full`: the human has seen that a member runs with `full`. */
   confirmFull?: boolean;
+  /** `--confirm-gates`: the human has seen that a member runs `gates.done` commands. */
+  confirmGates?: boolean;
 };
 
 export type Validation = {
@@ -372,6 +382,7 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
       deputy: member.deputy ?? null,
       integrator: member.integrator === true,
       kickoff: member.kickoff ?? spec.kickoff ?? null,
+      gates: member.gates?.done ?? group.gates?.done ?? spec.gates?.done ?? [],
     };
   });
 
@@ -417,6 +428,9 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
     }
     if (member.permissions === "full" && options.confirmFull !== true) {
       error("full-unconfirmed", `${member.key} runs with permissions: full — confirm with --confirm-full`);
+    }
+    if (member.gates.length > 0 && options.confirmGates !== true) {
+      error("gates-unconfirmed", `${member.key} runs gates.done commands — confirm with --confirm-gates`);
     }
     const text = buildInstructions(spec, member);
     if (text.length > INSTRUCTION_LIMIT) {
