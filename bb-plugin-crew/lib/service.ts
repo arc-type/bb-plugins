@@ -232,8 +232,8 @@ export function createCrewService(deps: ServiceDeps) {
     return deps.store.listMessages({ ...filter, projectId, crewId: crew?.id ?? filter.crewId });
   }
 
-  async function validate(projectId: string, yaml: string, confirmFull = false): Promise<Validation> {
-    return validateCrew(yaml, { catalog: await catalog(), skills: await skillsCatalog(projectId), graphs: await graphsCatalog(), confirmFull });
+  async function validate(projectId: string, yaml: string, confirmFull = false, confirmGates = false): Promise<Validation> {
+    return validateCrew(yaml, { catalog: await catalog(), skills: await skillsCatalog(projectId), graphs: await graphsCatalog(), confirmFull, confirmGates });
   }
 
   const service = {
@@ -358,8 +358,8 @@ export function createCrewService(deps: ServiceDeps) {
       throw new Error(`No crew, template or file named "${ref}".`);
     },
 
-    async plan(projectId: string, yaml: string, options: { fresh?: string[]; confirmFull?: boolean } = {}) {
-      const validation = await validate(projectId, yaml, options.confirmFull);
+    async plan(projectId: string, yaml: string, options: { fresh?: string[]; confirmFull?: boolean; confirmGates?: boolean } = {}) {
+      const validation = await validate(projectId, yaml, options.confirmFull, options.confirmGates);
       const items: PlanItem[] = validation.spec ? await plan(ctx, projectId, validation, options) : [];
       const extra = await projectProblems(projectId, validation);
       const crew = validation.spec ? store.findCrew(projectId, validation.spec.name) : null;
@@ -371,9 +371,9 @@ export function createCrewService(deps: ServiceDeps) {
     async apply(
       projectId: string,
       yaml: string,
-      options: { fresh?: string[]; confirmFull?: boolean } = {},
+      options: { fresh?: string[]; confirmFull?: boolean; confirmGates?: boolean } = {},
     ): Promise<ApplyOutcome & { validation: Validation; limit: string; remote: string[] }> {
-      const validation = await validate(projectId, yaml, options.confirmFull);
+      const validation = await validate(projectId, yaml, options.confirmFull, options.confirmGates);
       const before = validation.spec ? store.findCrew(projectId, validation.spec.name)?.status ?? null : null;
       const outcome = await apply(ctx, { projectId, yaml, validation, fresh: options.fresh });
       await recordEnvironments(outcome.crew);
@@ -512,8 +512,8 @@ export function createCrewService(deps: ServiceDeps) {
 
     /** Store a crew file without applying it. Invalid files are refused. */
     async save(projectId: string, yaml: string) {
-      const validation = await validate(projectId, yaml, true);
-      if (!validation.spec || validation.problems.some((problem) => problem.level === "error" && problem.code !== "full-unconfirmed")) {
+      const validation = await validate(projectId, yaml, true, true);
+      if (!validation.spec || validation.problems.some((problem) => problem.level === "error" && problem.code !== "full-unconfirmed" && problem.code !== "gates-unconfirmed")) {
         return { crew: null, validation };
       }
       const { crew } = deps.store.saveCrewFile(projectId, validation.spec.name, yaml);

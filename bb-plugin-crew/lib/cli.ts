@@ -16,11 +16,11 @@ import type { MemberResult } from "./sync";
 export const CLI_COMMANDS = [
   { name: "list", summary: "List the crews of the project", usage: "bb crew list [--project <id|name>]" },
   { name: "show", summary: "Show a crew: file version, status, members", usage: "bb crew show <crew>" },
-  { name: "plan", summary: "Preview what apply would do (read-only)", usage: "bb crew plan <crew|template|file.yaml> [--fresh <member>…]" },
+  { name: "plan", summary: "Preview what apply would do (read-only)", usage: "bb crew plan <crew|template|file.yaml> [--fresh <member>…] [--confirm-full] [--confirm-gates]" },
   {
     name: "apply",
     summary: "Create or reconcile the crew's threads",
-    usage: "bb crew apply <crew|template|file.yaml> [--fresh <member>…] [--confirm-full]",
+    usage: "bb crew apply <crew|template|file.yaml> [--fresh <member>…] [--confirm-full] [--confirm-gates]",
   },
   { name: "stop", summary: "Stop running turns, optionally archive", usage: "bb crew stop <crew> [--archive]" },
   {
@@ -77,7 +77,7 @@ export const CLI_COMMANDS = [
   {
     name: "add-member",
     summary: "Add a member to the crew file and apply",
-    usage: "bb crew add-member <group>-<id> --crew <crew> [--role <r>] [--provider <p>] [--model <m>] [--permissions <p>] [--kickoff <k>] [--confirm-full]",
+    usage: "bb crew add-member <group>-<id> --crew <crew> [--role <r>] [--provider <p>] [--model <m>] [--permissions <p>] [--kickoff <k>] [--confirm-full] [--confirm-gates]",
   },
   { name: "remove-member", summary: "Remove a member from the crew file and apply; its thread is archived", usage: "bb crew remove-member <member> --crew <crew>" },
   {
@@ -443,7 +443,7 @@ export async function runCli(
             permissions: permissions as Permission | undefined,
             kickoff: args.values.kickoff,
           },
-          { confirmFull: args.flags.has("--confirm-full") },
+          { confirmFull: args.flags.has("--confirm-full"), confirmGates: args.flags.has("--confirm-gates") },
         );
         const lines = [`${outcome.crew.name}: ${outcome.crew.status} (file v${outcome.crew.fileVersion})`, ...formatProblems(outcome.validation.problems), ...formatResults(outcome.results)];
         return outcome.results.some((result) => result.result === "failed") ? { exitCode: 1, stdout: `${bound(lines.join("\n"))}\n` } : ok(lines);
@@ -652,7 +652,7 @@ export async function runCli(
       case "apply": {
         if (!target) return fail(`Usage: bb crew ${command} <crew|template|file.yaml>`);
         const file = await service.resolveFile(projectId, target, ctx.cwd);
-        const options = { fresh: args.fresh, confirmFull: args.flags.has("--confirm-full") };
+        const options = { fresh: args.fresh, confirmFull: args.flags.has("--confirm-full"), confirmGates: args.flags.has("--confirm-gates") };
         if (command === "plan") {
           const { validation, items, limit, behind, remote } = await service.plan(projectId, file.yaml, options);
           const lines = [

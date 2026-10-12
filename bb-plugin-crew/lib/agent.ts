@@ -151,7 +151,7 @@ export function formatMessageLine(row: MessageRow): string {
  * Asks the human before a team change goes through (§4.6 `pendingInteraction`):
  * removing a member, or a new member with `full`. True = confirmed.
  */
-export type Confirm = (threadId: string, request: { title: string; kind: "remove-member" | "full-permissions"; detail: string }) => Promise<boolean>;
+export type Confirm = (threadId: string, request: { title: string; kind: "remove-member" | "full-permissions" | "gates-unconfirmed"; detail: string }) => Promise<boolean>;
 
 const LEAD_ONLY = "Only the lead of the crew changes the team.";
 
@@ -568,7 +568,21 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
           });
           if (!confirmFull) return failure("The human declined permissions: full.");
         }
-        const outcome = await service.lifecycle.addMember(self.crew, { ...params }, { confirmFull });
+        let confirmGates = false;
+        try {
+          const outcome = await service.lifecycle.addMember(self.crew, { ...params }, { confirmFull });
+          return bounded(results(outcome.results));
+        } catch (error) {
+          if (!(error instanceof AddressError) || !error.message.includes("gates-unconfirmed")) throw error;
+          if (!options.confirm) return failure("The new crew file runs gates.done commands, which needs the human's confirmation, not available here. Ask the human to run bb crew add-member … --confirm-gates.");
+          confirmGates = await options.confirm(ctx.threadId, {
+            kind: "gates-unconfirmed",
+            title: `Add ${params.group}-${params.id} with gates.done commands?`,
+            detail: `${self.member.address} wants to add ${params.group}-${params.id}@${self.crew.name}; the crew file runs gates.done commands before closing work items.`,
+          });
+          if (!confirmGates) return failure("The human declined the gates.done commands.");
+        }
+        const outcome = await service.lifecycle.addMember(self.crew, { ...params }, { confirmFull, confirmGates });
         return bounded(results(outcome.results));
       })(params, ctx),
   });

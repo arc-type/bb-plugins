@@ -185,6 +185,7 @@ const fileInput = z.object({
   yaml: z.string().max(200_000).optional(),
   fresh: z.array(z.string()).max(50).default([]),
   confirmFull: z.boolean().default(false),
+  confirmGates: z.boolean().default(false),
 });
 
 export type CrewDto = z.infer<typeof crewSchema>;
@@ -380,6 +381,7 @@ export const rpcContract = defineRpcContract({
       serviceTier: z.enum(SERVICE_TIERS).optional(),
       permissions: z.enum(["ask", "accept-edits", "auto", "full"]).optional(),
       confirmFull: z.boolean().default(false),
+      confirmGates: z.boolean().default(false),
     }),
     output: lifecycleResult,
   },
@@ -1045,9 +1047,9 @@ export default async function plugin(bb: BbPluginApi) {
         publish();
         return { threadId: threadId as string | null, error: null as string | null };
       }, (error) => ({ threadId: null, error })),
-    addMember: ({ projectId, name, confirmFull, ...member }) =>
+    addMember: ({ projectId, name, confirmFull, confirmGates, ...member }) =>
       changing(async () => {
-        const outcome = await service.lifecycle.addMember(requireCrew(projectId, name), member, { confirmFull });
+        const outcome = await service.lifecycle.addMember(requireCrew(projectId, name), member, { confirmFull, confirmGates });
         return { results: outcome.results, problems: outcome.validation.problems, error: null };
       }),
     removeMember: ({ projectId, name, member }) =>

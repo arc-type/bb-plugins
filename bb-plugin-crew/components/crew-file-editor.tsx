@@ -108,15 +108,17 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
   const [text, setText] = useState(initialYaml);
   const [view, setView] = useState<"yaml" | "form">("yaml");
   const [confirmFull, setConfirmFull] = useState(false);
+  const [confirmGates, setConfirmGates] = useState(false);
   const [plan, setPlan] = useState<{ items: PlanLine[]; problems: ProblemLine[] } | null>(null);
   const [planning, setPlanning] = useState(false);
   const [applied, setApplied] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => setText(initialYaml), [initialYaml]);
 
-  const validation = useMemo(() => validateCrew(text, { confirmFull }), [text, confirmFull]);
+  const validation = useMemo(() => validateCrew(text, { confirmFull, confirmGates }), [text, confirmFull, confirmGates]);
   const errors = validation.problems.filter((problem) => problem.level === "error");
   const needsFull = validation.problems.some((problem) => problem.code === "full-unconfirmed") || confirmFull;
+  const needsGates = validation.problems.some((problem) => problem.code === "gates-unconfirmed") || confirmGates;
 
   // The preview follows the text, debounced; a stale answer never overwrites a newer one.
   useEffect(() => {
@@ -127,7 +129,7 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
     let live = true;
     setPlanning(true);
     const timer = setTimeout(() => {
-      rpc.call("plan", { projectId, yaml: text, fresh: [], confirmFull }).then(
+      rpc.call("plan", { projectId, yaml: text, fresh: [], confirmFull, confirmGates }).then(
         (result) => {
           if (!live) return;
           setPlan({ items: result.items, problems: result.problems });
@@ -144,7 +146,7 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
       live = false;
       clearTimeout(timer);
     };
-  }, [rpc, projectId, text, confirmFull, errors.length]);
+  }, [rpc, projectId, text, confirmFull, confirmGates, errors.length]);
 
   const model = useMemo(() => (view === "form" ? formModel(text) : null), [view, text]);
   const lines = plan ? formatPlan(plan.items) : [];
@@ -212,6 +214,12 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
                 I confirm permissions: full
               </label>
             ) : null}
+            {needsGates ? (
+              <label className="mt-2 flex items-center gap-1.5 text-destructive">
+                <input type="checkbox" aria-label="Confirm gates" checked={confirmGates} onChange={(event) => setConfirmGates(event.target.checked)} />
+                I confirm gates.done runs commands
+              </label>
+            ) : null}
           </section>
           <section aria-label="What Apply does" className="rounded-xl border border-border bg-card text-card-foreground p-3">
             <h4 className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">What Apply does</h4>
@@ -240,7 +248,7 @@ export function CrewFileEditor({ projectId, initialYaml, onApplied }: { projectI
             onClick={async () => {
               setError(null);
               try {
-                const result = await rpc.call("apply", { projectId, yaml: text, fresh: [], confirmFull });
+                const result = await rpc.call("apply", { projectId, yaml: text, fresh: [], confirmFull, confirmGates });
                 setApplied(result.results.map((entry) => `${entry.result} ${entry.address}${entry.detail ? ` (${entry.detail})` : ""}`));
                 onApplied?.();
               } catch (cause) {
