@@ -2,8 +2,8 @@
 //
 // Crew's own copy of the canvas page (BBP-131 WI4): shown only when
 // `canvasPage` says Graph Studio is not active, otherwise a short note.
-import { cleanup, screen, fireEvent } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 
 let app: CapturedPluginApp;
@@ -11,6 +11,7 @@ let app: CapturedPluginApp;
 beforeAll(async () => {
   app = await loadPluginApp(() => import("../app"));
 });
+beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
 function canvasPanel(
@@ -40,7 +41,7 @@ function canvasPanel(
         ...overrides.rpc,
       },
       context: { projectId: overrides.projectId === undefined ? "p1" : overrides.projectId, threadId: null },
-      ...(overrides.sdk ? { sdk: overrides.sdk as never } : { sdk: { projects: { get: async () => ({ name: "Shop" }) } } as never }),
+      ...(overrides.sdk ? { sdk: overrides.sdk as never } : { sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }], get: async () => ({ name: "Shop" }) } } as never }),
     },
   );
 }
@@ -61,7 +62,7 @@ describe("crew's canvas page", () => {
 
   it("loads a thread's timeline lazily, once its node is opened", async () => {
     const timeline = async () => ({ rows: [{ id: "r1", kind: "conversation", text: "Ship it" }] });
-    canvasPanel({ sdk: { projects: { get: async () => ({ name: "Shop" }) }, threads: { timeline } } });
+    canvasPanel({ sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { timeline } } });
     fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
     fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
     expect(await screen.findByRole("button", { name: new RegExp("^Ship it — ") })).toBeTruthy();
@@ -79,28 +80,72 @@ describe("crew's canvas page", () => {
     expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
   });
 
-  it("negative: no project anywhere → a project picker that deep-links into the canvas, no empty page", async () => {
-    const slot = canvasPanel({
+  it("negative: no project anywhere → every project as a root side by side, no picker dead-end", async () => {
+    const asked: string[] = [];
+    canvasPanel({
       projectId: null,
-      sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }], get: async () => ({ name: "Shop" }) } },
+      rpc: {
+        canvasLayer: ({ projectId }: { projectId: string }) => {
+          asked.push(projectId);
+          return { contractVersion: 1, nodes: [], edges: [], expanded: [] };
+        },
+      },
+      sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }] } },
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Blog" }));
-    expect(slot.navigateCalls).toEqual([{ method: "toPluginPanel", path: "canvas", options: { subPath: "p2" } }]);
+    expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Projects: All/ })).toBeTruthy();
+    expect(asked.sort()).toEqual(["p1", "p2"]);
   });
 
-  it("picker says it is loading until the project list arrives, then asks for a pick", async () => {
+  it("the project filter narrows the roots and survives a reload", async () => {
+    const sdk = { projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }] } };
+    canvasPanel({ projectId: null, sdk });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Blog" }));
+    expect(await screen.findByRole("button", { name: /Projects: Blog/ })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Shop — ") })).toBeNull());
+    expect(screen.getByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+    cleanup();
+    canvasPanel({ projectId: null, sdk });
+    expect(await screen.findByRole("button", { name: /Projects: Blog/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^Shop — ") })).toBeNull();
+  });
+
+  it("negative: a stored id of a deleted project is ignored, every project shows", async () => {
+    localStorage.setItem("bb-canvas:project-filter", '["gone"]');
+    canvasPanel({ projectId: null, sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }] } } });
+    expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+  });
+
+  it("a subPath project pre-selects that project", async () => {
+    localStorage.setItem("bb-canvas:project-filter", '["p1"]');
+    canvasPanel({ projectId: null, subPath: "p2", sdk: { projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }] } } });
+    expect(await screen.findByRole("button", { name: /Projects: Blog/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Blog — ") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^Shop — ") })).toBeNull();
+  });
+
+  it("says it is loading until the project list arrives", async () => {
     let release: (list: { id: string; name: string }[]) => void = () => {};
     const pending = new Promise<{ id: string; name: string }[]>((resolve) => (release = resolve));
     canvasPanel({ projectId: null, sdk: { projects: { list: () => pending } } });
     expect(await screen.findByText("Loading projects…")).toBeTruthy();
     release([{ id: "p1", name: "Shop" }]);
-    expect(await screen.findByText("Pick a project to see its canvas.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
   });
 
-  it("negative: an empty project list says so instead of an orphaned prompt", async () => {
+  it("negative: a failing project list still shows the project the page was opened for", async () => {
+    canvasPanel({ sdk: { projects: { list: async () => Promise.reject(new Error("offline")), get: async () => ({ name: "Shop" }) } } });
+    expect(await screen.findByRole("button", { name: new RegExp("^Shop — ") })).toBeTruthy();
+  });
+
+  it("negative: an empty project list says so instead of an empty canvas", async () => {
     canvasPanel({ projectId: null, sdk: { projects: { list: async () => [] } } });
     expect(await screen.findByText("No projects yet.")).toBeTruthy();
-    expect(screen.queryByText("Pick a project to see its canvas.")).toBeNull();
   });
 });
 

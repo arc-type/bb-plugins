@@ -61,6 +61,9 @@ export type CanvasViewProps = {
    * already in `nodes` (crew, graph-run, …) need none of this.
    */
   loadChildren?: (node: CanvasNode) => Promise<LoadedChildren>;
+  /** Page-owned controls shown in the toolbar beside the colour toggle —
+   *  the project filter, say (BBP-181). */
+  toolbar?: ReactNode;
   className?: string;
 };
 
@@ -76,6 +79,7 @@ export function CanvasView({
   renderFrameEditor,
   initialExpanded,
   loadChildren,
+  toolbar,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initialExpanded ?? []));
@@ -312,7 +316,8 @@ export function CanvasView({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
-        <div style={{ padding: "4px 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
+          {toolbar}
           <ColorModeToggle mode={colorMode} onToggle={toggleColorMode} />
         </div>
       </div>
