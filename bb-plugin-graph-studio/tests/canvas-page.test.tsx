@@ -76,6 +76,47 @@ describe("the canvas page", () => {
     expect(await screen.findByRole("button", { name: new RegExp("^Please fix the bug — ") })).toBeTruthy();
   });
 
+  it("shows the thread's real title on its card once loaded (BBP-206)", async () => {
+    canvasPanel({
+      sdk: {
+        threads: {
+          get: async () => ({
+            title: "Fix login bug",
+            status: "idle",
+            providerId: "claude-code",
+            createdAt: 0,
+            updatedAt: 0,
+          }),
+        },
+      },
+    });
+    expect(await screen.findByRole("button", { name: new RegExp("^Fix login bug — ") })).toBeTruthy();
+  });
+
+  it("falls back to the first user message when the thread has no title (BBP-206)", async () => {
+    canvasPanel({
+      sdk: {
+        threads: {
+          get: async () => ({ title: null, status: "idle", providerId: "claude-code", createdAt: 0, updatedAt: 0 }),
+          timeline: async () => ({ rows: [{ id: "r1", kind: "conversation", role: "user", text: "Add dark mode" }] }),
+        },
+      },
+    });
+    expect(await screen.findByRole("button", { name: new RegExp("^Add dark mode — ") })).toBeTruthy();
+  });
+
+  it("wires onOpenAtRow to open the thread (BB can't yet address one exact row)", async () => {
+    const timeline = () => ({
+      rows: [{ id: "r1", kind: "work", workKind: "tool", toolName: "Bash", sourceSeqStart: 5 }],
+    });
+    const slot = canvasPanel({ sdk: { threads: { timeline } } });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Thread — ") }));
+    fireEvent.keyDown(document.querySelector("[data-canvas-view]")!, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp("^Bash — ") }));
+    fireEvent.click(screen.getByRole("button", { name: "Open at row" }));
+    expect(slot.navigateCalls).toContainEqual({ method: "toThread", threadId: "t1" });
+  });
+
   // BBP-179 acceptance regression: a real SDK timeline response nests a
   // turn's work rows under `children`, and a delegation (subagent) row
   // nests its own rows under `childRows` — not the shallow

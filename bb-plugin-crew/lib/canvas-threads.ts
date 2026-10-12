@@ -5,6 +5,7 @@
 // the same vendored `bb-canvas`, and this bit of mapping is domain code, not
 // part of the shared package.
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
+import type { ThreadLike } from "./canvas-details";
 
 export const threadNodeId = (threadId: string): string => `thread:${threadId}`;
 
@@ -27,6 +28,50 @@ export function threadNodeFor(
     parentId: parent.id,
     meta: compactMeta({ threadId, state: extra?.state, provider: extra?.provider }),
   };
+}
+
+/** What `enrichThreadNodes` needs to turn a placeholder thread node into
+ *  its real card: the thread itself, and — only when it has no title — its
+ *  first user message, for the same fallback `threadNodeFor` applies. */
+export type ThreadTitlePort = {
+  get: (threadId: string) => Promise<ThreadLike>;
+  firstUserMessage: (threadId: string) => Promise<string | undefined>;
+};
+
+/** Replaces each placeholder `"Thread"` node (built eagerly by `threadNodeFor`
+ *  with no `extra`) with one carrying the thread's real title/state/provider,
+ *  once that is readable (BBP-206 requirement 3). A thread that cannot be
+ *  read, or a node that is not a thread's parent, is left exactly as it was
+ *  — this never throws and never drops a node. */
+export async function enrichThreadNodes(
+  parents: readonly CanvasNode[],
+  nodes: readonly CanvasNode[],
+  port: ThreadTitlePort,
+): Promise<CanvasNode[]> {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  await Promise.all(
+    parents.map(async (parent) => {
+      const threadId = parent.meta?.threadId;
+      if (typeof threadId !== "string" || threadId === "") return;
+      const id = threadNodeId(threadId);
+      if (!byId.has(id)) return;
+      try {
+        const thread = await port.get(threadId);
+        const title = thread.title || thread.titleFallback || undefined;
+        const firstUserMessage = title ? undefined : await port.firstUserMessage(threadId).catch(() => undefined);
+        const rebuilt = threadNodeFor(parent, {
+          title,
+          state: thread.displayStatus ?? thread.status,
+          provider: thread.providerId,
+          firstUserMessage,
+        });
+        if (rebuilt) byId.set(id, rebuilt);
+      } catch {
+        // Thread unreadable: the placeholder "Thread" label stands.
+      }
+    }),
+  );
+  return nodes.map((node) => byId.get(node.id) ?? node);
 }
 
 /** The slice of a `ThreadTimelineResponse` row this mapping reads, aligned

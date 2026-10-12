@@ -16,7 +16,14 @@ import {
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
-import { threadNodeFor, timelineToCanvas, turnDetailsToCanvas, type TimelineRowLike } from "../lib/canvas-threads";
+import {
+  enrichThreadNodes,
+  threadNodeFor,
+  timelineToCanvas,
+  turnDetailsToCanvas,
+  type ThreadTitlePort,
+  type TimelineRowLike,
+} from "../lib/canvas-threads";
 import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
 import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
@@ -29,6 +36,20 @@ function withThreadNodes(nodes: readonly CanvasNode[]): CanvasNode[] {
     return thread ? [thread] : [];
   });
   return [...nodes, ...threads];
+}
+
+/** Builds the port `enrichThreadNodes` needs from the SDK the page already
+ *  has — the first user message is only ever fetched for a thread with no
+ *  title of its own. */
+function threadTitlePort(sdk: ReturnType<typeof useSdk>): ThreadTitlePort {
+  return {
+    get: async (threadId) => (await sdk.threads.get({ threadId })) as unknown as ThreadLike,
+    firstUserMessage: async (threadId) => {
+      const response = await sdk.threads.timeline({ threadId });
+      const rows = response.rows as unknown as readonly { kind: string; role?: string; text?: string }[];
+      return rows.find((row) => row.kind === "conversation" && row.role === "user")?.text;
+    },
+  };
 }
 
 type Layer = {
@@ -138,14 +159,18 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
               frames.push(frame);
             }
           }
+          const nodes = withThreadNodes(page.nodes);
           setLayer({
-            nodes: withThreadNodes(page.nodes),
+            nodes,
             edges: [...page.edges],
             expanded: new Set(page.expanded),
             frames,
             frameProjects,
           });
           setError(null);
+          void enrichThreadNodes(page.nodes, nodes, threadTitlePort(sdk)).then((enriched) => {
+            if (!cancelled) setLayer((prev) => (prev ? { ...prev, nodes: enriched } : prev));
+          });
         },
         (cause: unknown) => {
           // A failed poll keeps the last good tree on screen; only the
@@ -160,7 +185,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       stopPolling();
     };
     // `shownKey` stands in for `shown`, which is a fresh array on every filter change.
-  }, [rpc, shownKey, visible]);
+  }, [rpc, sdk, shownKey, visible]);
 
   if (visible === null) return null;
   if (!visible) {
@@ -242,6 +267,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       }
       toolbar={<ProjectFilter projects={projects} selected={selected} onChange={choose} />}
       onOpenThread={(threadId) => navigate.toThread(threadId)}
+      // BB's navigate API has no way yet to open a thread scrolled to a
+      // specific row (BBP-206); this opens the thread itself, the closest
+      // `onOpenAtRow` can get until the SDK can address one.
+      onOpenAtRow={(threadId) => navigate.toThread(threadId)}
       onOpenCrew={(crew) => {
         // BBP-49/185: the thread side panel first, as the crew surfaces do;
         // a surface with none falls back to the nav panel.

@@ -108,6 +108,7 @@ export type CanvasViewProps = {
   onOpenThread?: (threadId: string) => void;
   onOpenRun?: (runId: string) => void;
   onOpenCrew?: (crew: string) => void;
+  onOpenAtRow?: (threadId: string, seq: number) => void;
   className?: string;
 };
 
@@ -130,6 +131,7 @@ export function CanvasView({
   onOpenThread,
   onOpenRun,
   onOpenCrew,
+  onOpenAtRow,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -567,6 +569,7 @@ export function CanvasView({
                   onOpenThread={onOpenThread}
                   onOpenRun={onOpenRun}
                   onOpenCrew={onOpenCrew}
+                  onOpenAtRow={onOpenAtRow}
                   relations={hasRelations ? outgoingRelations(allEdges, selected.id, byId) : undefined}
                   onSelect={select}
                 />

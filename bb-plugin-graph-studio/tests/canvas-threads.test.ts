@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { threadNodeFor, threadNodeId, timelineToCanvas, turnDetailsToCanvas } from "../lib/canvas-threads";
+import { enrichThreadNodes, threadNodeFor, threadNodeId, timelineToCanvas, turnDetailsToCanvas } from "../lib/canvas-threads";
 import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
+import type { ThreadLike } from "../lib/canvas-details";
 
 describe("threadNodeFor", () => {
   it("builds a collapsed thread node under a member with a bound thread", () => {
@@ -351,5 +352,53 @@ describe("turn firstLine (BBP-209)", () => {
   it("omits firstLine without a user message", () => {
     const { nodes } = timelineToCanvas("t1", { rows: [{ id: "turn", kind: "turn", children: null }] });
     expect(nodes[0]!.meta).not.toHaveProperty("firstLine");
+  });
+});
+
+describe("enrichThreadNodes (BBP-210)", () => {
+  const parent: CanvasNode = { id: "member:a@crew", kind: "member", label: "a", parentId: null, meta: { threadId: "t1" } };
+
+  it("replaces the placeholder thread node with its real title, state and provider", async () => {
+    const placeholder = threadNodeFor(parent)!;
+    const port = {
+      get: async () =>
+        ({ title: "Fix login bug", status: "idle", displayStatus: "idle", providerId: "claude-code", createdAt: 0, updatedAt: 0 }) as ThreadLike,
+      firstUserMessage: async () => undefined,
+    };
+    const [node] = await enrichThreadNodes([parent], [placeholder], port);
+    expect(node).toMatchObject({ label: "Fix login bug", meta: { state: "idle", provider: "claude-code" } });
+  });
+
+  it("falls back to the first user message when the thread has no title", async () => {
+    const placeholder = threadNodeFor(parent)!;
+    const port = {
+      get: async () => ({ title: null, status: "idle", providerId: "claude-code", createdAt: 0, updatedAt: 0 }) as ThreadLike,
+      firstUserMessage: async () => "Please add dark mode",
+    };
+    const [node] = await enrichThreadNodes([parent], [placeholder], port);
+    expect(node.label).toBe("Please add dark mode");
+  });
+
+  it("keeps the placeholder label when the thread cannot be read", async () => {
+    const placeholder = threadNodeFor(parent)!;
+    const port = {
+      get: async (): Promise<ThreadLike> => {
+        throw new Error("gone");
+      },
+      firstUserMessage: async () => undefined,
+    };
+    const [node] = await enrichThreadNodes([parent], [placeholder], port);
+    expect(node).toEqual(placeholder);
+  });
+
+  it("leaves every non-thread node untouched, in its original position", async () => {
+    const other: CanvasNode = { id: "project:p1", kind: "project", label: "p1", parentId: null };
+    const nodes = await enrichThreadNodes([], [other], {
+      get: async (): Promise<ThreadLike> => {
+        throw new Error("n/a");
+      },
+      firstUserMessage: async () => undefined,
+    });
+    expect(nodes).toEqual([other]);
   });
 });
