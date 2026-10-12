@@ -95,6 +95,41 @@ describe("NodeCard status border (BBP-146)", () => {
     expect(screen.queryByText("Could not load activity")).toBeNull();
   });
 
+  it("shows a small check instead of the status dot when done, no title='done' dot", () => {
+    render(<NodeCard label="x" status="done" />);
+    expect(screen.queryByTitle("done")).toBeNull();
+    expect(document.querySelector("svg[data-bb-done-check]")).toBeTruthy();
+  });
+
+  it("negative: no check for any other status, or no status at all", () => {
+    render(
+      <>
+        <NodeCard label="a" status="running" />
+        <NodeCard label="b" />
+      </>,
+    );
+    expect(document.querySelector("svg[data-bb-done-check]")).toBeNull();
+  });
+});
+
+describe("NodeCard group tier never borders (BBP-222)", () => {
+  it.each(["agents", "project", "crew"] as const)("gives a %s card no border at all, even failed", (kind) => {
+    render(<NodeCard label="x" kind={kind} status="failed" />);
+    expect(screen.getByRole("button").style.borderStyle).toBe("none");
+  });
+
+  it("negative: a card-tier kind keeps its status border", () => {
+    render(<NodeCard label="x" kind="member" status="failed" />);
+    expect(screen.getByRole("button").style.border).toContain("var(--destructive)");
+  });
+
+  it("does not pulse a group card even while running", () => {
+    render(<NodeCard label="x" kind="project" status="running" />);
+    expect(screen.getByRole("button").className).not.toContain("bb-canvas-pulse");
+  });
+});
+
+describe("NodeCard keyframes injection", () => {
   it("injects its keyframes once, no matter how many cards render", () => {
     render(
       <>

@@ -19,6 +19,7 @@ export const TIER_OF: Record<CanvasNodeKind, Tier> = {
   turn: "row",
   "tool-call": "row",
   subagent: "row",
+  "system-event": "row",
 };
 
 export type TierSize = { width: number; height: number };

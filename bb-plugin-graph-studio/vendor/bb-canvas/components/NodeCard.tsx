@@ -8,6 +8,7 @@
 // kept only for the caller's icon and the card's ARIA label, not the border.
 import type { ReactNode } from "react";
 import type { CanvasNodeKind, CanvasStatus } from "../lib/types";
+import { TIER_OF } from "../lib/tiers";
 
 export type NodeCardProps = {
   label: string;
@@ -60,8 +61,12 @@ function ensurePulseStyles(): void {
 type Border = { border: string; pulse: boolean };
 
 /** Only a state colours the border — a neutral card (idle, done, or no
- *  status at all) always gets the same plain line, regardless of `kind`. */
-function borderFor(status: CanvasStatus | undefined, loadFailed: boolean): Border {
+ *  status at all) always gets the same plain line, regardless of `kind`. A
+ *  group-tier node (agents/project/crew, BBP-221) is a headerless header row
+ *  and never borders at all, whatever its status — it does not pulse either,
+ *  the same accent a border would otherwise carry. */
+function borderFor(status: CanvasStatus | undefined, kind: CanvasNodeKind | undefined, loadFailed: boolean): Border {
+  if (kind !== undefined && TIER_OF[kind] === "group") return { border: "none", pulse: false };
   if (loadFailed || status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
   // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
   // state that needs the human — it must not read weaker than "running".
@@ -77,6 +82,7 @@ export function NodeCard({
   label,
   subtitle,
   status,
+  kind,
   icon,
   selected = false,
   onClick,
@@ -85,7 +91,7 @@ export function NodeCard({
   loadFailed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
-  const { border, pulse } = borderFor(status, loadFailed);
+  const { border, pulse } = borderFor(status, kind, loadFailed);
   const errorText = loadFailed ? "Could not load activity" : undefined;
   const effectiveSubtitle = errorText ?? subtitle;
   const card = (
@@ -171,7 +177,23 @@ export function NodeCard({
           </span>
         ) : null}
       </span>
-      {status ? (
+      {status === "done" ? (
+        <svg
+          aria-hidden
+          data-bb-done-check
+          width={12}
+          height={12}
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="var(--muted-foreground)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0 }}
+        >
+          <path d="M3.5 8.5l3 3 6-7" />
+        </svg>
+      ) : status ? (
         <span
           aria-hidden
           title={status}
