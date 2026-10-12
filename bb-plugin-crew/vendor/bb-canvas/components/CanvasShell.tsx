@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutTree, type TreeLayout } from "../lib/layout";
-import { NodeCard, type NodeCardProps } from "./NodeCard";
+import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
 import type { CanvasEdge, CanvasNode } from "../lib/types";
@@ -29,20 +29,27 @@ export function useHostColorMode(): [React.RefObject<HTMLDivElement | null>, Col
   const [mode, setMode] = useState<ColorMode>("system");
   const measure = useCallback(() => {
     if (!ref.current || typeof getComputedStyle !== "function") return;
-    const background = getComputedStyle(ref.current).backgroundColor;
-    const lightness = colorLightness(background);
-    if (lightness !== null) setMode(lightness < 0.5 ? "dark" : "light");
+    // The shell itself is transparent, and `rgba(0, 0, 0, 0)` would read as
+    // black: walk up to the first painted background, the one actually on
+    // screen behind the canvas.
+    for (let element: Element | null = ref.current; element; element = element.parentElement) {
+      const lightness = colorLightness(getComputedStyle(element).backgroundColor);
+      if (lightness === null) continue;
+      setMode(lightness < 0.5 ? "dark" : "light");
+      return;
+    }
   }, []);
   useLayoutEffect(measure);
   return [ref, mode];
 }
 
 /** Perceived lightness (0–1) of an `rgb()`/`rgba()` string, or `null` if it
- *  cannot be read — a transparent background, for instance. */
+ *  cannot be read or is fully transparent. */
 export function colorLightness(color: string): number | null {
   const match = color.match(/rgba?\(([^)]+)\)/);
   if (!match) return null;
-  const [r, g, b] = match[1]!.split(",").map((part) => Number(part.trim()));
+  const [r, g, b, alpha] = match[1]!.split(",").map((part) => Number(part.trim()));
+  if (alpha === 0) return null;
   if (r === undefined || g === undefined || b === undefined || [r, g, b].some(Number.isNaN)) return null;
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
@@ -70,6 +77,10 @@ export type CanvasShellProps = {
   edges?: readonly CanvasEdge[];
   selectedId?: string | null;
   onSelect?: (nodeId: string) => void;
+  /** "status" (default) borders a card by its run state; "type" tints a
+   *  neutral card by `kind` instead. An error or needs-input border always
+   *  wins over either. */
+  colorMode?: NodeCardColorMode;
   className?: string;
 };
 
@@ -86,6 +97,7 @@ function toFlow(
   nodes: readonly CanvasNode[],
   selectedId: string | null | undefined,
   onSelect: ((id: string) => void) | undefined,
+  colorMode: NodeCardColorMode,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const childCount = new Map<string, number>();
@@ -99,6 +111,8 @@ function toFlow(
       subtitle: describeNode(node.kind, childCount.get(node.id) ?? 0, node.meta),
       icon: <KindIcon kind={node.kind} />,
       status: node.status,
+      kind: node.kind,
+      colorMode,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
     };
@@ -124,25 +138,27 @@ function toFlow(
     source: placed.from,
     target: placed.to,
     type: "statusEdge",
-    data: { variant: placed.variant, path: placed.path, label: placed.label } satisfies StatusEdgeData as unknown as Record<
-      string,
-      unknown
-    >,
+    data: {
+      variant: placed.variant,
+      path: placed.path,
+      label: placed.label,
+      state: placed.state,
+    } satisfies StatusEdgeData as unknown as Record<string, unknown>,
   }));
 
   return { flowNodes, flowEdges };
 }
 
 const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(function CanvasShellInner(
-  { nodes, expanded, edges = [], selectedId, onSelect, className },
+  { nodes, expanded, edges = [], selectedId, onSelect, colorMode: cardColorMode = "status", className },
   handleRef,
 ) {
-  const [hostRef, colorMode] = useHostColorMode();
+  const [hostRef, themeMode] = useHostColorMode();
   const flow = useReactFlow();
   const layout = useMemo(() => layoutTree(nodes, expanded, edges), [nodes, expanded, edges]);
   const { flowNodes, flowEdges } = useMemo(
-    () => toFlow(layout, nodes, selectedId, onSelect),
-    [layout, nodes, selectedId, onSelect],
+    () => toFlow(layout, nodes, selectedId, onSelect, cardColorMode),
+    [layout, nodes, selectedId, onSelect, cardColorMode],
   );
 
   useImperativeHandle(
@@ -162,7 +178,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         edges={flowEdges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
-        colorMode={colorMode}
+        colorMode={themeMode}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}

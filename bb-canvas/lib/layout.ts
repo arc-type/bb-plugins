@@ -7,7 +7,7 @@
 // tree read left to right (agents → project → crew → member → …), not a
 // flow chart. Siblings (several members, several run steps) stack as rows
 // within their shared column.
-import type { CanvasEdge, CanvasNode } from "./types";
+import type { CanvasEdge, CanvasEdgeState, CanvasNode } from "./types";
 
 export const NODE_WIDTH = 180;
 export const NODE_HEIGHT = 64;
@@ -36,6 +36,8 @@ export type PlacedEdge = {
   /** A back reference bows out to the right instead of running straight down
    *  through the nodes in between. */
   isBack: boolean;
+  /** Undefined draws the plain `--border` line from before BBP-146. */
+  state?: CanvasEdgeState;
 };
 
 export type TreeLayout = {
@@ -133,7 +135,7 @@ export function layoutTree(
   const flowEdges: PlacedEdge[] = order.flatMap((id) => {
     const parentId = parentIdOf.get(id)!;
     if (parentId === null) return [];
-    return [flowEdge(placed.get(parentId)!, placed.get(id)!)];
+    return [flowEdge(placed.get(parentId)!, placed.get(id)!, byId.get(id)!)];
   });
 
   const declaredEdges: PlacedEdge[] = edges.flatMap((edge) => {
@@ -151,14 +153,28 @@ export function layoutTree(
   return { positions: [...placed.values()], edges: [...flowEdges, ...declaredEdges], width, height };
 }
 
-function flowEdge(from: PlacedNode, to: PlacedNode): PlacedEdge {
+/** A tree line's state follows the child it leads to, not a declared edge —
+ *  there is no `CanvasEdge` for it to read one from. A child with no status
+ *  was never attempted; `running` is "now"; anything else it already has a
+ *  status for was attempted, so the line is "taken" — except `idle`, which is
+ *  also what a `skipped` step maps to: routing did not go there. */
+function flowEdgeState(child: CanvasNode): CanvasEdgeState | undefined {
+  // `idle` is a status, but nothing went there: an idle crew member must not
+  // light its line up like a step the run passed through, or every member
+  // list turns blue and the run's real path disappears in it.
+  if (child.status === undefined || child.status === "idle") return undefined;
+  return child.status === "running" ? "now" : "taken";
+}
+
+function flowEdge(from: PlacedNode, to: PlacedNode, toNode: CanvasNode): PlacedEdge {
   const fromX = from.x + from.width;
   const fromY = from.y + from.height / 2;
   const toX = to.x;
   const toY = to.y + to.height / 2;
   const midX = (fromX + toX) / 2;
   const path = [`M ${fromX} ${fromY}`, `C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`].join(" ");
-  return { from: from.id, to: to.id, variant: "flow", path, label: "", isBack: false };
+  const state = flowEdgeState(toNode);
+  return { from: from.id, to: to.id, variant: "flow", path, label: "", isBack: false, ...(state ? { state } : {}) };
 }
 
 /** Bows out past the right edge of the column the edge starts in, so a loop
@@ -170,7 +186,15 @@ function backEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdg
   const toX = to.x + to.width;
   const toY = to.y + to.height / 2;
   const path = [`M ${fromX} ${fromY}`, `C ${laneX} ${fromY}, ${laneX} ${toY}, ${toX} ${toY}`].join(" ");
-  return { from: from.id, to: to.id, variant: "back", path, label: edge.label ?? "", isBack: true };
+  return {
+    from: from.id,
+    to: to.id,
+    variant: "back",
+    path,
+    label: edge.label ?? "",
+    isBack: true,
+    ...(edge.state ? { state: edge.state } : {}),
+  };
 }
 
 function messageEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdge {
