@@ -99,6 +99,20 @@ describe("canvasLayer / canvasPage RPC", () => {
     await harness.lifecycle.dispose();
   });
 
+  it("keeps relation and links on link edges through the RPC output schema (BBP-197 fix)", async () => {
+    const { rpcContract } = await import("../server");
+    const layer = {
+      contractVersion: 1,
+      ...crewCanvasLayer("p1", [{ name: "trio", status: "running" }], [
+        { crew: "trio", key: "lead", lead: true, groupId: "orch", activity: "idle" },
+        { crew: "trio", key: "dev", lead: false, groupId: "impl", activity: "idle" },
+      ] as never, { trio: [{ from: "lead", to: "dev", kind: "assigns_to" }, { from: "dev", to: "lead", kind: "escalates_to" }] }),
+    };
+    const parsed = rpcContract.canvasLayer.output.parse(layer);
+    expect(parsed.edges).toEqual(layer.edges);
+    expect(parsed.edges[0]).toMatchObject({ relation: true, links: [{ kind: "assigns_to" }, { kind: "escalates_to" }] });
+  });
+
   it("negative: plugins.list failing keeps the page visible rather than hiding the canvas everywhere", async () => {
     const { createFakePluginHost } = await import("@get-bb/plugin-sdk/testing");
     const { default: plugin } = await import("../server");

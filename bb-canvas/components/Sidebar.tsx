@@ -150,6 +150,9 @@ export type SidebarProps = {
   onOpenRun?: (runId: string) => void;
   /** Shown as "Open crew" only when `meta.crew` is a string. */
   onOpenCrew?: (crew: string) => void;
+  /** Shown as "Open at row" only when `meta.threadId` is a string and
+   *  `meta.sourceSeq` is a number — jumps to that exact timeline position. */
+  onOpenAtRow?: (threadId: string, seq: number) => void;
   /** The node's own relations by kind (BBP-203); a target's name selects it
    *  through `onSelect`. Empty or absent: no section. */
   relations?: readonly RelationGroup[];
@@ -161,12 +164,20 @@ function stringMeta(node: CanvasNode, key: string): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, relations = [], onSelect }: SidebarProps) {
+function numberMeta(node: CanvasNode, key: string): number | undefined {
+  const value = node.meta?.[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect }: SidebarProps) {
   const { curated, details } = curateMeta(node.kind, node.meta);
   const threadId = onOpenThread ? stringMeta(node, "threadId") : undefined;
   const runId = onOpenRun ? stringMeta(node, "runId") : undefined;
   const crew = onOpenCrew ? stringMeta(node, "crew") : undefined;
-  const hasActions = threadId !== undefined || runId !== undefined || crew !== undefined;
+  const atRowThreadId = onOpenAtRow ? stringMeta(node, "threadId") : undefined;
+  const atRowSeq = onOpenAtRow ? numberMeta(node, "sourceSeq") : undefined;
+  const atRow = atRowThreadId !== undefined && atRowSeq !== undefined ? { threadId: atRowThreadId, seq: atRowSeq } : undefined;
+  const hasActions = threadId !== undefined || runId !== undefined || crew !== undefined || atRow !== undefined;
   const [width, setWidth] = useState(loadWidth);
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
   const asideRef = useRef<HTMLElement>(null);
@@ -342,6 +353,11 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, re
           {crew !== undefined ? (
             <button type="button" onClick={() => onOpenCrew?.(crew)} className="bb-canvas-action" style={ACTION_STYLE}>
               Open crew
+            </button>
+          ) : null}
+          {atRow !== undefined ? (
+            <button type="button" onClick={() => onOpenAtRow?.(atRow.threadId, atRow.seq)} className="bb-canvas-action" style={ACTION_STYLE}>
+              Open at row
             </button>
           ) : null}
         </div>

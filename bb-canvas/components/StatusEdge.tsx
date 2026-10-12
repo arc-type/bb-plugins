@@ -31,6 +31,8 @@ const STROKE_DASHARRAY: Partial<Record<CanvasEdgeVariant, string>> = {
   message: "4 4",
 };
 
+const RELATION_HOVER = { pointerEvents: "stroke" } as const;
+
 const NOW_CLASS = "bb-canvas-edge-now";
 const STYLE_ID = "bb-canvas-status-edge-styles";
 
@@ -66,6 +68,9 @@ export function StatusEdge({ data, selected }: StatusEdgeProps) {
       onMouseEnter={data.relation ? () => setHovered(true) : undefined}
       onMouseLeave={data.relation ? () => setHovered(false) : undefined}
       opacity={data.emphasis === "dim" ? 0.25 : undefined}
+      // React Flow marks unselectable edges "inactive" (pointer-events: none),
+      // so without this the hover label of a relation could never show.
+      style={data.relation ? RELATION_HOVER : undefined}
     >
       <BaseEdge
         path={data.path}

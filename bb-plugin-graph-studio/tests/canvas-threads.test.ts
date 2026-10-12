@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadNodeFor, threadNodeId, timelineToCanvas } from "../lib/canvas-threads";
+import { threadNodeFor, threadNodeId, timelineToCanvas, turnDetailsToCanvas } from "../lib/canvas-threads";
 import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
 
 describe("threadNodeFor", () => {
@@ -111,13 +111,47 @@ describe("timelineToCanvas", () => {
     expect(nodes[0]).toMatchObject({ kind: "subagent", label: "Agent: (no description)" });
   });
 
-  it("nests a turn row's children under its own canvas node", () => {
+  it("builds an expandable turn node from the real timeline shape (children: null)", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
         {
           id: "turn-1",
           kind: "turn",
           turnId: "turn-1",
+          status: "completed",
+          summaryCount: 2,
+          sourceSeqStart: 10,
+          sourceSeqEnd: 20,
+          children: null,
+        },
+      ],
+    });
+    const turn = nodes.find((node) => node.id === "row:turn-1")!;
+    expect(turn.status).toBe("done");
+    expect(turn.label).toBe("Turn · 2 steps");
+    expect(turn.meta).toMatchObject({
+      threadId: "t1",
+      turnId: "turn-1",
+      sourceSeqStart: 10,
+      sourceSeqEnd: 20,
+      summaryCount: 2,
+    });
+  });
+
+  it("carries summaryCount: 0 in meta for a turn with no steps, so it gets no chevron", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "turn-2", kind: "turn", turnId: "turn-2", status: "completed", summaryCount: 0, children: null }],
+    });
+    expect(nodes[0]!.meta).toMatchObject({ summaryCount: 0 });
+  });
+
+  it("nests a turn row's eagerly-provided children under its own canvas node (defensive, not the real SDK shape)", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "turn-3",
+          kind: "turn",
+          turnId: "turn-3",
           status: "completed",
           summaryCount: 2,
           children: [
@@ -127,9 +161,7 @@ describe("timelineToCanvas", () => {
         },
       ],
     });
-    const turn = nodes.find((node) => node.id === "row:turn-1")!;
-    expect(turn.status).toBe("done");
-    expect(turn.label).toBe("Turn · 2 steps");
+    const turn = nodes.find((node) => node.id === "row:turn-3")!;
     const children = nodes.filter((node) => node.parentId === turn.id);
     expect(children.map((node) => node.id)).toEqual(["row:r1", "row:r2"]);
   });
@@ -145,5 +177,27 @@ describe("timelineToCanvas", () => {
   it("falls back to '(empty)' for a conversation row with no text", () => {
     const { nodes } = timelineToCanvas("t1", { rows: [{ id: "r1", kind: "conversation", text: "" }] });
     expect(nodes[0]!.label).toBe("(empty)");
+  });
+});
+
+describe("turnDetailsToCanvas", () => {
+  it("maps a turn's lazily-fetched steps under the turn node, same mapping as thread-level rows", () => {
+    const { nodes } = turnDetailsToCanvas("row:turn-1", {
+      rows: [
+        { id: "r1", kind: "work", workKind: "tool", toolName: "Bash", status: "completed" },
+        {
+          id: "r2",
+          kind: "work",
+          workKind: "delegation",
+          toolName: "Task",
+          status: "completed",
+          description: "research the bug",
+          childRows: [{ id: "r3", kind: "work", workKind: "tool", toolName: "Read", status: "completed" }],
+        },
+      ],
+    });
+    expect(nodes.map((node) => node.id)).toEqual(["row:r1", "row:r2", "row:r3"]);
+    expect(nodes.filter((node) => node.parentId === "row:turn-1").map((node) => node.id)).toEqual(["row:r1", "row:r2"]);
+    expect(nodes.find((node) => node.id === "row:r3")!.parentId).toBe("row:r2");
   });
 });

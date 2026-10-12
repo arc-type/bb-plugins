@@ -12,7 +12,8 @@ export type CanvasNodeKind =
   | "thread"
   | "turn"
   | "tool-call"
-  | "subagent";
+  | "subagent"
+  | "system-event";
 
 export type CanvasStatus = "idle" | "running" | "waiting" | "done" | "failed" | "escalated";
 
@@ -92,9 +93,10 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   // `state` is the thread's own BB status, loaded on selection; the node-level
   // pill is the status of whatever the thread hangs under, not the thread.
   thread: ["title", "state", "provider", "model", "turns", "created", "updated", "threadId"],
-  turn: ["rowId"],
-  "tool-call": ["status", "summary"],
+  turn: ["rowId", "firstLine"],
+  "tool-call": ["toolName", "command", "outputPreview", "exitCode", "duration", "startedAt", "completedAt"],
   subagent: ["status", "summary"],
+  "system-event": ["detail", "oldParent", "newParent", "titles"],
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -121,6 +123,18 @@ const FIELD_LABELS: Record<string, string> = {
   turns: "Turns",
   created: "Created",
   updated: "Updated",
+  firstLine: "First line",
+  toolName: "Tool",
+  command: "Command",
+  outputPreview: "Output",
+  exitCode: "Exit code",
+  duration: "Duration",
+  startedAt: "Started",
+  completedAt: "Completed",
+  detail: "Detail",
+  oldParent: "Old parent",
+  newParent: "New parent",
+  titles: "Events",
 };
 
 function fieldLabel(key: string): string {

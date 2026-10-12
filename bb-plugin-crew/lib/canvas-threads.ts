@@ -30,7 +30,13 @@ export type TimelineRowLike = {
   role?: string;
   status?: string;
   summaryCount?: number;
-  /** A `"turn"` row's own nested rows. */
+  /** Where this row sits in the thread's source sequence — a turn row needs
+   *  both ends to fetch its own steps via `timelineTurnSummaryDetails`. */
+  sourceSeqStart?: number;
+  sourceSeqEnd?: number;
+  /** A `"turn"` row's own nested rows. The real SDK never populates this —
+   *  turn steps are fetched lazily via `timelineTurnSummaryDetails` — but a
+   *  caller that already has them (e.g. a future eager page) can still nest them. */
   children?: readonly TimelineRowLike[] | null;
   /** Discriminates a `"work"` row, e.g. `"tool"`, `"delegation"`. */
   workKind?: string;
@@ -99,19 +105,38 @@ export function timelineToCanvas(
   const nodes: CanvasNode[] = [];
   for (const row of response.rows) {
     if (row.kind === "turn") {
-      const turnId = `row:${row.id}`;
+      const turnNodeId = `row:${row.id}`;
+      const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
       nodes.push({
-        id: turnId,
+        id: turnNodeId,
         kind: "turn",
-        label: `Turn · ${row.summaryCount ?? (row.children?.length ?? 0)} ${(row.summaryCount ?? row.children?.length ?? 0) === 1 ? "step" : "steps"}`,
+        label: `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
         ...(row.status && TURN_STATUS[row.status] ? { status: TURN_STATUS[row.status] } : {}),
         parentId: parent,
-        meta: { rowId: row.id },
+        meta: {
+          rowId: row.id,
+          threadId,
+          turnId: row.turnId ?? row.id,
+          sourceSeqStart: row.sourceSeqStart,
+          sourceSeqEnd: row.sourceSeqEnd,
+          summaryCount,
+        },
       });
-      for (const child of row.children ?? []) nodes.push(...rowNodes(child, turnId));
+      for (const child of row.children ?? []) nodes.push(...rowNodes(child, turnNodeId));
     } else {
       nodes.push(...rowNodes(row, parent));
     }
   }
   return { nodes, edges: [] };
+}
+
+/** Converts a turn's lazily-fetched steps (`timelineTurnSummaryDetails`'s
+ *  `rows`) into canvas nodes under the turn's own node id. Same row mapping
+ *  as `timelineToCanvas`'s thread-level rows (tool-call, subagent incl.
+ *  nested `childRows`) — only the parent differs. */
+export function turnDetailsToCanvas(
+  turnNodeId: string,
+  response: { rows: readonly TimelineRowLike[] },
+): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  return { nodes: response.rows.flatMap((row) => rowNodes(row, turnNodeId)), edges: [] };
 }

@@ -15,6 +15,7 @@ const ALL_KINDS: CanvasNodeKind[] = [
   "turn",
   "tool-call",
   "subagent",
+  "system-event",
 ];
 
 describe("KindIcon", () => {
@@ -30,5 +31,12 @@ describe("KindIcon", () => {
 
   it("describes a subagent node by its label alone", () => {
     expect(describeNode("subagent", 0)).toBe("Subagent");
+  });
+
+  it("renders a distinct icon and label for system-event", () => {
+    const { container } = render(<KindIcon kind="system-event" />);
+    const path = container.querySelector("path")?.getAttribute("d");
+    expect(path).toBeTruthy();
+    expect(describeNode("system-event", 0)).toBe("System event");
   });
 });

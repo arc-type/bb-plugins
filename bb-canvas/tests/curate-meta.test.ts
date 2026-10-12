@@ -17,11 +17,11 @@ describe("curateMeta", () => {
     ]);
   });
 
-  it("curates a tool-call node's status and summary", () => {
-    const { curated } = curateMeta("tool-call", { rowId: "r1", kind: "work", status: "completed", summary: "ls → 3 files" });
+  it("curates a tool-call node's tool name and command, not status/summary", () => {
+    const { curated } = curateMeta("tool-call", { rowId: "r1", kind: "work", toolName: "Bash", command: "ls" });
     expect(curated).toEqual([
-      { label: "Status", value: "completed" },
-      { label: "Summary", value: "ls → 3 files" },
+      { label: "Tool", value: "Bash" },
+      { label: "Command", value: "ls" },
     ]);
   });
 
@@ -78,5 +78,46 @@ describe("curateMeta", () => {
   it("shows only the thread fields that are present, without empty rows", () => {
     const { curated } = curateMeta("thread", { threadId: "thr_1", model: null });
     expect(curated).toEqual([{ label: "Thread", value: "thr_1" }]);
+  });
+
+  it("curates a system-event node's detail", () => {
+    const { curated } = curateMeta("system-event", { detail: "Earlier chat is hidden" });
+    expect(curated).toEqual([{ label: "Detail", value: "Earlier chat is hidden" }]);
+  });
+
+  it("curates a system-event node's old/new parent for a parent-change", () => {
+    const { curated } = curateMeta("system-event", { oldParent: "thr_a", newParent: "thr_b" });
+    expect(curated).toEqual([
+      { label: "Old parent", value: "thr_a" },
+      { label: "New parent", value: "thr_b" },
+    ]);
+  });
+
+  it("curates a bundled system-event node's titles", () => {
+    const { curated } = curateMeta("system-event", { titles: "event 1, event 2" });
+    expect(curated).toEqual([{ label: "Events", value: "event 1, event 2" }]);
+  });
+
+  it("curates a turn node's first line alongside its row id", () => {
+    const { curated } = curateMeta("turn", { rowId: "r1", firstLine: "Add dark mode" });
+    expect(curated).toEqual([
+      { label: "Row", value: "r1" },
+      { label: "First line", value: "Add dark mode" },
+    ]);
+  });
+
+  it("curates a tool-call node's expanded fields", () => {
+    const { curated } = curateMeta("tool-call", {
+      toolName: "Bash",
+      command: "ls -la",
+      outputPreview: "3 files",
+      exitCode: 0,
+      duration: "2.3s",
+      startedAt: "2026-10-12 08:00 UTC",
+      completedAt: "2026-10-12 08:00:02 UTC",
+    });
+    expect(curated.map((field) => field.label)).toEqual([
+      "Tool", "Command", "Output", "Exit code", "Duration", "Started", "Completed",
+    ]);
   });
 });
