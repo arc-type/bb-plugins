@@ -224,6 +224,9 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew }: 
     <aside
       ref={asideRef}
       aria-label={`Details for ${node.label}`}
+      // Scrolling a long details list must not pan the canvas underneath it
+      // (BBP-199) — React Flow skips its own wheel handling for this class.
+      className="nowheel"
       style={{
         position: "relative",
         // border-box: the clamped value is the width on screen, padding and border included.

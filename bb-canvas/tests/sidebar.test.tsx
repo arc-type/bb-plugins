@@ -76,6 +76,12 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close details" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("negative (BBP-199): carries the nowheel class so scrolling it does not pan the canvas", () => {
+    const node: CanvasNode = { id: "m1", kind: "member", label: "orch-lead", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.getByLabelText("Details for orch-lead").className).toContain("nowheel");
+  });
 });
 
 describe("Sidebar actions", () => {

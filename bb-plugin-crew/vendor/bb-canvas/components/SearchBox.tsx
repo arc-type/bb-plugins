@@ -30,7 +30,13 @@ export function SearchBox({ value, onChange, onSubmit, onClose }: SearchBoxProps
   };
 
   return (
-    <div role="search" style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px" }}>
+    <div
+      role="search"
+      // Keeps a wheel gesture over the search bar from panning the canvas
+      // underneath it (BBP-199).
+      className="nowheel"
+      style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px" }}
+    >
       <input
         ref={ref}
         type="text"

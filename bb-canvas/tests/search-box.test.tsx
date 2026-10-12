@@ -30,4 +30,9 @@ describe("SearchBox", () => {
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("negative (BBP-199): carries the nowheel class so scrolling it does not pan the canvas", () => {
+    render(<SearchBox value="" onChange={vi.fn()} onSubmit={() => true} onClose={vi.fn()} />);
+    expect(screen.getByRole("search").className).toContain("nowheel");
+  });
 });

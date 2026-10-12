@@ -73,6 +73,51 @@ describe("CanvasShell frames (BBP-165)", () => {
   });
 });
 
+describe("CanvasShell trackpad/scroll navigation (BBP-199)", () => {
+  function viewportTransform(container: HTMLElement): string {
+    return (container.querySelector(".react-flow__viewport") as HTMLElement).style.transform;
+  }
+
+  it("pans the viewport on a plain wheel gesture over the canvas", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewportTransform(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: 100, bubbles: true });
+    const after = viewportTransform(container);
+    expect(after).not.toBe(before);
+    // A pan changes translate, not scale.
+    expect(after.match(/scale\(([^)]+)\)/)?.[1]).toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  });
+
+  it("zooms at the pointer on Ctrl+wheel instead of panning", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const pane = container.querySelector(".react-flow__pane")!;
+    const before = viewportTransform(container);
+    fireEvent.wheel(pane, { deltaX: 0, deltaY: -100, ctrlKey: true, bubbles: true });
+    const after = viewportTransform(container);
+    expect(after.match(/scale\(([^)]+)\)/)?.[1]).not.toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  });
+
+  it("negative: a wheel gesture over a node card without Ctrl/Cmd pans instead of zooming", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const card = screen.getByRole("button", { name: new RegExp("^orch-lead — ") });
+    const before = viewportTransform(container);
+    fireEvent.wheel(card, { deltaX: 0, deltaY: 100, bubbles: true });
+    const after = viewportTransform(container);
+    expect(after.match(/scale\(([^)]+)\)/)?.[1]).toBe(before.match(/scale\(([^)]+)\)/)?.[1]);
+  });
+
+  it("negative: scrolling over an element outside the canvas pane does not move the viewport", () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} />);
+    const outside = document.createElement("div");
+    outside.className = "nowheel";
+    container.appendChild(outside);
+    const before = viewportTransform(container);
+    fireEvent.wheel(outside, { deltaX: 0, deltaY: 100, bubbles: true });
+    expect(viewportTransform(container)).toBe(before);
+  });
+});
+
 describe("colorLightness", () => {
   it("treats a fully transparent background as unreadable, not as black", () => {
     expect(colorLightness("rgba(0, 0, 0, 0)")).toBeNull();

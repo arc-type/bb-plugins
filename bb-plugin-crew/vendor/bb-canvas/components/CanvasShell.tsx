@@ -294,8 +294,10 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
         // `CanvasView` already gives a meaning to. Without this, a click on a
         // card (which focuses its node) hands those keys to React Flow first.
         disableKeyboardA11y
-        zoomOnScroll
-        panOnScroll={false}
+        zoomOnScroll={false}
+        panOnScroll
+        zoomOnPinch
+        zoomActivationKeyCode={["Meta", "Control"]}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         // React Flow's default floor (0.5) is too high for a real tree: two
