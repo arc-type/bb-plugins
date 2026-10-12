@@ -40,6 +40,8 @@ export type PlacedEdge = {
   isBack: boolean;
   /** Undefined draws the plain `--border` line from before BBP-146. */
   state?: CanvasEdgeState;
+  relation?: boolean;
+  emphasis?: CanvasEdge["emphasis"];
 };
 
 /** A frame's bounding box: the padded rectangle around its member cards. */
@@ -254,6 +256,7 @@ function backEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdg
     label: edge.label ?? "",
     isBack: true,
     ...(edge.state ? { state: edge.state } : {}),
+    ...relationOf(edge),
   };
 }
 
@@ -263,5 +266,10 @@ function messageEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): Placed
   const toX = to.x + to.width / 2;
   const toY = to.y + to.height / 2;
   const path = `M ${fromX} ${fromY} L ${toX} ${toY}`;
-  return { from: from.id, to: to.id, variant: "message", path, label: edge.label ?? "", isBack: false };
+  return { from: from.id, to: to.id, variant: "message", path, label: edge.label ?? "", isBack: false, ...relationOf(edge) };
+}
+
+function relationOf(edge: CanvasEdge): Pick<PlacedEdge, "relation" | "emphasis"> {
+  if (!edge.relation) return {};
+  return { relation: true, ...(edge.emphasis ? { emphasis: edge.emphasis } : {}) };
 }

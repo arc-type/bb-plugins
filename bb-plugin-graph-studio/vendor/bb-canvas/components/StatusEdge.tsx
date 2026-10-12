@@ -4,15 +4,26 @@
 // traffic to show one for) — and, since BBP-146, the two states any `flow`
 // or `back` edge can carry: `taken` (solid primary) and `now` (the same,
 // with a dash that travels along it).
+//
+// A relation edge (BBP-202) shows its label only on hover or when its
+// selection highlights it, and dims when another node's relations are in
+// focus.
+import { useState } from "react";
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from "@xyflow/react";
-import type { CanvasEdgeState, CanvasEdgeVariant } from "../lib/types";
+import type { CanvasEdgeEmphasis, CanvasEdgeState, CanvasEdgeVariant } from "../lib/types";
 
 export type StatusEdgeData = {
   variant: CanvasEdgeVariant;
   path: string;
   label: string;
   state?: CanvasEdgeState;
+  relation?: boolean;
+  emphasis?: CanvasEdgeEmphasis;
 };
+
+export function relationLabelVisible(data: StatusEdgeData, hovered: boolean): boolean {
+  return !data.relation || hovered || data.emphasis === "highlight";
+}
 
 export type StatusEdgeProps = EdgeProps & { data: StatusEdgeData };
 
@@ -47,10 +58,15 @@ function strokeFor(state: CanvasEdgeState | undefined, selected: boolean | undef
 
 export function StatusEdge({ data, selected }: StatusEdgeProps) {
   ensureNowStyles();
+  const [hovered, setHovered] = useState(false);
   const [labelX, labelY] = midpoint(data.path);
-  const { stroke, strokeWidth } = strokeFor(data.state, selected);
+  const { stroke, strokeWidth } = strokeFor(data.state, selected || data.emphasis === "highlight");
   return (
-    <>
+    <g
+      onMouseEnter={data.relation ? () => setHovered(true) : undefined}
+      onMouseLeave={data.relation ? () => setHovered(false) : undefined}
+      opacity={data.emphasis === "dim" ? 0.25 : undefined}
+    >
       <BaseEdge
         path={data.path}
         className={data.state === "now" ? NOW_CLASS : undefined}
@@ -61,7 +77,7 @@ export function StatusEdge({ data, selected }: StatusEdgeProps) {
           fill: "none",
         }}
       />
-      {data.label ? (
+      {data.label && relationLabelVisible(data, hovered) ? (
         <EdgeLabelRenderer>
           <div
             style={{
@@ -79,7 +95,7 @@ export function StatusEdge({ data, selected }: StatusEdgeProps) {
           </div>
         </EdgeLabelRenderer>
       ) : null}
-    </>
+    </g>
   );
 }
 

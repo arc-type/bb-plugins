@@ -62,7 +62,14 @@ export type CanvasEdge = {
   label?: string;
   count?: number;
   state?: CanvasEdgeState;
+  /** A declared relation between two nodes — a crew's link (BBP-202): drawn
+   *  only on demand, see `relationsView`. */
+  relation?: boolean;
+  /** Set by `relationsView` when a node is selected. */
+  emphasis?: CanvasEdgeEmphasis;
 };
+
+export type CanvasEdgeEmphasis = "highlight" | "dim";
 
 export type CuratedField = { label: string; value: string };
 

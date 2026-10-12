@@ -16,6 +16,7 @@ import {
   withToggle,
   type ExpandedState,
 } from "../lib/expanded-state";
+import { loadRelations, relationsView, saveRelations } from "../lib/relations";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const COLOR_MODE_KEY = "bb-canvas:colour-mode";
@@ -140,6 +141,7 @@ export function CanvasView({
   // the state that caused it.
   const [failedLoads, setFailedLoads] = useState<ReadonlySet<string>>(new Set());
   const [colorMode, setColorMode] = useState<ColorMode>(() => loadColorMode());
+  const [showRelations, setShowRelations] = useState(() => loadRelations(surface));
   // Only one frame editable at a time (BBP-166): entering a second frame's
   // edit mode without an `Escape` first is a no-op, not a silent switch.
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -162,6 +164,19 @@ export function CanvasView({
     () => [...edges, ...[...loaded.values()].flatMap((result) => result.edges ?? [])],
     [edges, loaded],
   );
+
+  const hasRelations = useMemo(() => allEdges.some((edge) => edge.relation), [allEdges]);
+  const shownEdges = useMemo(
+    () => (hasRelations ? relationsView(allEdges, showRelations, selectedId) : allEdges),
+    [hasRelations, allEdges, showRelations, selectedId],
+  );
+
+  function toggleRelations() {
+    setShowRelations((prev) => {
+      saveRelations(surface, !prev);
+      return !prev;
+    });
+  }
 
   const byId = useMemo(() => new Map(allNodes.map((node) => [node.id, node])), [allNodes]);
   const visible = useMemo(
@@ -478,6 +493,11 @@ export function CanvasView({
           <button type="button" onClick={expandAll} style={TOOLBAR_BUTTON}>
             Expand all
           </button>
+          {hasRelations ? (
+            <button type="button" onClick={toggleRelations} aria-pressed={showRelations} style={TOOLBAR_BUTTON}>
+              Relations
+            </button>
+          ) : null}
           <ColorModeToggle mode={colorMode} onToggle={toggleColorMode} />
         </div>
       </div>
@@ -498,7 +518,7 @@ export function CanvasView({
             expandable={expandable}
             onToggle={toggle}
             fitRequest={fitRequest}
-            edges={allEdges}
+            edges={shownEdges}
             frames={frames}
             selectedId={selectedId}
             onSelect={select}

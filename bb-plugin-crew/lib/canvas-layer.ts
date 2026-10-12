@@ -99,7 +99,8 @@ export const crewNameFromFrameId = (frameId: string): string => frameId.slice("f
  * the groups in file order), and the crew's links as edges. A link that
  * points back up (pathBetween's "back" shape) becomes a back edge, the rest
  * flow edges. Links to unknown members or to oneself are dropped; several
- * links between one pair of members bundle into one edge.
+ * links between one pair of members bundle into one edge. Every edge is a
+ * relation (BBP-202): bb-canvas draws it only on demand.
  */
 export function crewTopologyFrame(
   crew: string,
@@ -141,6 +142,7 @@ export function crewTopologyFrame(
     from: nodeId(pair.from),
     to: nodeId(pair.to),
     variant: pathBetween(boxes.get(pair.from)!, boxes.get(pair.to)!).shape === "back" ? "back" : "flow",
+    relation: true,
     label: [[...pair.forward].join(", "), [...pair.back].join(", ")].filter(Boolean).join(" ⇄ "),
   }));
   return { frames: [{ id: frameId, parentId: null, label: crew }], nodes, edges };

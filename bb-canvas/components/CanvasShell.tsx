@@ -16,7 +16,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { layoutTree, type TreeLayout } from "../lib/layout";
+import { layoutTree, type PlacedEdge, type TreeLayout } from "../lib/layout";
 import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
 import { Frame, type FrameProps } from "./Frame";
 import { describeNode, KindIcon } from "./KindIcon";
@@ -194,6 +194,26 @@ export type CanvasShellHandle = {
   zoomOut: () => void;
 };
 
+/** React Flow edges for the placed ones; relations sit below every card and
+ *  badge (BBP-202). */
+export function toFlowEdges(placedEdges: readonly PlacedEdge[]): Edge[] {
+  return placedEdges.map((placed, index) => ({
+    id: `${placed.from}->${placed.to}-${index}`,
+    source: placed.from,
+    target: placed.to,
+    type: "statusEdge",
+    data: {
+      variant: placed.variant,
+      path: placed.path,
+      label: placed.label,
+      state: placed.state,
+      relation: placed.relation,
+      emphasis: placed.emphasis,
+    } satisfies StatusEdgeData as unknown as Record<string, unknown>,
+    ...(placed.relation ? { zIndex: 0 } : {}),
+  }));
+}
+
 function toFlow(
   layout: TreeLayout,
   nodes: readonly CanvasNode[],
@@ -251,18 +271,7 @@ function toFlow(
     };
   });
 
-  const flowEdges: Edge[] = layout.edges.map((placed, index) => ({
-    id: `${placed.from}->${placed.to}-${index}`,
-    source: placed.from,
-    target: placed.to,
-    type: "statusEdge",
-    data: {
-      variant: placed.variant,
-      path: placed.path,
-      label: placed.label,
-      state: placed.state,
-    } satisfies StatusEdgeData as unknown as Record<string, unknown>,
-  }));
+  const flowEdges = toFlowEdges(layout.edges);
 
   const frameNodes: Node[] = (layout.frames ?? []).map((placed) => ({
     id: placed.id,
