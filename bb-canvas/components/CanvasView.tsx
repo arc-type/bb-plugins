@@ -13,6 +13,10 @@ import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const COLOR_MODE_KEY = "bb-canvas:colour-mode";
 const EMPTY_DIMMED: ReadonlySet<string> = new Set();
+/** Floor height so the canvas stays usable even with no sized ancestor
+ *  (BBP-173). Tall enough to show a handful of cards, short enough to not
+ *  force scroll in a host that does size its container normally. */
+const MIN_HEIGHT = 320;
 
 /** Never throws: a private-browsing tab, a full quota, or an environment
  *  with no `localStorage` at all must fall back to the default, not crash
@@ -300,7 +304,11 @@ export function CanvasView({
       // or the sidebar must not steal focus away from it.
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      style={{ display: "flex", flexDirection: "column", height: "100%", outline: "none" }}
+      // `height: "100%"` alone collapses to 0 the moment an ancestor has no
+      // explicit height of its own — the nav-panel route's container, for
+      // one (BBP-173). `minHeight` is the floor that keeps the canvas usable
+      // either way; a sized ancestor still wins, since 100% there is taller.
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: MIN_HEIGHT, outline: "none" }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />

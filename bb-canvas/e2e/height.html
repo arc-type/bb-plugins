@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>bb-canvas e2e height fixture</title>
+    <link rel="stylesheet" href="./dist/height.css" />
+    <style>
+      /* No height anywhere on purpose — html/body/#root all default to
+         auto, the case a nav-panel host without a measured height gives
+         CanvasView (BBP-173/WI7). */
+      :root {
+        --card: #151517; --border: #2a2a2d; --foreground: #e6e6e6;
+        --muted-foreground: #9a9aa0; --primary: #6aa9ff; --background: #0b0b0c;
+        --destructive: #ff6a6a;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./dist/height.js"></script>
+  </body>
+</html>

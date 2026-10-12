@@ -14,3 +14,15 @@ await build({
   jsx: "automatic",
   loader: { ".css": "css" },
 });
+
+// Its own entry point (BBP-173/WI7): a page that must not share
+// fixture-app.tsx's fixed-size wrapper, since the whole point is to render
+// with no ancestor height at all.
+await build({
+  entryPoints: [`${dir}height-fixture.tsx`],
+  bundle: true,
+  outfile: `${dir}dist/height.js`,
+  format: "esm",
+  jsx: "automatic",
+  loader: { ".css": "css" },
+});
