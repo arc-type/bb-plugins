@@ -7,6 +7,7 @@ import {
   threadNodeId,
   timelineToCanvas,
   turnDetailsToCanvas,
+  turnTitle,
   type TimelineRowLike,
 } from "../lib/canvas-threads";
 import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
@@ -682,7 +683,7 @@ describe("turn firstLine (BBP-206 R2b)", () => {
         },
       ],
     });
-    expect(nodes[0]).toMatchObject({ label: "Turn · 2 steps", meta: { firstLine: "Add dark mode" } });
+    expect(nodes[0]).toMatchObject({ label: "Add dark mode", meta: { firstLine: "Add dark mode" } });
   });
 
   it("omits firstLine without a user message, and on the real shape where children is always null", () => {
@@ -899,7 +900,93 @@ describe("BBP-206 R2b acceptance: real timeline fixtures", () => {
       turnDetails: async () => ({ rows: [fixtures.conversationUser as TimelineRowLike, fixtures.conversationAssistant as TimelineRowLike] }),
     };
     const [enriched] = await enrichTurnNodes(nodes, port);
-    expect(enriched.label).toMatch(/^\[crew\] Kickoff brief for steps-impl@factory-1$/);
-    expect(enriched.meta!.firstLine).toContain("[crew] Kickoff brief for steps-impl@factory-1");
+    expect(enriched.label).toBe("Kickoff: steps-impl@factory-1");
+    expect(enriched.meta!.firstLine).toBe("Kickoff: steps-impl@factory-1");
+  });
+});
+
+describe("turnTitle (BBP-228)", () => {
+  it("translates a crew From/To message with a Subject line to 'from <sender>: <subject>'", () => {
+    expect(turnTitle("[crew] From: orch-lead@factory-1 → To: steps-spec@factory-1\nSent: …\nSubject: Spec BBP-228\n---\nNew ticket…")).toBe(
+      "from orch-lead: Spec BBP-228",
+    );
+  });
+
+  it("falls back to the first line after the --- separator when there is no Subject line", () => {
+    expect(turnTitle("[crew] From: X → To: Y\n---\nErste Zeile.\nZweite Zeile.")).toBe("Erste Zeile.");
+  });
+
+  it("translates a crew kickoff brief to 'Kickoff: <name>'", () => {
+    expect(turnTitle("[crew] Kickoff brief for steps-impl@factory-1\n\nYou are…")).toBe("Kickoff: steps-impl@factory-1");
+  });
+
+  it("strips the [bb system] prefix, keeping the rest of the line", () => {
+    expect(turnTitle("[bb system] Reminder: …")).toBe("Reminder: …");
+  });
+
+  it("translates a thread message prefix to 'from thread: <line>'", () => {
+    expect(turnTitle("[bb message from thread:thr_abc123] Bitte prüfen")).toBe("from thread: Bitte prüfen");
+  });
+
+  it("uses a normal user message as-is", () => {
+    expect(turnTitle("Bitte das Feature X bauen")).toBe("Bitte das Feature X bauen");
+  });
+
+  it("falls back to 'Turn' for an empty request", () => {
+    expect(turnTitle("")).toBe("Turn");
+  });
+
+  it("falls back to 'Turn' for a bare [bb system] prefix with nothing after it", () => {
+    expect(turnTitle("[bb system]")).toBe("Turn");
+  });
+
+  it("falls back to 'Turn' when only blank lines follow the --- separator", () => {
+    expect(turnTitle("[crew] From: X → To: Y\n---\n\n")).toBe("Turn");
+  });
+});
+
+describe("timelineToCanvas: turn titles from the triggering request (BBP-228)", () => {
+  it("uses the thread-level user row's turnTitle as the turn's label and meta.firstLine, with no separate node for that row", () => {
+    const { nodes } = timelineToCanvas("thr_wyw9bnia2w", {
+      rows: [fixtures.conversationUser as TimelineRowLike, fixtures.turnWithManySteps as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    const turn = nodes[0]!;
+    expect(turn.label).toBe("Kickoff: steps-impl@factory-1");
+    expect(turn.meta).toMatchObject({ firstLine: "Kickoff: steps-impl@factory-1" });
+  });
+
+  it("sets meta.answerPreview from the last assistant conversation row under the same turnId", () => {
+    const { nodes } = timelineToCanvas("thr_wyw9bnia2w", {
+      rows: [fixtures.conversationUser as TimelineRowLike, fixtures.conversationAssistant as TimelineRowLike, fixtures.turnWithManySteps as TimelineRowLike],
+    });
+    const turn = nodes.find((node) => node.id === `row:${(fixtures.turnWithManySteps as Record<string, string>).id}`)!;
+    expect(turn.meta!.answerPreview).toBe((fixtures.conversationAssistant as Record<string, string>).text);
+  });
+
+  it("assigns a Pi-style user row without turnId to the next following turn by sourceSeqStart order", () => {
+    const { rows } = fixtures.piThreadRequestFallback as { rows: TimelineRowLike[] };
+    const { nodes } = timelineToCanvas("thr_m5hdus9gv4", { rows });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ kind: "turn", label: "Bitte den Timeout-Bug im Retry-Handler fixen" });
+  });
+
+  it("drops a turnId-less user row entirely when no turn follows it (no fallback to a previous turn, no own node)", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "turn-a", kind: "turn", turnId: "turn-a", status: "completed", summaryCount: 1, sourceSeqStart: 1, sourceSeqEnd: 2, children: null },
+        { id: "orphan", kind: "conversation", role: "user", text: "trailing message", sourceSeqStart: 5 },
+      ],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({ id: "row:turn-a", label: "Turn · 1 step" });
+  });
+
+  it("keeps a turn without any assigned request on the plain 'Turn · n steps' label", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "turn-b", kind: "turn", turnId: "turn-b", status: "completed", summaryCount: 3, children: null }],
+    });
+    expect(nodes[0]).toMatchObject({ label: "Turn · 3 steps" });
+    expect(nodes[0]!.meta).not.toHaveProperty("firstLine");
   });
 });

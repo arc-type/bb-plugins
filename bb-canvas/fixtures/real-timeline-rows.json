@@ -293,5 +293,36 @@
         "title": "Creating worktree"
       }
     ]
+  },
+  "piThreadRequestFallback": {
+    "_note": "Pi/pipeline (thr_m5hdus9gv4): a thread-level user conversation row with no turnId, followed by exactly one turn — BBP-228 Decisions/Spec note that Pi threads may omit turnId on the request row, so it is assigned to the next following turn by sourceSeqStart order instead.",
+    "rows": [
+      {
+        "id": "pi_conv_01",
+        "kind": "conversation",
+        "role": "user",
+        "threadId": "thr_m5hdus9gv4",
+        "turnId": null,
+        "createdAt": 1791815890000,
+        "startedAt": 1791815890000,
+        "sourceSeqStart": 39,
+        "sourceSeqEnd": 39,
+        "text": "Bitte den Timeout-Bug im Retry-Handler fixen"
+      },
+      {
+        "id": "pi_turn_01",
+        "kind": "turn",
+        "threadId": "thr_m5hdus9gv4",
+        "turnId": "pi_turn_01",
+        "status": "completed",
+        "summaryCount": 3,
+        "createdAt": 1791815890100,
+        "startedAt": 1791815890100,
+        "completedAt": 1791815900800,
+        "sourceSeqStart": 40,
+        "sourceSeqEnd": 41,
+        "children": null
+      }
+    ]
   }
 }

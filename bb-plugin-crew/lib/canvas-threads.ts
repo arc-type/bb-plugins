@@ -198,6 +198,9 @@ export type TimelineRowLike = {
   workflowName?: string | null;
   taskType?: string;
   summary?: string | null;
+  /** A `"conversation"` row's own request classification (BBP-228) — not yet
+   *  used by `turnTitle` (reserved for a future kind-specific form). */
+  systemMessageKind?: string;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -240,13 +243,66 @@ function duration(startedAt?: number, completedAt?: number): string | undefined 
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** The first line of the first conversation row with `role: "user"` among
- *  `rows` — the turn's own request. Untruncated; callers pick their own
- *  length (the card label and the sidebar field truncate differently). */
-function firstUserLine(rows: readonly TimelineRowLike[] | null | undefined): string | undefined {
-  const request = (rows ?? []).find((row) => row.kind === "conversation" && row.role === "user");
-  const line = request?.text?.split("\n").find((candidate) => candidate.trim() !== "");
-  return line || undefined;
+/** The first conversation row with `role: "user"` among `rows` — the turn's
+ *  own request, as found in its (always-null-on-real-pages) `children`, kept
+ *  only as the `turnDetailsToCanvas`/`enrichTurnNodes` fallback path's
+ *  source of truth (BBP-228 moved the primary source to thread-level rows,
+ *  see `timelineToCanvas`). */
+function firstUserConversation(rows: readonly TimelineRowLike[] | null | undefined): TimelineRowLike | undefined {
+  return (rows ?? []).find((row) => row.kind === "conversation" && row.role === "user");
+}
+
+/** Derives a turn's card title from the raw text of its triggering request
+ *  (BBP-228): a crew message's `From: … → To: …` header becomes `"from
+ *  <sender>: <subject>"` (or, lacking a `Subject:` line, the first line after
+ *  the `---` separator); a kickoff brief becomes `"Kickoff: <name>"`; a `[bb
+ *  message from thread:…]` becomes `"from thread: <line>"`; a `[bb system]`
+ *  notice keeps just its own first line; anything else is used as-is. Never
+ *  empty — a request with no usable line after stripping its prefix falls
+ *  back to `"Turn"`. `systemMessageKind` is accepted for a future
+ *  kind-specific form but not evaluated this round. */
+export function turnTitle(text: string, _systemMessageKind?: string): string {
+  const trimmed = (text ?? "").trim();
+  if (trimmed === "") return "Turn";
+  const lines = trimmed.split("\n");
+  const firstLine = lines[0]!.trim();
+
+  const kickoff = firstLine.match(/^\[crew\] Kickoff brief for (.+)$/);
+  if (kickoff) {
+    const name = kickoff[1]!.trim();
+    return name ? `Kickoff: ${name}` : "Turn";
+  }
+
+  const fromTo = firstLine.match(/^\[crew\] From: (.+?) → To: .+$/);
+  if (fromTo) {
+    const sender = fromTo[1]!.split(/[@→]/)[0]!.trim();
+    const subjectLine = lines.slice(1).find((line) => /^Subject:/.test(line.trim()));
+    if (subjectLine) {
+      const subject = subjectLine.trim().replace(/^Subject:\s*/, "").trim();
+      if (subject) return `from ${sender}: ${subject}`;
+    }
+    const sepIndex = lines.findIndex((line) => line.trim() === "---");
+    if (sepIndex >= 0) {
+      const firstAfter = lines.slice(sepIndex + 1).find((line) => line.trim() !== "");
+      if (firstAfter) return firstAfter.trim();
+    }
+    return "Turn";
+  }
+
+  const threadMessage = trimmed.match(/^\[bb message from thread:[^\]]*\]\s*([\s\S]*)$/);
+  if (threadMessage) {
+    const line = (threadMessage[1] ?? "").split("\n").find((candidate) => candidate.trim() !== "");
+    return line ? `from thread: ${line.trim()}` : "Turn";
+  }
+
+  const system = trimmed.match(/^\[bb system\]\s*([\s\S]*)$/);
+  if (system) {
+    const line = (system[1] ?? "").split("\n").find((candidate) => candidate.trim() !== "");
+    return line ? line.trim() : "Turn";
+  }
+
+  const firstNonEmpty = lines.find((line) => line.trim() !== "");
+  return firstNonEmpty ? firstNonEmpty.trim() : "Turn";
 }
 
 function fileName(path: string | null | undefined): string | undefined {
@@ -537,44 +593,104 @@ function mapRows(rows: readonly TimelineRowLike[], parentId: string, threadId?: 
  * conversation and work rows) become its canvas children; every other
  * top-level row hangs directly off the thread.
  */
+/** Maps each turn to the raw text of the thread-level request that triggered
+ *  it (BBP-228): a `"conversation"`/`role: "user"` row's `turnId` names its
+ *  turn directly; a row with no `turnId` (observed on Pi threads) is instead
+ *  assigned to the next `"turn"` row that follows it in `sourceSeqStart`
+ *  order, as long as that turn has no request yet — a trailing row with no
+ *  turn left to follow stays unassigned. Every matched or Pi-style user row
+ *  is excluded from the returned index so the thread never also renders it
+ *  as its own node (only engaged when the page has at least one turn row at
+ *  all, so a page of bare conversation rows keeps its original rendering). */
+function requestsByTurn(rows: readonly TimelineRowLike[]): { byTurnKey: Map<string, string>; consumed: ReadonlySet<number> } {
+  const byTurnKey = new Map<string, string>();
+  const consumed = new Set<number>();
+  const turnKeys = new Set(rows.filter((row) => row.kind === "turn").map((row) => row.turnId ?? row.id));
+  if (turnKeys.size === 0) return { byTurnKey, consumed };
+
+  rows.forEach((row, index) => {
+    if (row.kind !== "conversation" || row.role !== "user") return;
+    consumed.add(index);
+    if (typeof row.turnId === "string" && turnKeys.has(row.turnId) && !byTurnKey.has(row.turnId) && row.text) {
+      byTurnKey.set(row.turnId, row.text);
+    }
+  });
+
+  const turnsBySeq = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.kind === "turn" && typeof row.sourceSeqStart === "number")
+    .sort((a, b) => a.row.sourceSeqStart! - b.row.sourceSeqStart!);
+  const orphans = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => consumed.has(index) && (row.turnId === undefined || row.turnId === null) && typeof row.sourceSeqStart === "number")
+    .sort((a, b) => a.row.sourceSeqStart! - b.row.sourceSeqStart!);
+  for (const { row } of orphans) {
+    const key = row.turnId ?? undefined;
+    if (key !== undefined && byTurnKey.has(key)) continue;
+    const next = turnsBySeq.find(({ row: turn }) => turn.sourceSeqStart! > row.sourceSeqStart! && !byTurnKey.has(turn.turnId ?? turn.id));
+    if (next && row.text) byTurnKey.set(next.row.turnId ?? next.row.id, row.text);
+  }
+
+  return { byTurnKey, consumed };
+}
+
+/** The text of the last `"conversation"`/`role: "assistant"` row sharing a
+ *  given turn's `turnId` — its answer preview (BBP-228). Only matches by
+ *  `turnId` (no Pi fallback for the answer side, per spec). */
+function answersByTurn(rows: readonly TimelineRowLike[]): Map<string, string> {
+  const byTurnKey = new Map<string, string>();
+  for (const row of rows) {
+    if (row.kind === "conversation" && row.role === "assistant" && typeof row.turnId === "string" && row.text) {
+      byTurnKey.set(row.turnId, row.text);
+    }
+  }
+  return byTurnKey;
+}
+
 export function timelineToCanvas(
   threadId: string,
   response: { rows: readonly TimelineRowLike[] },
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   const parent = threadNodeId(threadId);
+  const { byTurnKey: requestText, consumed } = requestsByTurn(response.rows);
+  const answerText = answersByTurn(response.rows);
   const nodes: CanvasNode[] = [];
   let pending: TimelineRowLike[] = [];
   const flush = () => {
     nodes.push(...mapRows(pending, parent, threadId));
     pending = [];
   };
-  for (const row of response.rows) {
+  response.rows.forEach((row, index) => {
     if (row.kind !== "turn") {
-      pending.push(row);
-      continue;
+      if (!consumed.has(index)) pending.push(row);
+      return;
     }
     flush();
     const turnNodeId = `row:${row.id}`;
+    const turnKey = row.turnId ?? row.id;
     const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
-    const firstLine = truncate(firstUserLine(row.children) ?? "", 120);
+    const requestFullText = requestText.get(turnKey) ?? firstUserConversation(row.children)?.text;
+    const title = requestFullText !== undefined ? turnTitle(requestFullText) : undefined;
+    const answerPreview = answerText.get(turnKey);
     nodes.push({
       id: turnNodeId,
       kind: "turn",
-      label: `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
+      label: title ? truncate(title, 48) : `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
       ...(row.status && TURN_STATUS[row.status] ? { status: TURN_STATUS[row.status] } : {}),
       parentId: parent,
       meta: {
         rowId: row.id,
         threadId,
-        turnId: row.turnId ?? row.id,
+        turnId: turnKey,
         sourceSeqStart: row.sourceSeqStart,
         sourceSeqEnd: row.sourceSeqEnd,
         summaryCount,
-        ...(firstLine ? { firstLine } : {}),
+        ...(title ? { firstLine: title } : {}),
+        ...(answerPreview ? { answerPreview } : {}),
       },
     });
     nodes.push(...mapRows(row.children ?? [], turnNodeId, threadId));
-  }
+  });
   flush();
   return { nodes, edges: [] };
 }
@@ -627,13 +743,14 @@ export async function enrichTurnNodes(nodes: readonly CanvasNode[], port: TurnFi
       }
       try {
         const { rows } = await port.turnDetails(turnId, threadId, sourceSeqStart, sourceSeqEnd);
-        const line = firstUserLine(rows);
-        if (!line) return;
+        const request = firstUserConversation(rows);
+        if (!request?.text) return;
+        const title = turnTitle(request.text, request.systemMessageKind);
         byId.set(node.id, {
           ...node,
           // The step count is already the card's subtitle ("Turn · n steps").
-          label: truncate(line, 48),
-          meta: { ...node.meta, firstLine: truncate(line, 120) },
+          label: truncate(title, 48),
+          meta: { ...node.meta, firstLine: title },
         });
       } catch {
         // Turn steps unreadable: the plain "Turn · n steps" label stands.
