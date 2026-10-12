@@ -26,6 +26,12 @@ export type TimelineRowLike = {
   status?: string;
   summaryCount?: number;
   children?: readonly TimelineRowLike[] | null;
+  /** The tool's name, e.g. `"Bash"`, `"Read"`, or `"Agent"` for a subagent spawn. */
+  toolName?: string;
+  /** A subagent spawn's task description — the `"Agent: <description>"` label. */
+  description?: string;
+  /** A short input/output summary for the sidebar. */
+  summary?: string;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -42,19 +48,35 @@ function truncate(text: string, max: number): string {
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
-function rowLabel(row: TimelineRowLike): string {
-  if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
-  return row.kind;
+/** A subagent spawn is a tool call whose tool is the agent-spawning tool. */
+function isSubagentRow(row: TimelineRowLike): boolean {
+  return row.toolName === "Agent";
 }
 
-function rowNode(row: TimelineRowLike, parentId: string): CanvasNode {
-  return {
-    id: `row:${row.id}`,
-    kind: row.kind === "conversation" ? "turn" : "tool-call",
+function rowLabel(row: TimelineRowLike): string {
+  if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
+  if (isSubagentRow(row)) return `Agent: ${row.description ?? "(no description)"}`;
+  return row.toolName ?? row.kind;
+}
+
+/** Builds a row's own canvas node plus, for a subagent spawn, its nested
+ *  rows' nodes flattened alongside it. */
+function rowNodes(row: TimelineRowLike, parentId: string): CanvasNode[] {
+  const id = `row:${row.id}`;
+  const node: CanvasNode = {
+    id,
+    kind: row.kind === "conversation" ? "turn" : isSubagentRow(row) ? "subagent" : "tool-call",
     label: rowLabel(row),
     parentId,
-    meta: { rowId: row.id, kind: row.kind },
+    meta: {
+      rowId: row.id,
+      kind: row.kind,
+      ...(row.status ? { status: row.status } : {}),
+      ...(row.summary ? { summary: row.summary } : {}),
+    },
   };
+  const children = (row.children ?? []).flatMap((child) => rowNodes(child, id));
+  return [node, ...children];
 }
 
 /** Converts one page of a thread's timeline into canvas nodes under
@@ -76,9 +98,9 @@ export function timelineToCanvas(
         parentId: parent,
         meta: { rowId: row.id },
       });
-      for (const child of row.children ?? []) nodes.push(rowNode(child, turnId));
+      for (const child of row.children ?? []) nodes.push(...rowNodes(child, turnId));
     } else {
-      nodes.push(rowNode(row, parent));
+      nodes.push(...rowNodes(row, parent));
     }
   }
   return { nodes, edges: [] };

@@ -39,6 +39,47 @@ describe("timelineToCanvas", () => {
     expect(nodes[0]).toMatchObject({ id: "row:r2", kind: "tool-call", label: "tool" });
   });
 
+  it("labels a tool-call row by its tool name, not its raw kind", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "r3", kind: "tool", toolName: "Bash" }] });
+    expect(nodes[0]).toMatchObject({ id: "row:r3", kind: "tool-call", label: "Bash" });
+  });
+
+  it("falls back to the raw kind when a tool-call row has no tool name", () => {
+    const { nodes } = timelineToCanvas("t1", { rows: [{ id: "r4", kind: "mystery-row" }] });
+    expect(nodes[0]).toMatchObject({ id: "row:r4", kind: "tool-call", label: "mystery-row" });
+  });
+
+  it("maps a subagent spawn to the subagent kind, labelled by its description", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "r5", kind: "tool", toolName: "Agent", description: "fix the flaky test" }],
+    });
+    expect(nodes[0]).toMatchObject({ id: "row:r5", kind: "subagent", label: "Agent: fix the flaky test" });
+  });
+
+  it("nests a subagent's own rows underneath its canvas node", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        {
+          id: "r6",
+          kind: "tool",
+          toolName: "Agent",
+          description: "research the bug",
+          children: [{ id: "r7", kind: "tool", toolName: "Read" }],
+        },
+      ],
+    });
+    const subagent = nodes.find((node) => node.id === "row:r6")!;
+    expect(subagent.kind).toBe("subagent");
+    expect(nodes.filter((node) => node.parentId === subagent.id).map((node) => node.id)).toEqual(["row:r7"]);
+  });
+
+  it("puts a short input/output summary and status into a tool-call's meta", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [{ id: "r8", kind: "tool", toolName: "Bash", status: "completed", summary: "ls -la → 3 files" }],
+    });
+    expect(nodes[0].meta).toMatchObject({ status: "completed", summary: "ls -la → 3 files" });
+  });
+
   it("nests a turn row's children under its own canvas node", () => {
     const { nodes } = timelineToCanvas("t1", {
       rows: [
