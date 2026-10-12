@@ -42,6 +42,22 @@ describe("layoutTree", () => {
     expect(byId.get("m3")!.y).toBe(byId.get("m2")!.y + NODE_HEIGHT + ROW_GAP);
   });
 
+  it("stacks siblings of different tiers in one column without overlap (BBP-221)", () => {
+    const nodes = [
+      node("crew", null, { kind: "crew" }),
+      node("m1", "crew", { kind: "member" }), // card: 220x52
+      node("s1", "crew", { kind: "step" }), // row: 200x26
+      node("m2", "crew", { kind: "member" }),
+    ];
+    const { positions } = layoutTree(nodes, new Set(["crew"]));
+    const byId = new Map(positions.map((placed) => [placed.id, placed]));
+    const siblings = ["m1", "s1", "m2"].map((id) => byId.get(id)!);
+    const sorted = [...siblings].sort((a, b) => a.y - b.y);
+    for (let i = 0; i + 1 < sorted.length; i++) {
+      expect(sorted[i]!.y + sorted[i]!.height).toBeLessThanOrEqual(sorted[i + 1]!.y);
+    }
+  });
+
   it("centres a parent on its open children and keeps subtrees apart", () => {
     const nodes = [
       node("project", null, { kind: "project" }),
@@ -54,10 +70,14 @@ describe("layoutTree", () => {
     ];
     const { positions } = layoutTree(nodes, new Set(["project", "crewA", "crewB"]));
     const byId = new Map(positions.map((placed) => [placed.id, placed]));
-    expect(byId.get("crewA")!.y).toBe(byId.get("a2")!.y);
-    expect(byId.get("crewB")!.y).toBe(byId.get("b1")!.y);
+    // "crew" is a group-tier header (28px) while its members are card-tier
+    // (52px): centring aligns on the vertical centre of the span, not the
+    // top edge, since the two tiers no longer share one height.
+    const centerOf = (id: string) => byId.get(id)!.y + byId.get(id)!.height / 2;
+    expect(centerOf("crewA")).toBe(centerOf("a2"));
+    expect(centerOf("crewB")).toBe(centerOf("b1"));
     expect(byId.get("b1")!.y).toBe(byId.get("a3")!.y + NODE_HEIGHT + ROW_GAP);
-    expect(byId.get("project")!.y).toBe((byId.get("crewA")!.y + byId.get("crewB")!.y) / 2);
+    expect(centerOf("project")).toBe((centerOf("crewA") + centerOf("crewB")) / 2);
   });
 
   it("hides the children of a node that is not expanded", () => {
