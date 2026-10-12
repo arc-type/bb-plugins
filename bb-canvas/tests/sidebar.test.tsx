@@ -84,6 +84,37 @@ describe("Sidebar", () => {
   });
 });
 
+describe("Sidebar long field values (BBP-206 review round 1)", () => {
+  it("truncates a long curated field behind a 'more' toggle that reveals the full value", () => {
+    const long = "x".repeat(300);
+    const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { command: long } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByText(long)).toBeNull();
+    const more = screen.getByRole("button", { name: "more" });
+    fireEvent.click(more);
+    expect(screen.getByText(long)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "less" }));
+    expect(screen.queryByText(long)).toBeNull();
+  });
+
+  it("shows no 'more' toggle for a short value", () => {
+    const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { command: "ls -la" } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.getByText("ls -la")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "more" })).toBeNull();
+  });
+
+  it("truncates a long value in the collapsed Details block too", () => {
+    const long = "y".repeat(300);
+    const node: CanvasNode = { id: "c1", kind: "crew", label: "factory-1", parentId: null, meta: { crew: "factory-1", mystery: long } };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    const details = screen.getByText("Details").closest("details") as HTMLDetailsElement;
+    expect(within(details).queryByText(long)).toBeNull();
+    fireEvent.click(within(details).getByRole("button", { name: "more" }));
+    expect(within(details).getByText(long)).toBeTruthy();
+  });
+});
+
 describe("Sidebar actions", () => {
   it("shows Open thread only when meta.threadId exists, and calls onOpenThread with it", () => {
     const onOpenThread = vi.fn();

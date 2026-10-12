@@ -1,37 +1,48 @@
-// The canvas page's last level (BBP-131 WI4): a member's bound thread, and —
-// lazily, once that thread node is opened — its turns and tool calls from the
-// SDK timeline. Pure mapping, so it is testable without the SDK. Identical to
-// graph-studio's copy of the same name: each plugin draws its own page from
-// the same vendored `bb-canvas`, and this bit of mapping is domain code, not
-// part of the shared package.
+// The canvas page's last level (BBP-131 WI4): a crew member's bound thread,
+// and — lazily, once that thread node is opened — its turns and tool calls
+// from the SDK timeline. Pure mapping, so it is testable without the SDK.
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import type { ThreadLike } from "./canvas-details";
 
 export const threadNodeId = (threadId: string): string => `thread:${threadId}`;
 
-/** One thread node per member with a bound thread. Collapsed by default.
- *  Returns `null` for a node without a `meta.threadId`. `extra` lets a
- *  caller that already has the thread's title/state/provider (or its first
- *  user message, for the title fallback) pass them along — this mapping has
- *  no SDK access of its own. */
-export function threadNodeFor(
-  parent: CanvasNode,
-  extra?: { title?: string; state?: string; provider?: string; firstUserMessage?: string },
-): CanvasNode | null {
+/**
+ * One thread node per member/run that has a bound thread. Collapsed by
+ * default — its turns are not worth the weight until someone asks for them.
+ * Returns `null` for a node without a `meta.threadId`, so a caller can map
+ * over every node in a layer without filtering first.
+ */
+export function threadNodeFor(parent: CanvasNode, info: ThreadInfo = {}): CanvasNode | null {
   const threadId = parent.meta?.threadId;
   if (typeof threadId !== "string" || threadId === "") return null;
-  const label = extra?.title || (extra?.firstUserMessage ? truncate(extra.firstUserMessage, 48) : "") || "Thread";
+  const title = info.title?.trim() ?? "";
+  const firstMessage = truncate(info.firstUserMessage ?? "", 48);
   return {
     id: threadNodeId(threadId),
     kind: "thread",
-    label,
+    label: title || firstMessage || "Thread",
     parentId: parent.id,
-    meta: compactMeta({ threadId, state: extra?.state, provider: extra?.provider }),
+    meta: compact({ threadId, title, state: info.state, provider: info.provider }),
   };
 }
 
-/** What `enrichThreadNodes` needs to turn a placeholder thread node into
- *  its real card: the thread itself, and — only when it has no title — its
+/** What a caller may already know about the thread: its title (the card's
+ *  label), else its first user message, plus state and provider. */
+export type ThreadInfo = {
+  title?: string | null;
+  firstUserMessage?: string | null;
+  state?: string | null;
+  provider?: string | null;
+};
+
+/** Drops `undefined`, `null` and `""` so the sidebar never shows an empty
+ *  field (its `curateMeta` only drops `undefined`/`null`). */
+function compact(meta: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(meta).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+/** What `enrichThreadNodes` needs to turn a placeholder thread node into its
+ *  real card: the thread itself, and — only when it has no title — its
  *  first user message, for the same fallback `threadNodeFor` applies. */
 export type ThreadTitlePort = {
   get: (threadId: string) => Promise<ThreadLike>;
@@ -39,7 +50,7 @@ export type ThreadTitlePort = {
 };
 
 /** Replaces each placeholder `"Thread"` node (built eagerly by `threadNodeFor`
- *  with no `extra`) with one carrying the thread's real title/state/provider,
+ *  with no `info`) with one carrying the thread's real title/state/provider,
  *  once that is readable (BBP-206 requirement 3). A thread that cannot be
  *  read, or a node that is not a thread's parent, is left exactly as it was
  *  — this never throws and never drops a node. */
@@ -89,8 +100,7 @@ export type TimelineRowLike = {
   status?: string;
   summaryCount?: number;
   /** Where this row sits in the thread's source sequence — a turn row needs
-   *  both ends to fetch its own steps via `timelineTurnSummaryDetails`, a
-   *  work row needs the start to link back to its exact spot (BBP-206). */
+   *  both ends to fetch its own steps via `timelineTurnSummaryDetails`. */
   sourceSeqStart?: number;
   sourceSeqEnd?: number;
   /** A `"turn"` row's own nested rows. The real SDK never populates this —
@@ -101,29 +111,27 @@ export type TimelineRowLike = {
   workKind?: string;
   /** The tool's name, e.g. `"Bash"`, `"Read"`, `"Task"` for a delegation. */
   toolName?: string;
-  /** A tool row's command/invocation, when the SDK gives one directly. */
-  command?: string;
-  /** A tool row's raw arguments — read for a file path when `command` is absent. */
-  toolArgs?: unknown;
-  /** A short excerpt of a tool row's output, preferred over `output`. */
-  outputPreview?: string;
-  /** A tool row's process exit code; anything but `0` marks the row failed. */
-  exitCode?: number;
-  startedAt?: string;
-  completedAt?: string;
   /** A delegation (subagent) row's task description. */
   description?: string | null;
   /** A delegation row's own nested rows (`TimelineDelegationWorkRow.childRows`). */
   childRows?: readonly TimelineRowLike[] | null;
   /** A delegation row's final output, shown as a short summary. */
   output?: string;
-  /** A `"system"` row's own fields (`TimelineSystemRow`). */
+  /** A `"system"` row's own fields. */
   title?: string;
   detail?: string;
+  /** e.g. `error`, `operation`, `warning`, `deprecation`, `debug`, `reconnect`. */
   systemKind?: string;
+  /** e.g. `context_clear`, `compaction`, `parent-change`. */
   operationKind?: string;
   oldParentId?: string;
   newParentId?: string;
+  /** A `"work"` row's own fields. */
+  toolArgs?: unknown;
+  outputPreview?: string;
+  exitCode?: number;
+  startedAt?: string;
+  completedAt?: string;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -140,218 +148,202 @@ function truncate(text: string, max: number): string {
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
-/** Drops `undefined`/`null`/`""` values rather than leaving them for
- *  `curateMeta` to filter — a `""` would otherwise survive into the
- *  sidebar's collapsed Details block as an empty-looking row. */
-function compactMeta(fields: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (value === undefined || value === null || value === "") continue;
-    result[key] = value;
-  }
-  return result;
-}
-
 /** A delegation row is the SDK's representation of a spawned subagent. */
 function isSubagentRow(row: TimelineRowLike): boolean {
   return row.workKind === "delegation";
 }
 
+/** A tool call's arguments as one short string: the command if there is
+ *  one, else the arguments as JSON. Empty when there are none. */
+function argsText(args: unknown): string {
+  if (args === undefined || args === null || args === "") return "";
+  if (typeof args === "string") return args;
+  if (typeof args === "object" && typeof (args as { command?: unknown }).command === "string") {
+    return (args as { command: string }).command;
+  }
+  return JSON.stringify(args) ?? "";
+}
+
+/** The file a tool call touches, if its arguments name one. */
+function argsFileName(args: unknown): string {
+  if (!args || typeof args !== "object") return "";
+  const record = args as Record<string, unknown>;
+  const path = record.file_path ?? record.path ?? record.notebook_path;
+  return typeof path === "string" ? (path.split("/").pop() ?? "") : "";
+}
+
+function duration(startedAt?: string, completedAt?: string): string {
+  if (!startedAt || !completedAt) return "";
+  const ms = Date.parse(completedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 function rowLabel(row: TimelineRowLike): string {
   if (row.kind === "conversation") return truncate(row.text ?? "(empty)", 48) || "(empty)";
   if (isSubagentRow(row)) return `Agent: ${row.description ?? "(no description)"}`;
-  return row.toolName ?? row.kind;
-}
-
-/** A tool row's command, when the SDK gives one directly or it can be read
- *  off a common argument shape (`file_path`/`path`/`command`). */
-function deriveCommand(row: TimelineRowLike): string | undefined {
-  if (typeof row.command === "string" && row.command !== "") return row.command;
-  const args = row.toolArgs;
-  if (args && typeof args === "object") {
-    const record = args as Record<string, unknown>;
-    for (const key of ["file_path", "path", "command"]) {
-      const value = record[key];
-      if (typeof value === "string" && value !== "") return value;
-    }
+  if (row.toolName) return row.toolName;
+  if (row.kind === "work") {
+    const fromArgs = (args: unknown) =>
+      typeof args === "object" && args !== null && typeof (args as { command?: unknown }).command === "string"
+        ? argsText(args)
+        : argsFileName(args) || argsText(args);
+    return truncate(fromArgs(row.toolArgs), 48) || row.kind;
   }
-  return undefined;
+  return row.kind;
 }
 
-/** `"2.3s"`-style duration from two ISO timestamps; absent if either is
- *  missing or unparseable. */
-function computeDuration(startedAt?: string, completedAt?: string): string | undefined {
-  if (!startedAt || !completedAt) return undefined;
-  const start = Date.parse(startedAt);
-  const end = Date.parse(completedAt);
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return undefined;
-  return `${((end - start) / 1000).toFixed(1)}s`;
+// The sidebar itself truncates a long value behind a "more" toggle
+// (BBP-206 review round 1) — this stores the full value, never a clipped
+// one, so "more" always has the real thing to reveal.
+function workMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
+  const command = argsText(row.toolArgs);
+  const isCommand = typeof row.toolArgs === "string" || typeof (row.toolArgs as { command?: unknown } | null)?.command === "string";
+  return compact({
+    toolName: row.toolName,
+    ...(isCommand ? { command } : { toolArgs: command }),
+    outputPreview: row.outputPreview || row.output || "",
+    exitCode: row.exitCode,
+    duration: duration(row.startedAt, row.completedAt),
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    ...(threadId && typeof row.sourceSeqStart === "number" ? { threadId, sourceSeq: row.sourceSeqStart } : {}),
+  });
 }
 
-/** The first line of the first `conversation` child with `role: "user"` —
- *  the turn's own request, shown in its sidebar alongside its step count. */
-function firstUserLine(children: readonly TimelineRowLike[] | null | undefined): string | undefined {
-  const first = (children ?? []).find((child) => child.kind === "conversation" && child.role === "user");
-  const line = first?.text?.split("\n")[0]?.trim();
-  return line || undefined;
-}
-
-/** Builds a tool-call node for a non-delegation `"work"` row: labelled by
- *  tool name or derived command, with the fields its sidebar curates
- *  (BBP-206) — never the former bare `status`/`summary`. */
-function mapWorkRow(row: TimelineRowLike, parentId: string, threadId: string): CanvasNode {
-  const command = deriveCommand(row);
-  const label = truncate(row.toolName || command || row.kind, 48);
-  const exitCode = row.exitCode;
-  const status: CanvasNode["status"] | undefined = exitCode === undefined ? undefined : exitCode === 0 ? "done" : "failed";
-  return {
-    id: `row:${row.id}`,
-    kind: "tool-call",
-    label,
-    ...(status ? { status } : {}),
+/** Builds a row's own canvas node plus, for a subagent spawn, its own
+ *  `childRows` flattened alongside it. */
+function rowNodes(row: TimelineRowLike, parentId: string, threadId?: string): CanvasNode[] {
+  const id = `row:${row.id}`;
+  const isWork = row.kind === "work" && !isSubagentRow(row);
+  const failed = isWork && typeof row.exitCode === "number" && row.exitCode !== 0;
+  const node: CanvasNode = {
+    id,
+    kind: row.kind === "conversation" ? "turn" : isSubagentRow(row) ? "subagent" : "tool-call",
+    label: rowLabel(row),
+    ...(failed ? { status: "failed" as const } : {}),
     parentId,
-    meta: compactMeta({
+    meta: {
       rowId: row.id,
       kind: row.kind,
-      toolName: row.toolName,
-      command,
-      outputPreview: row.outputPreview ?? row.output,
-      exitCode,
-      duration: computeDuration(row.startedAt, row.completedAt),
-      startedAt: row.startedAt,
-      completedAt: row.completedAt,
-      threadId,
-      sourceSeq: row.sourceSeqStart,
-    }),
+      ...(row.status ? { status: row.status } : {}),
+      ...(row.output ? { summary: row.output } : {}),
+      ...(isWork ? workMeta(row, threadId) : {}),
+    },
   };
-}
-
-/** A `system` row that always gets its own node, never bundled: an error
- *  (status failed, detail visible) or an operation (context_clear,
- *  compaction, warning, deprecation, parent-change). */
-function isSystemOwnNode(row: TimelineRowLike): boolean {
-  return row.systemKind === "error" || row.systemKind === "operation";
-}
-
-function mapSystemOwnNode(row: TimelineRowLike, parentId: string): CanvasNode {
-  const status: CanvasNode["status"] | undefined = row.systemKind === "error" ? "failed" : undefined;
-  return {
-    id: `row:${row.id}`,
-    kind: "system-event",
-    label: row.title || "(system event)",
-    ...(status ? { status } : {}),
-    parentId,
-    meta: compactMeta({
-      detail: row.detail,
-      oldParent: row.operationKind === "parent-change" ? row.oldParentId : undefined,
-      newParent: row.operationKind === "parent-change" ? row.newParentId : undefined,
-    }),
-  };
-}
-
-/** Every other `system` row (`debug`, `reconnect`, or any row without a
- *  `detail`) is low-signal on its own — a consecutive run of them bundles
- *  into one `"n system events"` node rather than either n empty-looking
- *  nodes or n mislabelled `tool-call`s. */
-function mapSystemBundle(rows: readonly TimelineRowLike[], parentId: string): CanvasNode {
-  const titles = rows.map((row) => row.title).filter((title): title is string => typeof title === "string" && title !== "");
-  return {
-    id: `row:${rows[0].id}`,
-    kind: "system-event",
-    label: `${rows.length} system event${rows.length === 1 ? "" : "s"}`,
-    parentId,
-    meta: compactMeta({ titles: titles.length > 0 ? titles.join(", ") : undefined }),
-  };
-}
-
-/** Builds one row's own canvas node plus, for a subagent spawn, its own
- *  `childRows` nested underneath it. Dispatches `conversation` (as a `turn`
- *  node — the fallback shape for a bare conversation row, distinct from a
- *  real `"turn"` row handled in `mapRows`), `work`/delegation (`subagent`),
- *  `work`/tool (`mapWorkRow`), and anything else into the pre-BBP-206
- *  generic `tool-call` fallback so an unrecognised SDK row never crashes. */
-function mapRow(row: TimelineRowLike, parentId: string, threadId: string): CanvasNode[] {
-  const id = `row:${row.id}`;
-  if (row.kind === "conversation") {
-    return [{ id, kind: "turn", label: rowLabel(row), parentId, meta: { rowId: row.id, kind: row.kind } }];
-  }
-  if (isSubagentRow(row)) {
-    const node: CanvasNode = {
-      id,
-      kind: "subagent",
-      label: rowLabel(row),
-      parentId,
-      meta: compactMeta({ rowId: row.id, kind: row.kind, status: row.status, summary: row.output }),
-    };
-    return [node, ...mapRows(row.childRows ?? [], id, threadId)];
-  }
-  if (row.kind === "work") return [mapWorkRow(row, parentId, threadId)];
-  return [{ id, kind: "tool-call", label: rowLabel(row), parentId, meta: compactMeta({ rowId: row.id, kind: row.kind, status: row.status, summary: row.output }) }];
-}
-
-function mapTurnRow(row: TimelineRowLike, parentId: string, threadId: string): CanvasNode[] {
-  const turnNodeId = `row:${row.id}`;
-  const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
-  const node: CanvasNode = {
-    id: turnNodeId,
-    kind: "turn",
-    label: `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
-    ...(row.status && TURN_STATUS[row.status] ? { status: TURN_STATUS[row.status] } : {}),
-    parentId,
-    meta: compactMeta({
-      rowId: row.id,
-      threadId,
-      turnId: row.turnId ?? row.id,
-      sourceSeqStart: row.sourceSeqStart,
-      sourceSeqEnd: row.sourceSeqEnd,
-      summaryCount,
-      firstLine: firstUserLine(row.children),
-    }),
-  };
-  const children = row.children ? mapRows(row.children, turnNodeId, threadId) : [];
+  const children = mapRows(row.childRows ?? [], id, threadId);
   return [node, ...children];
 }
 
-/** Maps one list of sibling rows, bundling consecutive low-signal `system`
- *  rows as it goes (BBP-206) — the only mapping step that needs more than
- *  one row of lookahead, so it lives above the per-row dispatch. */
-function mapRows(rows: readonly TimelineRowLike[], parentId: string, threadId: string): CanvasNode[] {
+/** An error, or an operation that says what happened, stands on its own;
+ *  every other system row is noise worth one bundled node. */
+function isOwnSystemEvent(row: TimelineRowLike): boolean {
+  return row.systemKind === "error" || (row.systemKind === "operation" && !!row.detail);
+}
+
+function systemEventNode(row: TimelineRowLike, parentId: string): CanvasNode {
+  return {
+    id: `row:${row.id}`,
+    kind: "system-event",
+    label: row.title || row.operationKind || row.systemKind || "system event",
+    ...(row.systemKind === "error" ? { status: "failed" as const } : {}),
+    parentId,
+    meta: compact({
+      rowId: row.id,
+      detail: row.detail,
+      ...(row.operationKind === "parent-change" ? { oldParent: row.oldParentId, newParent: row.newParentId } : {}),
+    }),
+  };
+}
+
+function bundledSystemNode(rows: readonly TimelineRowLike[], parentId: string): CanvasNode {
+  const titles = rows.map((row) => row.title).filter((title): title is string => !!title);
+  return {
+    id: `row:${rows[0]!.id}`,
+    kind: "system-event",
+    label: `${rows.length} system ${rows.length === 1 ? "event" : "events"}`,
+    parentId,
+    meta: compact({ rowId: rows[0]!.id, ...(titles.length > 0 ? { titles } : {}) }),
+  };
+}
+
+/** Maps sibling rows, bundling each run of consecutive minor system rows. */
+function mapRows(rows: readonly TimelineRowLike[], parentId: string, threadId?: string): CanvasNode[] {
   const nodes: CanvasNode[] = [];
   let bundle: TimelineRowLike[] = [];
-  const flushBundle = () => {
-    if (bundle.length === 0) return;
-    nodes.push(mapSystemBundle(bundle, parentId));
+  const flush = () => {
+    if (bundle.length > 0) nodes.push(bundledSystemNode(bundle, parentId));
     bundle = [];
   };
   for (const row of rows) {
-    if (row.kind === "system" && !isSystemOwnNode(row)) {
+    if (row.kind === "system" && !isOwnSystemEvent(row)) {
       bundle.push(row);
       continue;
     }
-    flushBundle();
-    if (row.kind === "turn") nodes.push(...mapTurnRow(row, parentId, threadId));
-    else if (row.kind === "system") nodes.push(mapSystemOwnNode(row, parentId));
-    else nodes.push(...mapRow(row, parentId, threadId));
+    flush();
+    nodes.push(...(row.kind === "system" ? [systemEventNode(row, parentId)] : rowNodes(row, parentId, threadId)));
   }
-  flushBundle();
+  flush();
   return nodes;
 }
 
-/** Converts one page of a thread's timeline into canvas nodes under
- *  `threadNodeId(threadId)`, nesting a `"turn"` row's own children. */
+/**
+ * Converts one page of a thread's timeline into canvas nodes under
+ * `threadNodeId(threadId)`. A `"turn"` row's own `children` (its
+ * conversation and work rows) become its canvas children; every other
+ * top-level row hangs directly off the thread.
+ */
 export function timelineToCanvas(
   threadId: string,
   response: { rows: readonly TimelineRowLike[] },
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  return { nodes: mapRows(response.rows, threadNodeId(threadId), threadId), edges: [] };
+  const parent = threadNodeId(threadId);
+  const nodes: CanvasNode[] = [];
+  let pending: TimelineRowLike[] = [];
+  const flush = () => {
+    nodes.push(...mapRows(pending, parent, threadId));
+    pending = [];
+  };
+  for (const row of response.rows) {
+    if (row.kind !== "turn") {
+      pending.push(row);
+      continue;
+    }
+    flush();
+    const turnNodeId = `row:${row.id}`;
+    const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
+    const request = row.children?.find((child) => child.kind === "conversation" && child.role === "user");
+    const firstLine = truncate(request?.text?.split("\n").find((line) => line.trim() !== "") ?? "", 120);
+    nodes.push({
+      id: turnNodeId,
+      kind: "turn",
+      label: `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
+      ...(row.status && TURN_STATUS[row.status] ? { status: TURN_STATUS[row.status] } : {}),
+      parentId: parent,
+      meta: {
+        rowId: row.id,
+        threadId,
+        turnId: row.turnId ?? row.id,
+        sourceSeqStart: row.sourceSeqStart,
+        sourceSeqEnd: row.sourceSeqEnd,
+        summaryCount,
+        ...(firstLine ? { firstLine } : {}),
+      },
+    });
+    nodes.push(...mapRows(row.children ?? [], turnNodeId, threadId));
+  }
+  flush();
+  return { nodes, edges: [] };
 }
 
 /** Converts a turn's lazily-fetched steps (`timelineTurnSummaryDetails`'s
  *  `rows`) into canvas nodes under the turn's own node id. Same row mapping
- *  as `timelineToCanvas`'s thread-level rows — only the parent differs. */
+ *  as `timelineToCanvas`'s thread-level rows (tool-call, subagent incl.
+ *  nested `childRows`) — only the parent differs. */
 export function turnDetailsToCanvas(
   turnNodeId: string,
   response: { rows: readonly TimelineRowLike[] },
+  threadId?: string,
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  return { nodes: mapRows(response.rows, turnNodeId, ""), edges: [] };
+  return { nodes: mapRows(response.rows, turnNodeId, threadId), edges: [] };
 }

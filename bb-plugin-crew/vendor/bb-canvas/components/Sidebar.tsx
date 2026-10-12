@@ -128,13 +128,38 @@ function SectionHeading({ children }: { children: string }) {
   );
 }
 
+// Long values (a full shell command, raw tool output) would otherwise blow
+// out the sidebar's main body; truncated here, with the full value one
+// click away rather than silently absent (BBP-206 review round 1).
+const LONG_VALUE_THRESHOLD = 140;
+
+function FieldValue({ value }: { value: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (value.length <= LONG_VALUE_THRESHOLD) return <>{value}</>;
+  return (
+    <>
+      {expanded ? value : `${value.slice(0, LONG_VALUE_THRESHOLD)}…`}{" "}
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="bb-canvas-action"
+        style={{ ...ACTION_STYLE, height: 20, padding: "0 6px", fontSize: 11 }}
+      >
+        {expanded ? "less" : "more"}
+      </button>
+    </>
+  );
+}
+
 function FieldList({ fields }: { fields: { label: string; value: string }[] }) {
   return (
     <dl style={{ margin: 0, fontSize: 12, display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 12px", lineHeight: 1.4 }}>
       {fields.map((field) => (
         <div key={field.label} style={{ display: "contents" }}>
           <dt style={{ color: "var(--muted-foreground)" }}>{field.label}</dt>
-          <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{field.value}</dd>
+          <dd style={{ margin: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>
+            <FieldValue value={field.value} />
+          </dd>
         </div>
       ))}
     </dl>

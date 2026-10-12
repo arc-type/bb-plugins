@@ -193,13 +193,16 @@ function rowLabel(row: TimelineRowLike): string {
   return row.kind;
 }
 
+// The sidebar itself truncates a long value behind a "more" toggle
+// (BBP-206 review round 1) — this stores the full value, never a clipped
+// one, so "more" always has the real thing to reveal.
 function workMeta(row: TimelineRowLike, threadId: string | undefined): Record<string, unknown> {
   const command = argsText(row.toolArgs);
   const isCommand = typeof row.toolArgs === "string" || typeof (row.toolArgs as { command?: unknown } | null)?.command === "string";
   return compact({
     toolName: row.toolName,
-    ...(isCommand ? { command: truncate(command, 200) } : { toolArgs: command }),
-    outputPreview: row.outputPreview || (row.output ? truncate(row.output, 200) : ""),
+    ...(isCommand ? { command } : { toolArgs: command }),
+    outputPreview: row.outputPreview || row.output || "",
     exitCode: row.exitCode,
     duration: duration(row.startedAt, row.completedAt),
     startedAt: row.startedAt,

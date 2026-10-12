@@ -93,9 +93,10 @@ describe("curateMeta", () => {
     ]);
   });
 
-  it("curates a bundled system-event node's titles", () => {
-    const { curated } = curateMeta("system-event", { titles: "event 1, event 2" });
-    expect(curated).toEqual([{ label: "Events", value: "event 1, event 2" }]);
+  it("puts a bundled system-event node's titles into Details, one per line, not the main area", () => {
+    const { curated, details } = curateMeta("system-event", { titles: ["event 1", "event 2"] });
+    expect(curated).toEqual([]);
+    expect(details).toEqual([{ label: "Events", value: "event 1\nevent 2" }]);
   });
 
   it("curates a turn node's first line alongside its row id", () => {

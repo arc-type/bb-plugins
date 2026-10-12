@@ -204,7 +204,7 @@ describe("turnDetailsToCanvas", () => {
 });
 
 describe("threadNodeFor labels (BBP-209)", () => {
-  const member: CanvasNode = { id: "m", kind: "member", label: "a", meta: { threadId: "t1" } };
+  const member: CanvasNode = { id: "m", kind: "member", label: "a", parentId: null, meta: { threadId: "t1" } };
 
   it("labels the thread by its title and carries state and provider", () => {
     const thread = threadNodeFor(member, { title: "Fix login bug", state: "idle", provider: "claude-code" })!;

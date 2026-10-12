@@ -96,7 +96,7 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   turn: ["rowId", "firstLine"],
   "tool-call": ["toolName", "command", "outputPreview", "exitCode", "duration", "startedAt", "completedAt"],
   subagent: ["status", "summary"],
-  "system-event": ["detail", "oldParent", "newParent", "titles"],
+  "system-event": ["detail", "oldParent", "newParent"],
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -142,6 +142,12 @@ function fieldLabel(key: string): string {
   return key.length > 0 ? key[0].toUpperCase() + key.slice(1) : key;
 }
 
+/** An array value (e.g. a bundled system-event's `titles`) renders one
+ *  entry per line — `String(value)` would otherwise comma-join it. */
+function fieldValue(value: unknown): string {
+  return Array.isArray(value) ? value.map(String).join("\n") : String(value);
+}
+
 /** Splits a node's `meta` into the fields its kind curates (in the kind's
  *  own order) and everything left over, for the sidebar's main body versus
  *  its collapsed "Details" block. A missing, `null`, or `undefined` value is
@@ -156,13 +162,13 @@ export function curateMeta(
   for (const key of curatedKeys) {
     const value = entries[key];
     if (value === undefined || value === null) continue;
-    curated.push({ label: fieldLabel(key), value: String(value) });
+    curated.push({ label: fieldLabel(key), value: fieldValue(value) });
   }
   const curatedKeySet = new Set(curatedKeys);
   const details: CuratedField[] = [];
   for (const [key, value] of Object.entries(entries)) {
     if (curatedKeySet.has(key) || value === undefined || value === null) continue;
-    details.push({ label: fieldLabel(key), value: String(value) });
+    details.push({ label: fieldLabel(key), value: fieldValue(value) });
   }
   return { curated, details };
 }
