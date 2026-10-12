@@ -3,30 +3,31 @@ import { crewCanvasLayer, crewOwnsCanvasPage, crewTopologyFrame, memberNodeId } 
 import type { MemberInfo } from "../lib/contract";
 
 const member = (over: Partial<MemberInfo>): MemberInfo => ({
-  memberId: "m", address: "dev@trio", crew: "trio", key: "dev", lead: false, role: "",
+  memberId: "m", address: "dev@trio", crew: "trio", key: "dev", groupId: "dev", lead: false, role: "",
   threadId: null, shift: null, activity: "idle", ...over,
 });
 
 describe("crewCanvasLayer", () => {
-  it("hangs crews under the project and members under their crew, crews expanded", () => {
+  it("hangs crews under the project and members under their crew, crews expanded, members carry the crew's frame id", () => {
     const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], [
-      member({ address: "lead@trio", key: "lead", lead: true, activity: "working", threadId: "t1", role: "Leads" }),
+      member({ address: "lead@trio", key: "lead", groupId: "orch", lead: true, activity: "working", threadId: "t1", role: "Leads" }),
       member({ address: "dev@trio", key: "dev", activity: "needs-you" }),
     ]);
     expect(layer.nodes).toEqual([
       { id: "crew:trio", kind: "crew", label: "trio", status: "running", parentId: "project:p1", meta: { crew: "trio", status: "running" } },
-      { id: "member:lead@trio", kind: "member", label: "lead", status: "running", parentId: "crew:trio",
+      { id: "member:lead@trio", kind: "member", label: "lead", status: "running", parentId: "crew:trio", frameId: "frame:trio",
         meta: { address: "lead@trio", role: "Leads", lead: true, threadId: "t1", activity: "working" } },
-      { id: "member:dev@trio", kind: "member", label: "dev", status: "waiting", parentId: "crew:trio",
+      { id: "member:dev@trio", kind: "member", label: "dev", status: "waiting", parentId: "crew:trio", frameId: "frame:trio",
         meta: { address: "dev@trio", role: "", lead: false, threadId: null, activity: "needs-you" } },
     ]);
     expect(layer.expanded).toEqual(["crew:trio"]);
     expect(layer.edges).toEqual([]);
+    expect(layer.frames).toEqual([{ id: "frame:trio", parentId: null, label: "trio" }]);
     expect(memberNodeId("dev@trio")).toBe("member:dev@trio");
   });
 
   it("negative: no crews → empty layer; unknown activity → no status; stopped crew is not expanded", () => {
-    expect(crewCanvasLayer("p1", [], [])).toEqual({ nodes: [], edges: [], expanded: [] });
+    expect(crewCanvasLayer("p1", [], [])).toEqual({ nodes: [], edges: [], expanded: [], frames: [] });
     const layer = crewCanvasLayer("p1", [{ name: "old", status: "stopped" }], [member({ crew: "old", address: "a@old", activity: "unknown" })]);
     expect(layer.nodes[1]!.status).toBeUndefined();
     expect(layer.expanded).toEqual([]);
@@ -34,15 +35,15 @@ describe("crewCanvasLayer", () => {
 
   describe("links (BBP-170)", () => {
     const trio = [
-      member({ address: "lead@trio", key: "lead", lead: true }),
+      member({ address: "lead@trio", key: "lead", groupId: "orch", lead: true }),
       member({ address: "dev@trio", key: "dev" }),
     ];
 
-    it("turns a crew's declared links into message edges between its member nodes", () => {
+    it("turns a crew's declared links into edges between its member nodes, classified flow/back same as crewTopologyFrame", () => {
       const layer = crewCanvasLayer("p1", [{ name: "trio", status: "running" }], trio, {
         trio: [{ from: "lead", to: "dev", kind: "assigns_to" }],
       });
-      expect(layer.edges).toEqual([{ from: "member:lead@trio", to: "member:dev@trio", variant: "message", label: "assigns_to" }]);
+      expect(layer.edges).toEqual([{ from: "member:lead@trio", to: "member:dev@trio", variant: "flow", label: "assigns_to" }]);
     });
 
     it("negative: a link naming an unknown member, or a crew with no links entry, yields no edge", () => {
@@ -77,7 +78,7 @@ describe("canvasLayer / canvasPage RPC", () => {
     let plugins: { id: string; enabled: boolean; status: string }[] = [];
     harness.sdk.stub("plugins.list", async () => ({ plugins }) as never);
     await plugin(bb);
-    expect(await harness.behavior.callRpc("canvasLayer", { projectId: "p1" })).toEqual({ contractVersion: 1, nodes: [], edges: [], expanded: [] });
+    expect(await harness.behavior.callRpc("canvasLayer", { projectId: "p1" })).toEqual({ contractVersion: 1, nodes: [], edges: [], expanded: [], frames: [] });
     expect(await harness.behavior.callRpc("canvasPage", {})).toEqual({ visible: true });
     plugins = [{ id: "graph-studio", enabled: true, status: "running" }];
     expect(await harness.behavior.callRpc("canvasPage", {})).toEqual({ visible: false });

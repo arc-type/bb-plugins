@@ -28,18 +28,23 @@ const ACTIVITY_STATUS: Record<string, CanvasStatus> = {
   error: "failed",
 };
 
-/** A crew's declared links (BBP-170 WI6): drawn as message-styled edges
- *  between the same member nodes the tree already shows, so the topology
- *  reads on the same page instead of only in the old full-screen editor. */
+/** A crew's declared links (BBP-170): the same ones `crewTopologyFrame`
+ *  classifies into flow/back edges, keyed by crew name. */
 export type CrewLinks = Record<string, readonly { from: string; to: string; kind: string }[]>;
+
+export type CrewCanvasLayer = CanvasLayer & {
+  /** One frame per crew (BBP-170 WI6), drawn around its member nodes on the
+   *  same project→crew→member tree — not a separate page. */
+  frames: CanvasFrame[];
+};
 
 export function crewCanvasLayer(
   projectId: string,
   crews: { name: string; status: CrewStatus }[],
   members: MemberInfo[],
   linksByCrew: CrewLinks = {},
-): CanvasLayer {
-  const layer: CanvasLayer = { nodes: [], edges: [], expanded: [] };
+): CrewCanvasLayer {
+  const layer: CrewCanvasLayer = { nodes: [], edges: [], expanded: [], frames: [] };
   for (const crew of crews) {
     const id = crewNodeId(crew.name);
     layer.nodes.push({
@@ -53,7 +58,17 @@ export function crewCanvasLayer(
     // A stopped crew stays folded: its members have nothing to show.
     if (crew.status !== "stopped") layer.expanded.push(id);
     const crewMembers = members.filter((entry) => entry.crew === crew.name);
-    const byKey = new Map(crewMembers.map((entry) => [entry.key, entry]));
+    // The frame and its flow/back-classified edges come from the same
+    // topology math the edit mode uses (crewTopologyFrame) — one
+    // classification, not two, so run view and edit view never disagree on
+    // which link bows out as a back edge.
+    const topology = crewTopologyFrame(
+      crew.name,
+      crewMembers.map((entry) => ({ key: entry.key, groupId: entry.groupId, lead: entry.lead })),
+      linksByCrew[crew.name] ?? [],
+    );
+    layer.frames.push(...topology.frames);
+    layer.edges.push(...topology.edges);
     for (const member of crewMembers) {
       const status = ACTIVITY_STATUS[member.activity];
       layer.nodes.push({
@@ -62,17 +77,9 @@ export function crewCanvasLayer(
         label: member.key,
         ...(status ? { status } : {}),
         parentId: id,
+        frameId: crewFrameId(crew.name),
         meta: { address: member.address, role: member.role, lead: member.lead, threadId: member.threadId, activity: member.activity },
       });
-    }
-    // Both ends must still be members of this crew: a link surviving a
-    // removed member, or naming the wrong crew's key, is dropped rather than
-    // drawn to a node that is not there.
-    for (const link of linksByCrew[crew.name] ?? []) {
-      const from = byKey.get(link.from);
-      const to = byKey.get(link.to);
-      if (!from || !to) continue;
-      layer.edges.push({ from: memberNodeId(from.address), to: memberNodeId(to.address), variant: "message", label: link.kind });
     }
   }
   return layer;
