@@ -1660,6 +1660,19 @@ async function crewOfThread(threadId: string | null) {
   return (await rpcBridge.call("memberOfThread", { threadId })).member;
 }
 
+/**
+ * BBP-179: BB's nav gets exactly one "Activity Canvas", and it is Graph
+ * Studio's — its page already pulls crew's layer in over RPC, so it shows
+ * crews and graph runs together. Nav entries are registered synchronously,
+ * with no way to ask whether Graph Studio is installed, so crew registers
+ * none and serves its own canvas (for an install without Graph Studio) under
+ * `crews/canvas` instead.
+ */
+function CrewsRoute({ subPath = "" }: { subPath?: string }) {
+  const [first, ...rest] = subPath.split("/");
+  return first === "canvas" ? <CanvasPage subPath={rest.join("/")} /> : <CrewsPage />;
+}
+
 export default definePluginApp((app) => {
   app.experimental_icons.register({ name: CREW_ICON, component: CrewTeam });
   app.slots.navPanel({
@@ -1667,18 +1680,9 @@ export default definePluginApp((app) => {
     title: "Crews",
     icon: CREW_ICON,
     path: "crews",
-    component: CrewsPage,
+    component: CrewsRoute,
     headerContent: HeaderContent,
     experimental_sidebarAccessory: SidebarAccessory,
-  });
-  // BBP-131: the shared canvas. The page itself decides whether to show
-  // anything — Graph Studio owns it while that plugin is active.
-  app.slots.navPanel({
-    id: "canvas",
-    title: "Activity Canvas",
-    icon: CREW_ICON,
-    path: "canvas",
-    component: CanvasPage,
   });
   app.slots.experimental_threadHeaderAction({ id: "member-badge", title: "Crew member", component: MemberBadge });
   app.slots.messageDirective({ id: "crew", component: CrewDirectiveCard });

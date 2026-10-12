@@ -121,6 +121,7 @@ export function CanvasView({
   const persisted = useRef<ExpandedState>(
     (surface === undefined ? null : loadExpandedState(surface)) ?? { open: [], closed: [] },
   );
+  const [fitRequest, setFitRequest] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -268,11 +269,13 @@ export function CanvasView({
     const ids = [...hasChildren];
     remember({ open: ids, closed: [] });
     setExpanded(new Set(ids));
+    setFitRequest((count) => count + 1);
   }
 
   function collapseAll() {
     remember({ open: [], closed: [...new Set([...expandable, ...expanded])] });
     setExpanded(new Set());
+    setFitRequest((count) => count + 1);
   }
 
   function siblingsOf(id: string): CanvasNode[] {
@@ -405,9 +408,11 @@ export function CanvasView({
       // either way; a sized ancestor still wins, since 100% there is taller.
       style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: MIN_HEIGHT, outline: "none" }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      {/* Wraps rather than overflows: in BB's slim panel (370px) the
+          controls would otherwise run past the right edge (BBP-179). */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <Breadcrumb nodes={allNodes} selectedId={selectedId} onSelect={select} />
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "4px 8px" }}>
           {toolbar}
           <button type="button" onClick={collapseAll} style={TOOLBAR_BUTTON}>
             Collapse all
@@ -434,6 +439,7 @@ export function CanvasView({
             expanded={expanded}
             expandable={expandable}
             onToggle={toggle}
+            fitRequest={fitRequest}
             edges={allEdges}
             frames={frames}
             selectedId={selectedId}

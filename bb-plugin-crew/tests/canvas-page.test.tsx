@@ -17,10 +17,12 @@ afterEach(cleanup);
 function canvasPanel(
   overrides: { rpc?: Record<string, unknown>; sdk?: Record<string, unknown>; projectId?: string | null; subPath?: string } = {},
 ) {
-  const panel = app.navPanels.find((entry) => entry.id === "canvas")!;
+  // BBP-179: no nav entry of its own any more — the Crews panel serves the
+  // canvas under the `canvas` sub path.
+  const panel = app.navPanels.find((entry) => entry.id === "crews")!;
   return renderSlot(
     panel,
-    { subPath: overrides.subPath ?? "" },
+    { subPath: overrides.subPath ? `canvas/${overrides.subPath}` : "canvas" },
     {
       rpc: {
         canvasPage: () => ({ visible: true }),

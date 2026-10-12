@@ -2,7 +2,9 @@
 // a small fixed tree (a crew, three members, one running, a graph run with a
 // back edge) — enough to exercise every key the acceptance criterion names.
 import { createRoot } from "react-dom/client";
+import { useState } from "react";
 import { CanvasView } from "../components/CanvasView";
+import { ProjectFilter } from "../components/ProjectFilter";
 import type { CanvasEdge, CanvasNode } from "../lib/types";
 
 const nodes: CanvasNode[] = [
@@ -24,8 +26,27 @@ const initialExpanded = new Set(["agents", "project:p1", "crew:factory-1"]);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
-createRoot(root).render(
-  <div style={{ width: "1200px", height: "800px" }}>
-    <CanvasView nodes={nodes} edges={edges} initialExpanded={initialExpanded} />
-  </div>,
-);
+// `?width=370` narrows the canvas to the slim panel BB shows beside an open
+// file tree — where the toolbar and its dropdown have to fit (BBP-179).
+const width = Number(new URLSearchParams(location.search).get("width")) || 1200;
+
+const projects = [
+  { id: "p1", name: "bb-plugins" },
+  { id: "p2", name: "a-project-with-a-rather-long-name" },
+];
+
+function App() {
+  const [selected, setSelected] = useState<string[]>([]);
+  return (
+    <div style={{ width: `${width}px`, height: "800px" }}>
+      <CanvasView
+        nodes={nodes}
+        edges={edges}
+        initialExpanded={initialExpanded}
+        toolbar={<ProjectFilter projects={projects} selected={selected} onChange={setSelected} />}
+      />
+    </div>
+  );
+}
+
+createRoot(root).render(<App />);
