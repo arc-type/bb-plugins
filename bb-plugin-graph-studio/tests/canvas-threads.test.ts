@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
+  cleanRequestText,
   enrichThreadNodes,
   enrichTurnNodes,
   threadNodeFor,
@@ -964,12 +965,14 @@ describe("timelineToCanvas: turn titles from the triggering request (BBP-228)", 
     expect(turn.meta!.answerPreview).toBe((fixtures.conversationAssistant as Record<string, string>).text);
   });
 
-  it("sets meta.request to the full request text and meta.duration from the turn's own times", () => {
+  it("sets meta.request to the cleaned text, meta.requestRaw to the untouched text, and meta.duration from the turn's own times", () => {
     const { nodes } = timelineToCanvas("thr_wyw9bnia2w", {
       rows: [fixtures.conversationUser as TimelineRowLike, fixtures.turnWithManySteps as TimelineRowLike],
     });
     const turn = nodes.find((node) => node.id === `row:${(fixtures.turnWithManySteps as Record<string, string>).id}`)!;
-    expect(turn.meta!.request).toBe((fixtures.conversationUser as Record<string, string>).text.trim());
+    const rawText = (fixtures.conversationUser as Record<string, string>).text;
+    expect(turn.meta!.request).toBe(cleanRequestText(rawText));
+    expect(turn.meta!.requestRaw).toBe(rawText.trim());
     expect(turn.meta!.duration).toMatch(/s$/);
   });
 
@@ -997,6 +1000,93 @@ describe("timelineToCanvas: turn titles from the triggering request (BBP-228)", 
     });
     expect(nodes[0]).toMatchObject({ label: "Turn · 3 steps" });
     expect(nodes[0]!.meta).not.toHaveProperty("firstLine");
+  });
+});
+
+describe("turnTitle: child-thread completion (BBP-228 R2)", () => {
+  it("resolves the thread id to its name via systemMessageSubject.threadName and keeps the first content line", () => {
+    const title = turnTitle(
+      "[bb system]\n\n@thread:thr_2pse9tz7ku completed:\n\nIch bin bereit.",
+      "child-completed",
+      { kind: "thread", threadId: "thr_2pse9tz7ku", threadName: "steps-spec" },
+    );
+    expect(title).toBe("steps-spec done: Ich bin bereit.");
+  });
+
+  it("falls back to 'thread done: <line>' when systemMessageSubject has no threadName", () => {
+    const title = turnTitle("[bb system]\n\n@thread:thr_unknown completed:\n\nStatus geprüft.", "child-completed", {
+      kind: "thread",
+      threadId: "thr_unknown",
+    });
+    expect(title).toBe("thread done: Status geprüft.");
+  });
+
+  it("falls back to 'thread done: <line>' when no systemMessageSubject is given at all", () => {
+    expect(turnTitle("[bb system]\n\n@thread:thr_x completed:\n\nAlles klar.")).toBe("thread done: Alles klar.");
+  });
+
+  it("never shows the raw thread id, even without a content line", () => {
+    expect(turnTitle("[bb system]\n\n@thread:thr_x completed:")).toBe("thread done");
+  });
+
+  it("leaves a batch 'Child thread updates:' summary untouched (no per-line id resolution)", () => {
+    expect(turnTitle("[bb system]\n\nChild thread updates:\n\n- @thread:thr_a completed.\n- @thread:thr_b completed.")).toBe(
+      "Child thread updates:",
+    );
+  });
+});
+
+describe("cleanRequestText (BBP-228 R2)", () => {
+  it("strips the [bb system] prefix, keeping the body", () => {
+    expect(cleanRequestText("[bb system]\n\n@thread:thr_x completed:\n\nAlles klar.")).toBe("@thread:thr_x completed:\n\nAlles klar.");
+  });
+
+  it("strips a crew From/To header up to the --- separator", () => {
+    expect(cleanRequestText("[crew] From: X → To: Y\nSent: …\nSubject: Z\n---\nErste Zeile.\nZweite Zeile.")).toBe(
+      "Erste Zeile.\nZweite Zeile.",
+    );
+  });
+
+  it("strips a trailing 'Reply with crew_send(...)' footer", () => {
+    expect(
+      cleanRequestText(
+        "[crew] From: X → To: Y\n---\nDo the thing.\n---\nReply with crew_send(to: \"X\", reply_to: \"m1\", …) — only if there is something to do; acknowledgements are not needed.",
+      ),
+    ).toBe("Do the thing.");
+  });
+
+  it("strips the kickoff brief's own header line", () => {
+    expect(cleanRequestText("[crew] Kickoff brief for steps-impl@factory-1\n\nYou are steps-impl@factory-1.")).toBe(
+      "You are steps-impl@factory-1.",
+    );
+  });
+
+  it("leaves a plain message untouched", () => {
+    expect(cleanRequestText("Bitte das Feature X bauen")).toBe("Bitte das Feature X bauen");
+  });
+});
+
+describe("timelineToCanvas: cleaned Request vs raw Debug field (BBP-228 R2)", () => {
+  it("curates the cleaned text as meta.request and the untouched raw text as meta.requestRaw", () => {
+    const { nodes } = timelineToCanvas("t1", {
+      rows: [
+        { id: "turn", kind: "turn", turnId: "turn", status: "completed", summaryCount: 1, children: null },
+        { id: "c1", kind: "conversation", role: "user", turnId: "turn", text: "[crew] From: X → To: Y\n---\nDo the thing." },
+      ],
+    });
+    expect(nodes[0]!.meta).toMatchObject({ request: "Do the thing.", requestRaw: "[crew] From: X → To: Y\n---\nDo the thing." });
+  });
+});
+
+describe("BBP-228 R2 acceptance: real child-completion fixture", () => {
+  it("piConversationChildCompleted: title resolves the member name, never the raw thread id", () => {
+    const { nodes } = timelineToCanvas("thr_rnty5wvb2j", {
+      rows: [fixtures.piConversationChildCompleted as TimelineRowLike, fixtures.piTurnChildCompleted as TimelineRowLike],
+    });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.label).toBe("steps-impl@pipeline done: eapp#122 Paket 1 abge…");
+    expect(nodes[0]!.label).not.toContain("thr_g7yt8g9whn");
+    expect(nodes[0]!.meta!.request).not.toContain("[bb system]");
   });
 });
 
@@ -1034,11 +1124,12 @@ describe("BBP-228 acceptance: request-kind × provider fixture matrix", () => {
     expect(nodes[0]!.label).toBe("Kickoff: steps-impl@pipeline");
   });
 
-  it("Pi, [bb system] message without turnId: translated and assigned the same way as Claude Code", () => {
+  it("Pi, [bb system] message without turnId: resolved to the member name (BBP-228 R2), assigned the same way as Claude Code", () => {
     const { nodes } = timelineToCanvas("thr_rnty5wvb2j", {
       rows: [fixtures.piConversationSystemMessage as TimelineRowLike, fixtures.piTurnSystemMessage as TimelineRowLike],
     });
     expect(nodes).toHaveLength(1);
-    expect(nodes[0]!.label).toBe("@thread:thr_2pse9tz7ku completed:");
+    expect(nodes[0]!.label).toBe("steps-grill@pipeline done: Ich warte auf die An…");
+    expect(nodes[0]!.label).not.toContain("thr_2pse9tz7ku");
   });
 });

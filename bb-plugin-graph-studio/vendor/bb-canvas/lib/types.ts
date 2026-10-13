@@ -161,6 +161,7 @@ const FIELD_LABELS: Record<string, string> = {
   updated: "Updated",
   firstLine: "First line",
   request: "Request",
+  requestRaw: "Request (raw)",
   answerPreview: "Answer",
   toolName: "Tool",
   command: "Command",
@@ -221,6 +222,9 @@ const TECHNICAL_KEYS: ReadonlySet<string> = new Set([
   // A step's raw provider status ("completed", "error") — the card's status
   // pill already says it; a kind that means it (subagent) curates it.
   "status",
+  // A turn's untouched request text (BBP-228 R2) — "request" above is the
+  // cleaned version a reader wants; this is only for checking the cleanup.
+  "requestRaw",
 ]);
 
 function fieldLabel(key: string): string {

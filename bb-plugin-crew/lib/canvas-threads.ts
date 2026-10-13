@@ -201,6 +201,11 @@ export type TimelineRowLike = {
   /** A `"conversation"` row's own request classification (BBP-228) — not yet
    *  used by `turnTitle` (reserved for a future kind-specific form). */
   systemMessageKind?: string;
+  /** A `"conversation"` row's own structured detail for its `[bb system]`
+   *  notice (BBP-228 R2) — for a single child-thread completion, `threadName`
+   *  is that child's display name, already resolved server-side; `turnTitle`
+   *  uses it instead of ever showing the bare thread id. */
+  systemMessageSubject?: { kind?: string; threadId?: string; threadName?: string } | null;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -260,8 +265,15 @@ function firstUserConversation(rows: readonly TimelineRowLike[] | null | undefin
  *  notice keeps just its own first line; anything else is used as-is. Never
  *  empty — a request with no usable line after stripping its prefix falls
  *  back to `"Turn"`. `systemMessageKind` is accepted for a future
- *  kind-specific form but not evaluated this round. */
-export function turnTitle(text: string, _systemMessageKind?: string): string {
+ *  kind-specific form but not evaluated this round; `systemMessageSubject`
+ *  is used for exactly one shape — a single child-thread completion
+ *  (`"@thread:<id> completed:"`) — where its `threadName` replaces the id
+ *  (BBP-228 R2: a title must never show a bare thread id). */
+export function turnTitle(
+  text: string,
+  _systemMessageKind?: string,
+  systemMessageSubject?: TimelineRowLike["systemMessageSubject"],
+): string {
   const trimmed = (text ?? "").trim();
   if (trimmed === "") return "Turn";
   const lines = trimmed.split("\n");
@@ -297,12 +309,54 @@ export function turnTitle(text: string, _systemMessageKind?: string): string {
 
   const system = trimmed.match(/^\[bb system\]\s*([\s\S]*)$/);
   if (system) {
-    const line = (system[1] ?? "").split("\n").find((candidate) => candidate.trim() !== "");
-    return line ? line.trim() : "Turn";
+    const restLines = (system[1] ?? "").split("\n");
+    const firstIdx = restLines.findIndex((candidate) => candidate.trim() !== "");
+    if (firstIdx === -1) return "Turn";
+    const line = restLines[firstIdx]!.trim();
+    const childDone = line.match(/^@thread:\S+\s+completed:$/);
+    if (childDone) {
+      const name = systemMessageSubject?.threadName?.trim();
+      const label = name ? `${name} done` : "thread done";
+      const contentLine = restLines.slice(firstIdx + 1).find((candidate) => candidate.trim() !== "");
+      return contentLine ? `${label}: ${contentLine.trim()}` : label;
+    }
+    return line;
   }
 
   const firstNonEmpty = lines.find((line) => line.trim() !== "");
   return firstNonEmpty ? firstNonEmpty.trim() : "Turn";
+}
+
+/** Strips a request's own header/footer noise for the sidebar's "Request"
+ *  field (BBP-228 R2) — the raw text (with every prefix/header line intact)
+ *  stays available as `meta.requestRaw`, behind "Debug", so nothing is lost.
+ *  A crew message's `From/To`/`Sent`/`Subject` header is dropped up to its
+ *  `---` separator (or, lacking one, just its first line); a trailing
+ *  "Reply with crew_send(...)" footer (the crew tool's own boilerplate) is
+ *  dropped; a kickoff brief loses only its own first line; a `[bb system]`/
+ *  `[bb message from thread:…]` notice loses just its prefix. Anything else
+ *  passes through unchanged. */
+export function cleanRequestText(text: string): string {
+  const raw = text ?? "";
+  const lines = raw.split("\n");
+  const firstLine = (lines[0] ?? "").trim();
+  let body: string;
+
+  if (/^\[crew\] Kickoff brief for /.test(firstLine)) {
+    body = lines.slice(1).join("\n");
+  } else if (/^\[crew\] From: .+ → To: .+$/.test(firstLine)) {
+    let i = 1;
+    while (i < lines.length && lines[i]!.trim() !== "---" && lines[i]!.trim() !== "") i++;
+    if (lines[i]?.trim() === "---") i++;
+    body = lines.slice(i).join("\n");
+  } else {
+    const threadMessage = raw.match(/^\[bb message from thread:[^\]]*\]\s*([\s\S]*)$/);
+    const system = raw.match(/^\[bb system\]\s*([\s\S]*)$/);
+    body = threadMessage ? (threadMessage[1] ?? "") : system ? (system[1] ?? "") : raw;
+  }
+
+  body = body.replace(/\n?-{3,}\s*\nReply with crew_send\([\s\S]*$/, "");
+  return body.trim();
 }
 
 function fileName(path: string | null | undefined): string | undefined {
@@ -602,8 +656,8 @@ function mapRows(rows: readonly TimelineRowLike[], parentId: string, threadId?: 
  *  is excluded from the returned index so the thread never also renders it
  *  as its own node (only engaged when the page has at least one turn row at
  *  all, so a page of bare conversation rows keeps its original rendering). */
-function requestsByTurn(rows: readonly TimelineRowLike[]): { byTurnKey: Map<string, string>; consumed: ReadonlySet<number> } {
-  const byTurnKey = new Map<string, string>();
+function requestsByTurn(rows: readonly TimelineRowLike[]): { byTurnKey: Map<string, TimelineRowLike>; consumed: ReadonlySet<number> } {
+  const byTurnKey = new Map<string, TimelineRowLike>();
   const consumed = new Set<number>();
   const turnKeys = new Set(rows.filter((row) => row.kind === "turn").map((row) => row.turnId ?? row.id));
   if (turnKeys.size === 0) return { byTurnKey, consumed };
@@ -612,7 +666,7 @@ function requestsByTurn(rows: readonly TimelineRowLike[]): { byTurnKey: Map<stri
     if (row.kind !== "conversation" || row.role !== "user") return;
     consumed.add(index);
     if (typeof row.turnId === "string" && turnKeys.has(row.turnId) && !byTurnKey.has(row.turnId) && row.text) {
-      byTurnKey.set(row.turnId, row.text);
+      byTurnKey.set(row.turnId, row);
     }
   });
 
@@ -628,7 +682,7 @@ function requestsByTurn(rows: readonly TimelineRowLike[]): { byTurnKey: Map<stri
     const key = row.turnId ?? undefined;
     if (key !== undefined && byTurnKey.has(key)) continue;
     const next = turnsBySeq.find(({ row: turn }) => turn.sourceSeqStart! > row.sourceSeqStart! && !byTurnKey.has(turn.turnId ?? turn.id));
-    if (next && row.text) byTurnKey.set(next.row.turnId ?? next.row.id, row.text);
+    if (next && row.text) byTurnKey.set(next.row.turnId ?? next.row.id, row);
   }
 
   return { byTurnKey, consumed };
@@ -652,7 +706,7 @@ export function timelineToCanvas(
   response: { rows: readonly TimelineRowLike[] },
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   const parent = threadNodeId(threadId);
-  const { byTurnKey: requestText, consumed } = requestsByTurn(response.rows);
+  const { byTurnKey: requestRows, consumed } = requestsByTurn(response.rows);
   const answerText = answersByTurn(response.rows);
   const nodes: CanvasNode[] = [];
   let pending: TimelineRowLike[] = [];
@@ -669,8 +723,9 @@ export function timelineToCanvas(
     const turnNodeId = `row:${row.id}`;
     const turnKey = row.turnId ?? row.id;
     const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
-    const requestFullText = requestText.get(turnKey) ?? firstUserConversation(row.children)?.text;
-    const title = requestFullText !== undefined ? turnTitle(requestFullText) : undefined;
+    const requestRow = requestRows.get(turnKey) ?? firstUserConversation(row.children);
+    const requestFullText = requestRow?.text;
+    const title = requestFullText !== undefined ? turnTitle(requestFullText, requestRow?.systemMessageKind, requestRow?.systemMessageSubject) : undefined;
     const answerPreview = answerText.get(turnKey);
     nodes.push({
       id: turnNodeId,
@@ -686,9 +741,11 @@ export function timelineToCanvas(
         sourceSeqEnd: row.sourceSeqEnd,
         summaryCount,
         ...(title ? { firstLine: title } : {}),
-        // The sidebar's own rows: the full request (the card title is only
-        // its first line), the answer, and how long the turn took.
-        ...(requestFullText?.trim() ? { request: requestFullText.trim() } : {}),
+        // The sidebar's own rows: the cleaned request (the card title is
+        // only its first line; the raw text with every header/footer line
+        // intact stays behind "Debug" as requestRaw, BBP-228 R2), the
+        // answer, and how long the turn took.
+        ...(requestFullText?.trim() ? { request: cleanRequestText(requestFullText), requestRaw: requestFullText.trim() } : {}),
         ...(answerPreview ? { answerPreview } : {}),
         ...(duration(row.startedAt, row.completedAt) ? { duration: duration(row.startedAt, row.completedAt) } : {}),
       },
@@ -749,12 +806,12 @@ export async function enrichTurnNodes(nodes: readonly CanvasNode[], port: TurnFi
         const { rows } = await port.turnDetails(turnId, threadId, sourceSeqStart, sourceSeqEnd);
         const request = firstUserConversation(rows);
         if (!request?.text) return;
-        const title = turnTitle(request.text, request.systemMessageKind);
+        const title = turnTitle(request.text, request.systemMessageKind, request.systemMessageSubject);
         byId.set(node.id, {
           ...node,
           // The step count is already the card's subtitle ("Turn · n steps").
           label: truncate(title, 48),
-          meta: { ...node.meta, firstLine: title, request: request.text.trim() },
+          meta: { ...node.meta, firstLine: title, request: cleanRequestText(request.text), requestRaw: request.text.trim() },
         });
       } catch {
         // Turn steps unreadable: the plain "Turn · n steps" label stands.

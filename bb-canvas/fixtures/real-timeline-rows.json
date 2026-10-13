@@ -429,6 +429,33 @@
     "children": null,
     "_note": "Turn boundary for piConversationSystemMessage: real turn/started at seq 53, turn/completed at seq 86 on thr_rnty5wvb2j. sourceSeqStart (53) is after the request's own sourceSeqStart (52), matching the sourceSeqStart-fallback assignment."
   },
+  "piConversationChildCompleted": {
+    "id": "conv_pi_child_01",
+    "kind": "conversation",
+    "role": "user",
+    "threadId": "thr_rnty5wvb2j",
+    "turnId": null,
+    "createdAt": 1791811968174,
+    "startedAt": 1791811968174,
+    "sourceSeqStart": 2249,
+    "sourceSeqEnd": 2249,
+    "systemMessageKind": "child-completed",
+    "systemMessageSubject": { "kind": "thread", "threadId": "thr_g7yt8g9whn", "threadName": "steps-impl@pipeline" },
+    "text": "[bb system]\n\n@thread:thr_g7yt8g9whn completed:\n\neapp#122 Paket 1 abgeschlossen und dem Lead gemeldet.\n\n**Ergebnis:**\n- **Commit `395c5a47dc`** auf `bb/steps-impl-pipeline-thr_g7yt8g9whn` …\n\nWarte jetzt auf das nächste Ticket bzw. die Freigabe durch den Lead.",
+    "_note": "Real [bb system] single-child-completion request, thr_rnty5wvb2j (orch-lead@pipeline, Pi) seq 2249 — BBP-228 R2 human feedback (Abnahme 13.10.2026): this shape showed only '@thread:thr_… completed:' as the title, the thread id with no content. systemMessageSubject.threadName (\"steps-impl@pipeline\") is real data already on this same row, from the raw event's own systemMessageSubject.threadName — no turnId, per the Pi assumption."
+  },
+  "piTurnChildCompleted": {
+    "id": "turn_pi_child_01",
+    "kind": "turn",
+    "threadId": "thr_rnty5wvb2j",
+    "turnId": "turn_pi_child_01",
+    "status": "completed",
+    "summaryCount": 5,
+    "sourceSeqStart": 2250,
+    "sourceSeqEnd": 2949,
+    "children": null,
+    "_note": "Turn boundary for piConversationChildCompleted: illustrative sourceSeqStart (2250, just after the request's own 2249) so the Pi sourceSeqStart fallback (no turnId) picks this turn up, per the existing fallback design (BBP-228). The real turn/started was at seq 2207 (before the request), turn/completed at seq 2949 on thr_rnty5wvb2j — this was a mid-turn system notification, not a turn-starting request, which the current turnId-less fallback (next following turn only) does not model exactly."
+  },
   "piThreadRequestFallback": {
     "_note": "Pi/pipeline (thr_m5hdus9gv4): a thread-level user conversation row with no turnId, followed by exactly one turn — BBP-228 Decisions/Spec note that Pi threads may omit turnId on the request row, so it is assigned to the next following turn by sourceSeqStart order instead.",
     "rows": [

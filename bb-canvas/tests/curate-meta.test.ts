@@ -135,6 +135,12 @@ describe("curateMeta", () => {
     expect(curateMeta("turn", { rowId: "r1", request: "Hi" }).curated).toEqual([{ label: "Request", value: "Hi" }]);
   });
 
+  it("puts a turn's raw request behind Debug, not alongside the cleaned Request (BBP-228 R2)", () => {
+    const { curated, debug } = curateMeta("turn", { request: "Hi", requestRaw: "[bb system]\n\nHi" });
+    expect(curated).toEqual([{ label: "Request", value: "Hi" }]);
+    expect(debug).toEqual([{ label: "Request (raw)", value: "[bb system]\n\nHi" }]);
+  });
+
   it("shows a turn's request, answer, duration and steps, not its title again", () => {
     const { curated } = curateMeta("turn", { firstLine: "Hi", request: "Hi\nthere", answerPreview: "Done", duration: "2s", summaryCount: 3 });
     expect(curated).toEqual([
