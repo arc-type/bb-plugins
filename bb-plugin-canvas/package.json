@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@xyflow/react": "^12.12.0",
-    "zod": "^4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@get-bb/plugin-sdk": "0.6.15",
@@ -52,5 +52,8 @@
     "build": "bb plugin build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "overrides": {
+    "zod": "4.6.6"
   }
 }
