@@ -242,6 +242,9 @@ export const MIGRATIONS: readonly string[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS graph_runs_by_member ON graph_runs (member_id, status)`,
   `CREATE INDEX IF NOT EXISTS graph_runs_by_crew ON graph_runs (crew_id, status)`,
+  // BBP-266: the kickoff brief of a shift that has not had a turn yet; delivery
+  // prepends it to the next message it sends, then clears it.
+  `ALTER TABLE member_bindings ADD COLUMN pending_kickoff TEXT`,
 ];
 
 export const CREW_STATUSES = ["stopped", "starting", "running", "degraded"] as const;
@@ -732,6 +735,19 @@ export function createStore(db: Database, now: () => number = Date.now) {
         ).run(memberRow, shift, threadId, at);
       })();
       return this.currentBinding(memberRow)!;
+    },
+    /** BBP-266: the pending kickoff brief of the current binding, if any. */
+    pendingKickoff(memberRow: string): string | null {
+      const row = db
+        .prepare("SELECT pending_kickoff FROM member_bindings WHERE member_id = ? AND retired_at IS NULL ORDER BY shift DESC LIMIT 1")
+        .get(memberRow) as { pending_kickoff: string | null } | undefined;
+      return row?.pending_kickoff ?? null;
+    },
+    setPendingKickoff(memberRow: string, brief: string): void {
+      db.prepare("UPDATE member_bindings SET pending_kickoff = ? WHERE member_id = ? AND retired_at IS NULL").run(brief, memberRow);
+    },
+    clearPendingKickoff(memberRow: string): void {
+      db.prepare("UPDATE member_bindings SET pending_kickoff = NULL WHERE member_id = ? AND retired_at IS NULL").run(memberRow);
     },
     retireBinding(memberRow: string): void {
       db.prepare("UPDATE member_bindings SET retired_at = ? WHERE member_id = ? AND retired_at IS NULL").run(now(), memberRow);

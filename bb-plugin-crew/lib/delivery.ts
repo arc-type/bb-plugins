@@ -428,8 +428,12 @@ export function createDelivery(deps: DeliveryDeps) {
       return set({ status: "delivered", delivered: true, deliveryMode: mode, hold: null, reason: "found in the thread after an interrupted attempt" });
     }
     store.updateMessage(message.id, { attempt: true, deliveryMode: mode });
+    // BBP-266: a new shift's brief rides on its first real send, as one input.
+    const kickoff = store.pendingKickoff(member.id);
+    const text = renderMessage(message, maxStepsFor(message));
     try {
-      const result = await port.send(thread.id, renderMessage(message, maxStepsFor(message)), mode as SendMode);
+      const result = await port.send(thread.id, kickoff ? `${kickoff}\n\n${text}` : text, mode as SendMode);
+      if (kickoff) store.clearPendingKickoff(member.id);
       touched.add(thread.id);
       if (startsTurn && budget) budget.running += 1;
       return store.updateMessage(message.id, {
