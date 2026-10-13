@@ -2,7 +2,7 @@
 //
 // The Canvas nav page (BBP-189 AK 1): Agents → projects → every thread BB
 // lists, with no crew or Graph Studio RPC anywhere in the way.
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 
@@ -422,6 +422,8 @@ describe("the Canvas Active only toggle (BBP-288)", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Quiet chat — / })).toBeNull());
     expect(screen.getByRole("button", { name: /^Busy chat — / })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Active only" }).getAttribute("aria-pressed")).toBe("true");
+    // The bar counts what is left in view, not just the window.
+    expect(screen.getByText("Last 12 h · 2 of 2 · 1 active")).toBeTruthy();
   });
 
   it("remembers the toggle across reloads", async () => {
@@ -515,6 +517,8 @@ describe("the Canvas chat split", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Second — / }));
     await waitFor(() => expect(chat()?.getAttribute("data-thread-id")).toBe("t2"));
     expect(screen.getByRole("button", { name: /^First — / })).toBeTruthy();
+    // The chat names its thread, so the split never leaves you guessing.
+    expect(within(screen.getByRole("region", { name: "Chat" })).getByText("Second")).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Chat" })).toBeNull();
   });
 

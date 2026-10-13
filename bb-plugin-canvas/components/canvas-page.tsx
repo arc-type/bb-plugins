@@ -125,8 +125,9 @@ function saveActiveOnly(value: boolean) {
   }
 }
 
-/** From this page width graph and chat sit side by side (BBP-289). */
-const SPLIT_MIN_WIDTH = 900;
+/** From this page width graph and chat sit side by side (BBP-289): below it
+ *  the graph, squeezed by the chat and its own sidebar, has too little room. */
+const SPLIT_MIN_WIDTH = 1200;
 
 /** The width of `element`, kept current through a ResizeObserver. */
 function useWidth(element: HTMLElement | null): number {
@@ -258,7 +259,10 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
       </button>
       {layer !== null ? (
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span>{overviewSummary(filter, layer.shown, layer.total)}</span>
+          <span>
+            {overviewSummary(filter, layer.shown, layer.total)}
+            {activeOnly ? ` · ${layer.nodes.filter((node) => node.kind === "thread").length} active` : null}
+          </span>
           {!showingAll ? (
             <button
               type="button"
@@ -307,11 +311,13 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
   const visible = visibleFocusIds(layer.nodes, focusIds);
   const chatThreadId = selectedThreadId ?? focus;
   const split = (layout ?? (width >= SPLIT_MIN_WIDTH ? "split" : "tabs")) === "split";
+  const chatThread = chatThreadId === null ? undefined : state.threads.find((thread) => thread.id === chatThreadId);
+  const chatTitle = chatThreadId === null ? null : chatThread?.title?.trim() || chatThread?.titleFallback?.trim() || "Thread";
   const chatPane =
     chatThreadId !== null ? (
       <ThreadChat threadId={chatThreadId} variant="compact" />
     ) : (
-      <div className="p-4 text-sm text-muted-foreground">Select a thread to see its chat.</div>
+      <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">Select a thread to see its chat.</div>
     );
   return (
     <div ref={setRoot} className={`flex h-full min-h-0 ${split ? "flex-row" : "flex-col"}`}>
@@ -372,8 +378,13 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
         />
       </div>
       {split ? (
-        <div role="region" aria-label="Chat" className="min-h-0 w-[40%] min-w-[320px] border-l border-border">
-          {chatPane}
+        <div role="region" aria-label="Chat" className="flex min-h-0 w-[34%] min-w-[360px] max-w-[520px] flex-col border-l border-border">
+          {chatTitle !== null ? (
+            <div className="truncate border-b border-border px-3 py-1.5 text-xs font-medium text-foreground" title={chatTitle}>
+              {chatTitle}
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1">{chatPane}</div>
         </div>
       ) : tab === "chat" ? (
         <div role="tabpanel" className="min-h-0 flex-1">

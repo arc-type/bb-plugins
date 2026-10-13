@@ -51,10 +51,13 @@ export function ActivitySection({ sdk, threadId, turnsPerThread, version, onReve
             <button
               type="button"
               onClick={() => onReveal(entry.id, entry.inCanvas)}
-              className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary ${entry.inCanvas ? "text-foreground" : "text-muted-foreground"}`}
+              title={entry.inCanvas ? undefined : "Not in the canvas yet: click to show it"}
+              className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary ${entry.inCanvas ? "text-foreground" : "text-muted-foreground opacity-70 hover:opacity-100"}`}
             >
               <KindIcon kind={entry.kind} />
-              <span className="truncate">{entry.label}</span>
+              <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+              {/* What the canvas shows carries a mark; the rest is one click away. */}
+              {entry.inCanvas ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" /> : null}
             </button>
           </li>
         ))}
