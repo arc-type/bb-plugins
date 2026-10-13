@@ -47,6 +47,18 @@ describe("crew file validation", () => {
     expect(codes(bad)).toContain("schema");
   });
 
+  it("context (BBP-278): persistent by default, per-item readable on the member, an unknown value is a schema error", () => {
+    expect(validateCrew(base()).members.map((m) => m.context)).toEqual(["persistent", "persistent", "persistent"]);
+    const spec = base();
+    spec.groups[1]!.members[1] = { ...spec.groups[1]!.members[1]!, context: "per-item" };
+    const result = validateCrew(spec);
+    expect(result.problems).toEqual([]);
+    expect(result.members.find((m) => m.key === "dev-check")!.context).toBe("per-item");
+    const bad = base();
+    bad.groups[1]!.members[1] = { ...bad.groups[1]!.members[1]!, context: "foo" as never };
+    expect(codes(bad)).toContain("schema");
+  });
+
   it("rejects a schema violation (unknown permission)", () => {
     const spec = base();
     spec.permissions = "yolo" as never;
