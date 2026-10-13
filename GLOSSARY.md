@@ -67,7 +67,7 @@ layers those plugins contribute; editing them on the canvas is deferred.
 register inside their own UI. It stays until the Canvas plugin takes over the
 crew and graph layers; it is not the Canvas.
 
-**Active work** — on the Canvas, a node that is running, waiting or queued,
+**Active work** — on the Canvas, a node that is running or waiting,
 together with the chain of nodes above it up to the project. "Active only"
 shows exactly this and nothing else; finished siblings drop out.
 
