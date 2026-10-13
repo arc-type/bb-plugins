@@ -61,3 +61,8 @@ stay.
 **Parked merge** — a merge request whose merge commit exists but has not moved
 `main` yet, because the human's checkout of `main` has uncommitted changes. It
 counts as not merged until `main` catches up; the lead sees it on "Needs you".
+
+**Per-item context** — a member setting under which every newly assigned work
+item starts a fresh shift, so the member sees only that item and none of its
+earlier work. The opposite, and the default, is a persistent context that
+carries over from item to item.
