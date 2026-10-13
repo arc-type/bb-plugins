@@ -7,11 +7,14 @@ import { act } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_MS } from "../vendor/bb-canvas/lib/visible-poll";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
+// Static, not `() => import("../app")` in beforeAll: the cold transform of the
+// whole bundle belongs to the import phase, not to a timed hook (BBP-260).
+import pluginApp from "../app";
 
 let app: CapturedPluginApp;
 
 beforeAll(async () => {
-  app = await loadPluginApp(() => import("../app"));
+  app = await loadPluginApp(pluginApp);
 });
 beforeEach(() => localStorage.clear());
 afterEach(() => {

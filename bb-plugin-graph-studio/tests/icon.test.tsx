@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadPluginApp, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
+// Static, not `() => import("../app")` in beforeAll: the cold transform of the
+// whole bundle belongs to the import phase, not to a timed hook (BBP-260).
+import pluginApp from "../app";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import graphStudio from "../server";
 import { GRAPH_STUDIO_ICON } from "../lib/icon";
@@ -14,7 +17,7 @@ import { GraphStudioFlow } from "../components/graph-studio-icon";
 let app: CapturedPluginApp;
 
 beforeAll(async () => {
-  app = await loadPluginApp(() => import("../app"));
+  app = await loadPluginApp(pluginApp);
 });
 afterEach(cleanup);
 
