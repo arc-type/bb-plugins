@@ -230,12 +230,12 @@ export function createLifecycle(deps: LifecycleDeps) {
       journal.failed(opId, error instanceof Error ? error.message : String(error), thread.id);
       throw error;
     }
-    // The cleared session knows nothing: the kickoff brief is its first message.
+    // The cleared session knows nothing: the kickoff brief rides on its first
+    // message (BBP-267) instead of starting a turn of its own.
     const skillsCatalog = (await ctx.skillsCatalog?.(crew.projectId).catch(() => null)) ?? null;
-    await port.send(
-      thread.id,
+    store.setPendingKickoff(
+      member.id,
       `${kickoffBrief(spec, resolved, members, null, skillsCatalog)}\n\nThis is shift ${shift}: your context was cleared by a reset. Work items and messages are kept (crew_work_list, crew_inbox).`,
-      "start",
     );
     return { key: member.key, address: member.address, result: "updated", threadId: thread.id, shift, detail: "context cleared, same thread" };
   }

@@ -83,7 +83,7 @@ describe("snapshot and restore", () => {
 });
 
 describe("reset", () => {
-  it("clear: same thread, shift + 1, context cleared, kickoff brief sent, metadata follows", async () => {
+  it("clear: same thread, shift + 1, context cleared, no turn started, metadata follows", async () => {
     const t = await trio();
     const { service, store, crew, threads, members } = t;
     const result = await service.lifecycle.reset(crew, "dev-impl", "clear");
@@ -95,8 +95,25 @@ describe("reset", () => {
       [2, threads["dev-impl"], true],
     ]);
     expect(t.thread(threads["dev-impl"]!).metadata.shift).toBe(2);
-    expect(t.thread(threads["dev-impl"]!).inbox.at(-1)!.text).toContain("This is shift 2: your context was cleared");
     expect(store.memberByThread(threads["dev-impl"]!)?.key).toBe("dev-impl");
+    // BBP-267: nothing is sent; the brief waits as a pending kickoff and the member stays idle.
+    expect(t.port.countCalls("send")).toBe(0);
+    expect(t.thread(threads["dev-impl"]!).status).toBe("idle");
+    expect(store.pendingKickoff(members["dev-impl"]!.id)).toContain("This is shift 2: your context was cleared");
+    const [view] = (await service.activity.refreshAll(PROJECT)).filter((v) => v.memberRow === members["dev-impl"]!.id);
+    expect(view!.activity).toBe("idle");
+  });
+
+  it("clear: the next message carries the brief exactly once, brief first", async () => {
+    const t = await trio();
+    await t.service.lifecycle.reset(t.crew, "dev-impl", "clear");
+    const before = t.thread(t.threads["dev-impl"]!).inbox.length;
+    await t.service.send({ projectId: PROJECT, from: t.human, to: "dev-impl@trio", body: "first" });
+    await t.service.send({ projectId: PROJECT, from: t.human, to: "dev-impl@trio", body: "second" });
+    const inbox = t.thread(t.threads["dev-impl"]!).inbox.slice(before);
+    expect(inbox).toHaveLength(2);
+    expect(inbox[0]!.text.indexOf("This is shift 2")).toBeLessThan(inbox[0]!.text.indexOf("first"));
+    expect(inbox.filter((e) => e.text.includes("This is shift 2"))).toHaveLength(1);
   });
 
   it("clear: a member thread that still has a parent comes out without one", async () => {
