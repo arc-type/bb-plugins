@@ -6,11 +6,12 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
+import pluginApp from "../app";
 
 let app: CapturedPluginApp;
 
 beforeAll(async () => {
-  app = await loadPluginApp(() => import("../app"));
+  app = await loadPluginApp(pluginApp);
 });
 afterEach(cleanup);
 
