@@ -41,6 +41,8 @@ export type EnvironmentSpec = z.infer<typeof environmentObject>;
 
 export const REASONING_LEVELS = ["none", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode"] as const;
 export const SERVICE_TIERS = ["default", "fast"] as const;
+/** persistent: one long-running shift; per-item: a fresh shift for every assigned work item (BBP-104, ADR 0005). */
+export const CONTEXT_MODES = ["persistent", "per-item"] as const;
 
 const idSchema = z.string().trim().min(1).max(64);
 const permissionSchema = z.enum(PERMISSIONS);
@@ -58,6 +60,7 @@ const memberSchema = z
     reasoningLevel: z.enum(REASONING_LEVELS).optional(),
     /** Optional; only for providers that offer service tiers. */
     serviceTier: z.enum(SERVICE_TIERS).optional(),
+    context: z.enum(CONTEXT_MODES).optional(),
     role: z.string().default(""),
     instructions: z.string().optional(),
     permissions: permissionSchema.optional(),
@@ -202,6 +205,7 @@ export type ResolvedMember = {
   model: string | null;
   reasoningLevel: (typeof REASONING_LEVELS)[number] | null;
   serviceTier: (typeof SERVICE_TIERS)[number] | null;
+  context: (typeof CONTEXT_MODES)[number];
   permissions: Permission;
   environment: EnvironmentSpec;
   placement: Placement;
@@ -385,6 +389,7 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
       model: member.model ?? null,
       reasoningLevel: member.reasoningLevel ?? null,
       serviceTier: member.serviceTier ?? null,
+      context: member.context ?? "persistent",
       permissions,
       environment,
       placement: placementFor(lead, permissions, environment, spec.environment),
@@ -507,6 +512,23 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
       "shared-writers",
       `${sharedWriters.length} writing members share one environment: ${sharedWriters.map((m) => m.key).join(", ")}`,
     );
+  }
+
+  // A reviewer that reads the member assigning it work carries the author's context into the review.
+  for (const member of members) {
+    if (!/review|check/i.test(member.role)) continue;
+    const assigners = spec.links.filter((l) => l.kind === "assigns_to" && l.to === member.key).map((l) => l.from);
+    for (const assigner of new Set(assigners)) {
+      const reads = spec.links.some(
+        (l) =>
+          (l.kind === "can_read" && l.from === member.key && l.to === assigner) ||
+          (l.kind === "works_with" &&
+            ((l.from === member.key && l.to === assigner) || (l.from === assigner && l.to === member.key))),
+      );
+      if (reads) {
+        warn("review-reads-author", `${member.key}: reviews work from ${assigner} but also reads it (can_read or works_with), so the review is not independent`);
+      }
+    }
   }
 
   return { spec, members: topoOrder(members, spec.links), problems };

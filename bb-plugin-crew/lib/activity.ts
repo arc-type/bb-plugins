@@ -19,6 +19,7 @@ export type NeedsReason =
   | "error"
   | "merge-request"
   | "merge-conflict"
+  | "merge-parked"
   | "follow-up"
   | "context"
   | "graph-approval";
@@ -49,6 +50,8 @@ export type ActivityInput = {
   escalated?: number;
   /** A merge request of this lead's crew waits for the human. */
   mergeRequest?: string | null;
+  /** Reason of the crew's merge parked behind a dirty base checkout (BBP-270); lead only. */
+  parkedMerge?: string | null;
   /** Plugin-raised reasons (merge-conflict) with their detail. */
   needs?: readonly { reason: string; detail: string | null }[];
   context?: ContextUsage | null;
@@ -93,6 +96,7 @@ export function deriveActivity(input: ActivityInput): Derived {
   if (live && thread.status === "error") needsYou.push("error");
   if (input.mergeRequest) needsYou.push("merge-request");
   if ((input.needs ?? []).some((need) => need.reason === "merge-conflict")) needsYou.push("merge-conflict");
+  if (input.parkedMerge) needsYou.push("merge-parked");
   if ((input.escalated ?? 0) > 0) needsYou.push("follow-up");
   const context = input.context && input.context.contextWindow > 0 ? input.context.usedTokens / input.context.contextWindow : null;
   if (context !== null && input.lead && context >= CONTEXT_THRESHOLDS.leadNeedsYou) needsYou.push("context");
@@ -125,6 +129,7 @@ export function deriveActivity(input: ActivityInput): Derived {
     : (interactions[0]?.title ??
       (input.graphQuestion ? `Graph ${input.graphQuestion.graphId}: ${input.graphQuestion.question}` : null) ??
       (input.mergeRequest ? input.mergeRequest : null) ??
+      (input.parkedMerge ? `Merge parked: ${input.parkedMerge}` : null) ??
       (conflict ? `Rebase conflict: ${conflict.detail ?? "see the member thread"}` : null) ??
       (input.stoppedLoop ? `Stopped as a loop: ${input.stoppedLoop.reason}. Suggested: ${input.stoppedLoop.action}` : null));
   return {

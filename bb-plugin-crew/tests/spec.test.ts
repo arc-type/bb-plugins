@@ -47,6 +47,18 @@ describe("crew file validation", () => {
     expect(codes(bad)).toContain("schema");
   });
 
+  it("context (BBP-278): persistent by default, per-item readable on the member, an unknown value is a schema error", () => {
+    expect(validateCrew(base()).members.map((m) => m.context)).toEqual(["persistent", "persistent", "persistent"]);
+    const spec = base();
+    spec.groups[1]!.members[1] = { ...spec.groups[1]!.members[1]!, context: "per-item" };
+    const result = validateCrew(spec);
+    expect(result.problems).toEqual([]);
+    expect(result.members.find((m) => m.key === "dev-check")!.context).toBe("per-item");
+    const bad = base();
+    bad.groups[1]!.members[1] = { ...bad.groups[1]!.members[1]!, context: "foo" as never };
+    expect(codes(bad)).toContain("schema");
+  });
+
   it("rejects a schema violation (unknown permission)", () => {
     const spec = base();
     spec.permissions = "yolo" as never;
@@ -376,6 +388,35 @@ describe("crew file validation", () => {
     it("positive: under auto writers do not share, no warning", () => expect(codes(base())).not.toContain("shared-writers"));
   });
 
+  describe("review-reads-author", () => {
+    const reviewer = (kind: "can_read" | "works_with") => {
+      const spec = base();
+      spec.groups[1]!.members[1]!.role = "Reviews the commit";
+      spec.links!.push({ from: "dev-owner", to: "dev-check", kind: "assigns_to" }, { from: "dev-check", to: "dev-owner", kind });
+      return spec;
+    };
+    it.each(["can_read", "works_with"] as const)("negative: a reviewer with %s on its assigner warns, no error", (kind) => {
+      const { problems } = validateCrew(reviewer(kind));
+      expect(problems.map((p) => [p.level, p.code])).toContainEqual(["warning", "review-reads-author"]);
+      expect(hasErrors(problems)).toBe(false);
+    });
+    it("negative: works_with declared from the author's side also warns", () => {
+      const spec = reviewer("works_with");
+      spec.links![3] = { from: "dev-owner", to: "dev-check", kind: "works_with" };
+      expect(codes(spec)).toContain("review-reads-author");
+    });
+    it("positive: a reviewer only assigned to, without reading its author, does not warn", () => {
+      const spec = reviewer("can_read");
+      spec.links!.pop();
+      expect(codes(spec)).not.toContain("review-reads-author");
+    });
+    it("positive: without review or check in the role there is no warning", () => {
+      const spec = reviewer("can_read");
+      spec.groups[1]!.members[1]!.role = "Implements";
+      expect(codes(spec)).not.toContain("review-reads-author");
+    });
+  });
+
   describe("topological order", () => {
     it("puts the lead first even when it is declared last", () => {
       const spec = base();
@@ -443,6 +484,25 @@ describe("templates", () => {
     const result = validateCrew(template.spec);
     expect(result.problems).toEqual([]);
     expect(result.members.filter((m) => m.lead)).toHaveLength(1);
+  });
+  it.each([["pair", "dev-check"], ["trio", "dev-review"]])("%s gives its reviewer %s a per-item context", (id, key) => {
+    const template = TEMPLATES.find((t) => t.id === id)!;
+    const members = validateCrew(template.spec).members;
+    expect(members.find((m) => m.key === key)!.context).toBe("per-item");
+    expect(members.filter((m) => m.context === "per-item").map((m) => m.key)).toEqual([key]);
+  });
+  it("pair: dev-owner assigns to dev-check, no works_with and no escalation back to the author", () => {
+    const links = validateCrew(TEMPLATES[0]!.spec).spec!.links;
+    expect(links).toContainEqual({ from: "dev-owner", to: "dev-check", kind: "assigns_to" });
+    expect(links.filter((l) => l.kind === "works_with" || (l.from === "dev-check" && l.to === "dev-owner"))).toEqual([]);
+  });
+  it("trio: no works_with between dev-impl and dev-review", () => {
+    const links = validateCrew(TEMPLATES[1]!.spec).spec!.links;
+    expect(links.filter((l) => l.kind === "works_with")).toEqual([]);
+  });
+  it.each([["pair", 0], ["trio", 1]] as const)("%s reviewer only checks what the work item names", (_id, index) => {
+    const reviewer = validateCrew(TEMPLATES[index]!.spec).members.find((m) => m.context === "per-item")!;
+    expect(reviewer.role).toContain("acceptance criteria and gate result from the work item");
   });
   it("trio has 3 members with writer and reader placements", () => {
     const members = validateCrew(TEMPLATES[1]!.spec).members;

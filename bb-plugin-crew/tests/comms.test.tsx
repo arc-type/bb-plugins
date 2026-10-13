@@ -4,6 +4,7 @@ import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { flowOf, memberKeyOf, messageFlows, recentFlowIds, RECENT_MS, shortAddress, timeline } from "../lib/comms";
 import type { CrewDto, MemberDto, MessageDto, OverviewDto } from "../server";
+import pluginApp, { crewProjects, preview } from "../app";
 
 const KNOWN = new Set(["orch-lead", "dev-impl", "dev-review"]);
 const msg = (id: string, from: string, to: string, createdAt: number) => ({ id, fromAddress: from, toAddress: to, createdAt });
@@ -128,7 +129,6 @@ describe("panel helpers", () => {
   });
 
   it("crewProjects counts crews per project and falls back to the id without a name", async () => {
-    const { crewProjects } = await import("../app");
     expect(crewProjects([crewDto("a", "p1", "Plugins"), crewDto("b", "p1", "Plugins"), crewDto("c", "p2")])).toEqual([
       { id: "p1", name: "Plugins", count: 2 },
       { id: "p2", name: "p2", count: 1 },
@@ -202,7 +202,7 @@ async function openTopology(slot: { container: HTMLElement; findByRole: (role: s
 
 describe("topology communication", () => {
   it("asks for this crew's own messages, lists them in order and in the log", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const calls: unknown[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend([message("m1", "orch-lead@trio", "dev-impl@trio", "Build it", 1), message("m2", "dev-impl@trio", "orch-lead@trio", "Done", 2)], calls),
@@ -218,7 +218,7 @@ describe("topology communication", () => {
   });
 
   it("a tick opens the message card in place of the member card; closing brings the member back", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend([message("m1", "orch-lead@trio", "dev-impl@trio", "Build it", 1)]) });
     await openTopology(slot);
     // negative first: no message card before a pick
@@ -237,7 +237,7 @@ describe("topology communication", () => {
   });
 
   it("Replay walks the messages one after another and stops on the newest", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend([message("m1", "orch-lead@trio", "dev-impl@trio", "First", 1), message("m2", "dev-impl@trio", "orch-lead@trio", "Second", 2)]),
     });
@@ -261,7 +261,7 @@ describe("topology communication", () => {
   });
 
   it("negative: without messages there is no strip, only the hint, and an empty log", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend([]) });
     await openTopology(slot);
     await slot.findByText("No messages inside this crew yet", { exact: false });
@@ -274,7 +274,7 @@ describe("topology communication", () => {
 
 describe("Needs you with context", () => {
   it("a loop explains itself and lists the held message with Release and Discard — no empty answer box", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const actions: unknown[] = [];
     const held = { ...message("m9", "orch-lead@trio", "dev-impl@trio", "Again", 5), status: "stopped_loop" as const, reason: "loop: 6 rounds" };
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
@@ -304,7 +304,7 @@ describe("Needs you with context", () => {
   });
 
   it("negative: a member without Needs you shows no reasons and no held list", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend([]) });
     await openTopology(slot);
     const card = await slot.findByRole("complementary", { name: "Member card" });
@@ -316,12 +316,10 @@ describe("Needs you with context", () => {
 
 describe("feed preview", () => {
   it("collapses newlines into one paragraph and cuts long bodies", async () => {
-    const { preview } = await import("../app");
     expect(preview("a\n\n\nb   c")).toBe("a b c");
     expect(preview("x".repeat(300), 10)).toBe(`${"x".repeat(9)}…`);
   });
   it("negative: a short body stays as it is", async () => {
-    const { preview } = await import("../app");
     expect(preview("short")).toBe("short");
   });
 });

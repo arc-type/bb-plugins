@@ -7,6 +7,7 @@ import { validateCrew } from "../lib/spec";
 import { buildCrewCanvas, TopologyLegend } from "../components/crew-topology";
 import type { ActivityDto, MemberDto } from "../server";
 import { PROJECT, running, setup, trioYaml } from "./helpers";
+import pluginApp from "../app";
 
 const crew = { id: "p1:trio", projectId: "p1", name: "trio", fileVersion: 2, status: "running" as const, updatedAt: 1 };
 const member = (overrides: Partial<MemberDto>): MemberDto => ({
@@ -73,7 +74,7 @@ async function openCrew(slot: ReturnType<typeof renderSlot>, tab: string) {
 
 describe("registrations (E4)", () => {
   it("registers the header badge, the ::crew directive, the confirmation renderer and the crew thread panel", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     expect(app.threadHeaderActions.map((entry) => entry.id)).toEqual(["member-badge"]);
     expect(app.messageDirectives.map((entry) => entry.id)).toEqual(["crew"]);
     expect(app.pendingInteractions.map((entry) => entry.id)).toEqual(["crew-confirm"]);
@@ -83,7 +84,7 @@ describe("registrations (E4)", () => {
 
 describe("thread header badge", () => {
   it("renders address · Shift n for a member thread, with Reset / Handover / Detach", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const calls: { method: string; input: unknown }[] = [];
     const slot = renderSlot(app.threadHeaderActions[0]!, { threadId: "th_2", projectId: "p1", isCompactViewport: false }, {
       rpc: {
@@ -109,7 +110,7 @@ describe("thread header badge", () => {
   });
 
   it("negative: renders nothing on a thread that is not a crew member's", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const asked: unknown[] = [];
     const slot = renderSlot(app.threadHeaderActions[0]!, { threadId: "thr_plain", projectId: "p1", isCompactViewport: false }, {
       rpc: { memberOfThread: (input: unknown) => (asked.push(input), { member: null }) },
@@ -123,7 +124,7 @@ describe("thread header badge", () => {
 
 describe("::crew directive", () => {
   it("renders the crew live: status, members with activity, Needs you", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.messageDirectives[0]!, {
       attributes: { crew: "trio" },
       source: '::crew{crew="trio"}',
@@ -149,7 +150,7 @@ describe("::crew directive", () => {
   });
 
   it("BBP-49: falls back to the Crews nav panel when the surface has no thread side panel", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(
       app.messageDirectives[0]!,
       { attributes: { crew: "trio" }, source: '::crew{crew="trio"}', message: { id: "m1", threadId: "th_9", turnId: null, projectId: "p1" }, openWorkspaceFile: null },
@@ -162,7 +163,7 @@ describe("::crew directive", () => {
   });
 
   it("negative: an invalid crew attribute renders a note and calls nothing; an unknown crew says so", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const bad = renderSlot(app.messageDirectives[0]!, {
       attributes: { crew: "../etc" },
       source: "::crew",
@@ -185,7 +186,7 @@ describe("::crew directive", () => {
 
 describe("crew thread panel (BBP-49)", () => {
   it("opened from the directive's params: the member graph on top, the crew log below", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(
       app.threadPanelActions[0]!,
       { threadId: "th_9", params: { crew: "trio", projectId: "p1" } },
@@ -231,7 +232,7 @@ describe("crew thread panel (BBP-49)", () => {
   });
 
   it("opened without params (header/palette): falls back to the panel thread's own crew", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(
       app.threadPanelActions[0]!,
       { threadId: "th_2", params: null },
@@ -242,7 +243,7 @@ describe("crew thread panel (BBP-49)", () => {
   });
 
   it("negative: a thread with no crew and no params shows no graph", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(
       app.threadPanelActions[0]!,
       { threadId: "th_plain", params: null },
@@ -256,7 +257,7 @@ describe("crew thread panel (BBP-49)", () => {
 
 describe("crew sidepanel chrome (BBP-79)", () => {
   it("shows the crew picker, Apply/Stop/Edit/+New and the CLI hint, with Preview above the topology", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const calls: { method: string; input: unknown }[] = [];
     const slot = renderSlot(
       app.threadPanelActions[0]!,
@@ -303,7 +304,7 @@ describe("crew sidepanel chrome (BBP-79)", () => {
   });
 
   it("negative: picking another crew in the dropdown switches the panel to it", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const beta = { id: "p1:beta", projectId: "p1", name: "beta", fileVersion: 1, status: "stopped" as const, updatedAt: 1 };
     const asked: unknown[] = [];
     const slot = renderSlot(
@@ -328,7 +329,7 @@ describe("crew sidepanel chrome (BBP-79)", () => {
 
 describe("confirmation form", () => {
   it("Confirm submits confirmed: true, Decline confirmed: false", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const submitted: unknown[] = [];
     const props = {
       interaction: { id: "i1", threadId: "th_1", title: "Remove dev-review?", payload: { kind: "remove-member", title: "Remove dev-review from crew trio?", detail: "archived, not deleted" }, createdAt: 1, expiresAt: null },
@@ -360,7 +361,7 @@ describe("topology", () => {
   });
 
   it("the tab draws members coloured by activity and a card with the Needs-you question and answer button", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const sent: unknown[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({
@@ -382,7 +383,7 @@ describe("topology", () => {
   });
 
   it("negative: without Needs you the card has no question box; Open and Reset call the server", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const calls: { method: string; input: unknown }[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({
@@ -402,7 +403,7 @@ describe("topology", () => {
   });
 
   it("BBP-31: a member with open graph runs shows a sub-row per run; negative: none means no list", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({
         getActivity: () => ({
@@ -494,7 +495,7 @@ describe("topology edges (research template)", () => {
 
 describe("topology canvas surfaces", () => {
   it("cards name their group in Graph Studio's kind line; no group boxes are drawn", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend({}) });
     await openCrew(slot, "Members");
     const node = await waitFor(() => {
@@ -509,7 +510,7 @@ describe("topology canvas surfaces", () => {
   });
 
   it("an archived member's node says archived with the status first and Shift N kept (wraps, not cut)", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({
         getActivity: () => ({
@@ -534,7 +535,7 @@ describe("topology canvas surfaces", () => {
   });
 
   it("Reset is a split button: the menu offers clear context and new thread; new thread resets with mode new", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const calls: unknown[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({ reset: (input: unknown) => (calls.push(input), { results: [], problems: [], error: null }) }),
@@ -556,7 +557,7 @@ describe("topology canvas surfaces", () => {
 
 describe("crew header", () => {
   it("breadcrumb, Open all and the ⋯ menu with Stop, Snapshot, Add member, Attach, Delete", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const calls: { method: string; input: unknown }[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({
@@ -586,7 +587,7 @@ describe("crew header", () => {
 
 describe("add member form", () => {
   it("uses BB's picker: without a pick no provider/model is sent (the lead's apply), with a pick the choice is sent", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const sent: Record<string, unknown>[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({ addMember: (input: unknown) => (sent.push(input as Record<string, unknown>), { results: [{ result: "spawned", address: "dev-x@trio" }], error: null }) }),
@@ -621,7 +622,7 @@ describe("add member form", () => {
 
 describe("crew file editor", () => {
   it("validates while typing: an error appears at once, Apply is disabled, no plan is asked for", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const planned: unknown[] = [];
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend({ plan: (input: unknown) => (planned.push(input), { problems: [], items: [] }) }) });
     await openCrew(slot, "Edit crew file");
@@ -650,7 +651,7 @@ describe("crew file editor", () => {
     const expected = formatPlan((await planOf(edited)).items);
     expect(expected.some((line) => line.includes("update"))).toBe(true);
     const applied: unknown[] = [];
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, {
       rpc: backend({
         plan: ((input: { yaml: string }) => planOf(input.yaml)) as never,
@@ -670,7 +671,7 @@ describe("crew file editor", () => {
   });
 
   it("the form uses BB's provider/model picker per member and writes its choice into the YAML", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend({ getCrewFile: () => ({ yaml: trioYaml(), version: 2 }) }) });
     await openCrew(slot, "Edit crew file");
     await slot.findByLabelText("Crew file YAML");
@@ -695,7 +696,7 @@ describe("crew file editor", () => {
   });
 
   it("form and YAML are two views of one file: a form edit shows up in the YAML, comments kept", async () => {
-    const app = await loadPluginApp(() => import("../app"));
+    const app = await loadPluginApp(pluginApp);
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: backend({ getCrewFile: () => ({ yaml: `# keep me\n${trioYaml()}`, version: 2 }) }) });
     await openCrew(slot, "Edit crew file");
     await slot.findByLabelText("Crew file YAML");

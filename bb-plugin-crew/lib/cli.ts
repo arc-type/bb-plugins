@@ -311,7 +311,7 @@ export async function runCli(
         }
       }
       case "merges": {
-        const rows = store.listMerges({ projectId, states: args.flags.has("--all") ? undefined : ["open", "returned"] });
+        const rows = store.listMerges({ projectId, states: args.flags.has("--all") ? undefined : ["open", "returned", "parked"] });
         return ok(rows.length ? rows.map((row) => formatMerge(row, (id) => crewName(id) ?? id)) : "No merge requests wait.");
       }
       case "approve":

@@ -26,7 +26,7 @@ export function buildDirectory(store: Store, models: CrewModels, projectId: stri
     const spec = models(crew).spec;
     const lead = store.listMembers(crew.id).find((member) => member.lead) ?? null;
     const env = lead ? store.memberEnv(lead.id) : null;
-    const open = store.listMerges({ crewId: crew.id, states: ["open", "returned"] })[0] ?? null;
+    const open = store.listMerges({ crewId: crew.id, states: ["open", "returned", "parked"] })[0] ?? null;
     return {
       crew: crew.name,
       summary: spec?.summary ?? "",

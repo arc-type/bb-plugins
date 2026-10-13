@@ -109,6 +109,14 @@ export function createLifecycle(deps: LifecycleDeps) {
     return { key: member.key, address: member.address, result: "updated", threadId: null, shift, detail: "old thread archived; the new thread starts with the next message" };
   }
 
+  /** BBP-280: a per-item member's new shift on assignment; nothing to do without a live thread or during a handover. */
+  async function newShiftOnAssignment(member: MemberRow): Promise<void> {
+    if (store.activeHandover(member.id)) return;
+    const binding = store.currentBinding(member.id);
+    if (!binding) return;
+    await retireForPendingSpawn(member, binding.threadId);
+  }
+
   /** BBP-268: spawn the pending shift with brief + the first message as its prompt. */
   async function spawnPending(member: MemberRow, text: string): Promise<MemberResult> {
     const crew = store.getCrew(member.crewId);
@@ -457,6 +465,7 @@ export function createLifecycle(deps: LifecycleDeps) {
     restore,
     reset,
     spawnPending,
+    newShiftOnAssignment,
     handover,
     noteBrief,
     complete,
