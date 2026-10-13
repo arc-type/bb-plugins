@@ -3,6 +3,8 @@
 // narrowing step runs before the limit, so "20 threads of project X" means
 // 20 of X. The thread the canvas was opened for stays in view even when the
 // archived flag, the window or the limit would drop it.
+import { filterActive } from "./active-filter";
+import { threadNodeId } from "./canvas-threads";
 import { DEFAULT_THREAD_FILTER, filterThreads, narrowThreads, type ThreadFilter } from "./thread-filter";
 import { threadTree, type ProjectLike, type ThreadListItem } from "./thread-tree";
 
@@ -13,6 +15,8 @@ export type OverviewInput = {
   /** The thread the canvas is focused on, if any. */
   focusThreadId: string | null;
   now: number;
+  /** Last step: only active threads and the path to them (BBP-288). */
+  activeOnly?: boolean;
 };
 
 export type Overview = ReturnType<typeof threadTree> & {
@@ -22,16 +26,22 @@ export type Overview = ReturnType<typeof threadTree> & {
   total: number;
 };
 
-export function overviewTree({ projects, threads, filter, focusThreadId, now }: OverviewInput): Overview {
+export function overviewTree({ projects, threads, filter, focusThreadId, now, activeOnly = false }: OverviewInput): Overview {
   const shown = filterThreads(threads, filter, now);
   const focused =
     focusThreadId !== null && !shown.some((thread) => thread.id === focusThreadId)
       ? threads.find((thread) => thread.id === focusThreadId)
       : undefined;
+  const counts = { shown: shown.length, total: narrowThreads(threads, filter).length };
+  const tree = threadTree(projects, focused ? [...shown, focused] : shown);
+  if (!activeOnly) return { ...tree, ...counts };
+  const nodes = filterActive(tree.nodes, new Set(focusThreadId !== null ? [threadNodeId(focusThreadId)] : []));
+  const ids = new Set(nodes.map((node) => node.id));
   return {
-    ...threadTree(projects, focused ? [...shown, focused] : shown),
-    shown: shown.length,
-    total: narrowThreads(threads, filter).length,
+    nodes,
+    edges: tree.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)),
+    expanded: tree.expanded.filter((id) => ids.has(id)),
+    ...counts,
   };
 }
 

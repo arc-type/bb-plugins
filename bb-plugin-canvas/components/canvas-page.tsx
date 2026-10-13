@@ -53,6 +53,9 @@ function limitTurnNodes<R extends { nodes: CanvasNode[]; edges?: CanvasEdge[] }>
   return { ...result, nodes, ...(edges ? { edges } : {}) };
 }
 
+/** A turn shows its newest this many steps; older ones sit behind "+N earlier". */
+const STEPS_PER_TURN = 10;
+
 export async function loadChildren(sdk: Sdk, node: CanvasNode, turnsPerThread: number | null = DEFAULT_THREAD_FILTER.turnsPerThread) {
   const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};
   if (typeof threadId !== "string") return { nodes: [] };
@@ -62,7 +65,7 @@ export async function loadChildren(sdk: Sdk, node: CanvasNode, turnsPerThread: n
     return { ...result, nodes: await enrichTurnNodes(result.nodes, turnFirstLinePort(sdk)) };
   }
   if (node.kind === "turn" && typeof turnId === "string" && typeof sourceSeqStart === "number" && typeof sourceSeqEnd === "number") {
-    return turnDetailsToCanvas(node.id, await turnDetails(sdk, threadId, turnId, sourceSeqStart, sourceSeqEnd), threadId);
+    return turnDetailsToCanvas(node.id, await turnDetails(sdk, threadId, turnId, sourceSeqStart, sourceSeqEnd), threadId, STEPS_PER_TURN);
   }
   return { nodes: [] };
 }
@@ -82,7 +85,8 @@ function focusFromSubPath(subPath: string | undefined): string | null {
 /**
  * The page's props, fixed up front (BBP-285) so the BBP-283 work items can
  * fill them in parallel. `overview` overrides the default filter; `activeOnly`
- * and `layout` take effect in their own items.
+ * is the toggle's default until the user flips it (then stored); `layout`
+ * takes effect in its own item.
  */
 export type CanvasPageProps = {
   subPath?: string;
@@ -92,7 +96,26 @@ export type CanvasPageProps = {
   layout?: "tabs" | "split";
 };
 
-export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps) {
+const ACTIVE_ONLY_KEY = "bb-canvas:active-only";
+
+function loadActiveOnly(): boolean | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_ONLY_KEY);
+    return raw === null ? null : raw === "true";
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveOnly(value: boolean) {
+  try {
+    localStorage.setItem(ACTIVE_ONLY_KEY, String(value));
+  } catch {
+    // Storage blocked: the toggle still works for this page.
+  }
+}
+
+export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activeOnlyDefault = false }: CanvasPageProps) {
   const sdk = useSdk();
   const navigate = useBbNavigate();
   const [state, setState] = useState<State>(null);
@@ -116,6 +139,11 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
   const changeFilter = (next: ThreadFilter) => {
     if (next.projectIds !== filter.projectIds) saveProjectFilter(next.projectIds);
     setFilter(next);
+  };
+  const [activeOnly, setActiveOnlyState] = useState(() => loadActiveOnly() ?? activeOnlyDefault);
+  const setActiveOnly = (value: boolean) => {
+    saveActiveOnly(value);
+    setActiveOnlyState(value);
   };
   const turnsPerThread = useRef(filter.turnsPerThread);
   turnsPerThread.current = filter.turnsPerThread;
@@ -146,8 +174,8 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
 
   const layer = useMemo(() => {
     if (state === null || !("threads" in state)) return null;
-    return overviewTree({ projects: state.projects, threads: state.threads, filter, focusThreadId: focus, now: Date.now() });
-  }, [state, filter, focus]);
+    return overviewTree({ projects: state.projects, threads: state.threads, filter, focusThreadId: focus, now: Date.now(), activeOnly });
+  }, [state, filter, focus, activeOnly]);
   const focusIds = useMemo(() => (focus === null ? [] : [threadNodeId(focus)]), [focus]);
 
   useEffect(
@@ -182,6 +210,14 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
   const toolbar = (
     <>
       <CanvasFilters projects={state.projects} filter={filter} onChange={changeFilter} />
+      <button
+        type="button"
+        aria-pressed={activeOnly}
+        onClick={() => setActiveOnly(!activeOnly)}
+        className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary ${activeOnly ? "border-primary bg-primary/10 text-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}
+      >
+        Active only
+      </button>
       {layer !== null ? (
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span>{overviewSummary(filter, layer.shown, layer.total)}</span>
@@ -198,6 +234,22 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
       ) : null}
     </>
   );
+  if (activeOnly && (layer === null || layer.nodes.length === 0))
+    return (
+      <div className="flex flex-col">
+        <div className="flex flex-wrap items-center gap-1.5 px-2 py-1">{toolbar}</div>
+        <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+          Nothing is running right now.
+          <button
+            type="button"
+            onClick={() => setActiveOnly(false)}
+            className="rounded px-1 text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary"
+          >
+            Show everything
+          </button>
+        </div>
+      </div>
+    );
   if (layer === null || layer.nodes.length === 0)
     return (
       <div className="flex flex-col">
