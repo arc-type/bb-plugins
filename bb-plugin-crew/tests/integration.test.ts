@@ -324,18 +324,18 @@ describe("waitsFor", () => {
 });
 
 describe("local git backend", () => {
-  it("merges with --no-ff in the worktree that has main, and aborts on conflict", async () => {
+  it("BBP-269: builds the merge commit with merge-tree + commit-tree and fast-forwards a clean main checkout; no merge runs in the checkout", async () => {
     const calls: string[] = [];
     const git = createLocalGit(async (args, cwd) => {
       calls.push(`${cwd}: ${args.join(" ")}`);
       if (args[0] === "worktree") return { code: 0, stdout: "worktree /repo\nHEAD 1\nbranch refs/heads/main\n\nworktree /wt\nbranch refs/heads/bb/x\n", stderr: "" };
-      if (args[0] === "status") return { code: 0, stdout: "", stderr: "" };
-      if (args[0] === "merge" && args[1] === "--no-ff") return { code: 1, stdout: "CONFLICT (content): Merge conflict in a", stderr: "" };
+      if (args[0] === "merge-tree") return { code: 0, stdout: "tree1\n", stderr: "" };
+      if (args[0] === "commit-tree") return { code: 0, stdout: "c1\n", stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     });
-    const outcome = await git.merge("/wt", "bb/x", "main", "m");
-    expect(outcome).toMatchObject({ ok: false, conflict: true });
-    expect(calls).toContain("/repo: merge --abort");
+    expect(await git.merge("/wt", "bb/x", "main", "m")).toEqual({ ok: true, commit: "c1" });
+    expect(calls).toContain("/repo: merge --ff-only c1");
+    expect(calls.some((call) => call.includes("--no-ff") || call.includes("update-ref"))).toBe(false);
   });
 
   it("negative: a dirty main worktree is not merged into", async () => {

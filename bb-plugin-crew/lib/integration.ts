@@ -16,8 +16,9 @@
 //   with reason `merge-conflict`.
 //
 // Local case (the sandbox has no remote): "merge request" is a row in the
-// plugin DB, "merge" is `git merge --no-ff` in the worktree that has the base
-// branch checked out (or `git merge-tree` + `update-ref` when none has), and
+// plugin DB, "merge" is a commit built by `git merge-tree` + `commit-tree`,
+// fast-forwarded into the worktree that has the base branch checked out (or
+// moved by `update-ref` when none has), and
 // the crew branch is the branch BB gave the lead's worktree.
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -110,28 +111,19 @@ export function createLocalGit(run: Run = runProcess): GitBackend {
       return { kind: env ? "env" : "failed", code: result.code, output };
     },
     async merge(cwd, branch, base, message) {
+      // The merge commit is always built without a working tree (BBP-269); a checkout of the base only follows by fast-forward.
       const target = await worktreeWith(cwd, base);
-      if (target) {
-        if ((await run(["status", "--porcelain", "--untracked-files=no"], target)).stdout.trim() !== "") {
-          return { ok: false, conflict: false, detail: `the worktree ${target} that has ${base} checked out has uncommitted changes` };
-        }
-        const merged = await run(["merge", "--no-ff", "--no-edit", "-m", message, branch], target);
-        if (merged.code !== 0) {
-          const conflict = /CONFLICT/.test(merged.stdout + merged.stderr);
-          await run(["merge", "--abort"], target);
-          return { ok: false, conflict, detail: tail(`${merged.stdout}${merged.stderr}`.trim(), 1500) };
-        }
-        return { ok: true, commit: (await run(["rev-parse", "HEAD"], target)).stdout.trim() };
+      if (target && (await run(["status", "--porcelain", "--untracked-files=no"], target)).stdout.trim() !== "") {
+        return { ok: false, conflict: false, detail: `the worktree ${target} that has ${base} checked out has uncommitted changes` };
       }
-      // Nobody has the base checked out: build the merge commit without a worktree.
       const old = (await run(["rev-parse", base], cwd)).stdout.trim();
       const tree = await run(["merge-tree", "--write-tree", base, branch], cwd);
       if (tree.code !== 0) return { ok: false, conflict: tree.code === 1, detail: tail(tree.stdout.trim(), 1500) };
       const commit = await run(["commit-tree", tree.stdout.trim().split("\n")[0]!, "-p", base, "-p", branch, "-m", message], cwd);
       if (commit.code !== 0) return { ok: false, conflict: false, detail: commit.stderr.trim() };
       const sha = commit.stdout.trim();
-      const update = await run(["update-ref", `refs/heads/${base}`, sha, old], cwd);
-      if (update.code !== 0) return { ok: false, conflict: false, detail: update.stderr.trim() };
+      const update = target ? await run(["merge", "--ff-only", sha], target) : await run(["update-ref", `refs/heads/${base}`, sha, old], cwd);
+      if (update.code !== 0) return { ok: false, conflict: false, detail: tail(`${update.stdout}${update.stderr}`.trim(), 1500) };
       return { ok: true, commit: sha };
     },
     async rebase(cwd, base) {

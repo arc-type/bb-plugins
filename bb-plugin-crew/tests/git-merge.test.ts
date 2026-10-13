@@ -1,0 +1,85 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { createLocalGit } from "../lib/integration";
+
+// BBP-269: GitBackend.merge against a real temporary repository with a crew worktree.
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+
+function repo() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "crew-merge-")));
+  const main = join(root, "main");
+  const wt = join(root, "wt");
+  execFileSync("git", ["init", "-q", "-b", "main", main]);
+  for (const [k, v] of [["user.name", "t"], ["user.email", "t@t"], ["commit.gpgsign", "false"]]) git(main, "config", k!, v!);
+  writeFileSync(join(main, "a.txt"), "a\n");
+  writeFileSync(join(main, "b.txt"), "b\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  git(main, "worktree", "add", "-q", "-b", "bb/x", wt);
+  return { main, wt };
+}
+
+function commit(cwd: string, file: string, text: string) {
+  writeFileSync(join(cwd, file), text);
+  git(cwd, "commit", "-qam", `edit ${file}`);
+}
+
+describe("GitBackend.merge without the working tree (BBP-269)", () => {
+  it("clean main checkout: main is the new merge commit and the working tree equals HEAD", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    const outcome = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    expect(outcome.ok).toBe(true);
+    const sha = outcome.ok ? outcome.commit : "";
+    expect(git(main, "rev-parse", "main")).toBe(sha);
+    expect(git(main, "rev-parse", `${sha}^2`)).toBe(git(main, "rev-parse", "bb/x"));
+    expect(git(main, "status", "--porcelain")).toBe("");
+    expect(readFileSync(join(main, "a.txt"), "utf8")).toBe("crew\n");
+  });
+
+  it("main moved ahead of the branch: still a merge commit with both parents", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    commit(main, "b.txt", "human\n");
+    const before = git(main, "rev-parse", "main");
+    const outcome = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    expect(outcome.ok).toBe(true);
+    expect(git(main, "rev-parse", "main^1")).toBe(before);
+    expect(git(main, "status", "--porcelain")).toBe("");
+  });
+
+  it("nobody has main checked out: main moves by update-ref", async () => {
+    const { main, wt } = repo();
+    git(main, "switch", "-q", "--detach");
+    commit(wt, "a.txt", "crew\n");
+    const outcome = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    expect(outcome.ok).toBe(true);
+    expect(git(main, "rev-parse", "main")).toBe(outcome.ok ? outcome.commit : "");
+  });
+
+  it("negative: a conflict changes neither main, the files nor the checkout", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    commit(main, "a.txt", "human\n");
+    const before = git(main, "rev-parse", "main");
+    const outcome = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    expect(outcome).toMatchObject({ ok: false, conflict: true });
+    expect(git(main, "rev-parse", "main")).toBe(before);
+    expect(git(main, "status", "--porcelain")).toBe("");
+    expect(readFileSync(join(main, "a.txt"), "utf8")).toBe("human\n");
+    expect(git(main, "stash", "list")).toBe("");
+  });
+
+  it("negative: a dirty main checkout is still refused and left untouched", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    writeFileSync(join(main, "b.txt"), "wip\n");
+    const before = git(main, "rev-parse", "main");
+    expect(await createLocalGit().merge(wt, "bb/x", "main", "m")).toMatchObject({ ok: false, conflict: false, detail: expect.stringContaining("uncommitted") });
+    expect(git(main, "rev-parse", "main")).toBe(before);
+    expect(readFileSync(join(main, "b.txt"), "utf8")).toBe("wip\n");
+  });
+});
