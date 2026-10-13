@@ -207,6 +207,18 @@ describe("the Canvas chat tab and thread panel action", () => {
     expect(await screen.findByRole("button", { name: /^Other — / })).toBeTruthy();
   });
 
+  it("shows FocusUnavailable for an unknown thread when there are no threads at all", async () => {
+    threadPanel("gone", []);
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.queryByText("No threads yet.")).toBeNull();
+  });
+
+  it("shows FocusUnavailable for an unknown thread when the filters leave nothing", async () => {
+    threadPanel("gone", [row("t1", "p1", "Old", { archivedAt: 1 })]);
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(screen.queryByText("No threads match the filters.")).toBeNull();
+  });
+
   it("focuses a thread named in the nav page's sub-path", async () => {
     const panel = app.navPanels.find((entry) => entry.id === "canvas")!;
     renderSlot(panel, { subPath: "thread/t2" }, { context: { projectId: null, threadId: null }, sdk: { subscribe: () => () => {}, ...sdk([row("t1", "p1", "Other"), row("t2", "p1", "Mine")]) } as never });

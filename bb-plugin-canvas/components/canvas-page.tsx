@@ -152,6 +152,10 @@ export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focus
 
   if (state === null) return <div className="p-4 text-sm text-muted-foreground">Loading…</div>;
   if ("error" in state) return <div className="p-4 text-sm text-destructive">Canvas not available: {state.error}</div>;
+  // Before the empty states: a focus on a thread that is gone is the answer
+  // the user needs, whether or not anything else is left to show.
+  if (layer !== null && focusIds.length > 0 && missingFocusIds(layer.nodes, focusIds).length === focusIds.length)
+    return <FocusUnavailable onShowAll={() => setFocus(null)} />;
   if (state.threads.length === 0) return <div className="p-4 text-sm text-muted-foreground">No threads yet.</div>;
   const toolbar = <CanvasFilters projects={state.projects} filter={filter} onChange={changeFilter} />;
   if (layer === null || layer.nodes.length === 0)
@@ -161,8 +165,6 @@ export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focus
         <div className="p-4 text-sm text-muted-foreground">No threads match the filters.</div>
       </div>
     );
-  if (focusIds.length > 0 && missingFocusIds(layer.nodes, focusIds).length === focusIds.length)
-    return <FocusUnavailable onShowAll={() => setFocus(null)} />;
   const visible = visibleFocusIds(layer.nodes, focusIds);
   const chatThreadId = selectedThreadId ?? focus;
   return (
