@@ -21,16 +21,18 @@ export type SyncContext = {
   skillsCatalog?: (projectId: string) => Promise<SkillsCatalog | null>;
 };
 
-export type PlanAction = "reuse" | "unarchive" | "spawn" | "update" | "remove";
+export type PlanAction = "reuse" | "unarchive" | "spawn" | "update" | "remove" | "rename";
 export type PlanItem = {
   key: string;
+  /** rename only: the stored key this member had. */
+  from?: string;
   address: string;
   action: PlanAction;
   reasons: string[];
   threadId: string | null;
 };
 
-export type ResultKind = "reused" | "unarchived" | "spawned" | "updated" | "removed" | "failed";
+export type ResultKind = "reused" | "unarchived" | "spawned" | "updated" | "removed" | "renamed" | "failed";
 export type MemberResult = {
   key: string;
   address: string;
@@ -92,12 +94,24 @@ export async function plan(
   const fresh = new Set(options.fresh ?? []);
   const items: PlanItem[] = [];
   const lead = validation.members.find((member) => member.lead);
-  const leadBinding = crew && lead ? ctx.store.currentBinding(memberRowId(crew.id, lead.key)) : null;
+  // A stored member with the same group and member id under another key is
+  // renamed in place, not removed and spawned again.
+  const stored = crew ? ctx.store.listMembers(crew.id) : [];
+  const wanted = new Set(validation.members.map((member) => member.key));
+  const renamedFrom = new Map<string, string>();
+  for (const member of validation.members) {
+    if (stored.some((row) => row.key === member.key)) continue;
+    const old = stored.find((row) => row.groupId === member.groupId && row.memberId === member.memberId && !wanted.has(row.key));
+    if (old) renamedFrom.set(member.key, old.key);
+  }
+  const rowKey = (key: string) => renamedFrom.get(key) ?? key;
+  const leadBinding = crew && lead ? ctx.store.currentBinding(memberRowId(crew.id, rowKey(lead.key))) : null;
   let leadThreadId = leadBinding?.threadId ?? null;
 
   for (const member of validation.members) {
-    const binding = crew ? ctx.store.currentBinding(memberRowId(crew.id, member.key)) : null;
-    const base = { key: member.key, address: member.address, threadId: binding?.threadId ?? null };
+    const from = renamedFrom.get(member.key);
+    const binding = crew ? ctx.store.currentBinding(memberRowId(crew.id, rowKey(member.key))) : null;
+    const base = { key: member.key, address: member.address, threadId: binding?.threadId ?? null, ...(from ? { from } : {}) };
     if (fresh.has(member.key)) {
       items.push({ ...base, action: "spawn", reasons: ["--fresh: new shift"] });
       if (member.lead) leadThreadId = null;
@@ -106,7 +120,7 @@ export async function plan(
     const thread = binding ? await ctx.port.get(binding.threadId) : null;
     if (!thread) {
       const reasons = [binding ? `bound thread ${binding.threadId} is gone` : "no thread bound"];
-      if (crew && ctx.store.openOps(memberRowId(crew.id, member.key)).length > 0) {
+      if (crew && ctx.store.openOps(memberRowId(crew.id, rowKey(member.key))).length > 0) {
         reasons.push("unfinished spawn in the journal — apply looks for its thread first");
       }
       items.push({ ...base, threadId: null, action: "spawn", reasons });
@@ -116,15 +130,16 @@ export async function plan(
     // A lead that is about to be spawned has no id yet; its children get
     // re-parented during apply, so plan does not call that drift.
     const { reasons } = await drift(ctx.port, thread, expectedFor(member, leadThreadId));
-    if (thread.archived) items.push({ ...base, action: "unarchive", reasons: ["thread is archived", ...reasons] });
+    if (from) items.push({ ...base, action: "rename", reasons: [`rename ${from} → ${member.key}`, ...reasons] });
+    else if (thread.archived) items.push({ ...base, action: "unarchive", reasons: ["thread is archived", ...reasons] });
     else if (reasons.length > 0) items.push({ ...base, action: "update", reasons });
     else items.push({ ...base, action: "reuse", reasons: [] });
   }
 
   if (crew) {
-    const wanted = new Set(validation.members.map((member) => member.key));
-    for (const row of ctx.store.listMembers(crew.id)) {
-      if (wanted.has(row.key)) continue;
+    const renamed = new Set(renamedFrom.values());
+    for (const row of stored) {
+      if (wanted.has(row.key) || renamed.has(row.key)) continue;
       const binding = ctx.store.currentBinding(row.id);
       items.push({
         key: row.key,
@@ -196,6 +211,8 @@ export async function apply(ctx: SyncContext, input: ApplyInput): Promise<ApplyO
   const { store, port, journal } = ctx;
   const { crew } = store.saveCrewFile(projectId, spec.name, input.yaml);
   store.setCrewStatus(crew.id, "starting");
+  // Renames first (also a rename that respawns), so upsertMember below finds the renamed rows.
+  for (const item of items) if (item.from) store.renameMember(crew.id, item.from!, item.key, item.address);
   const rows = new Map<string, MemberRow>();
   for (const member of validation.members) {
     rows.set(
@@ -243,6 +260,7 @@ export async function apply(ctx: SyncContext, input: ApplyInput): Promise<ApplyO
       result = await spawnMember(ctx, { crew, spec, member, row, members: validation.members, leadThreadId, fresh: item.threadId });
     } else {
       result = await reconcile(ctx, member, row, item.threadId!, leadThreadId);
+      if (item.action === "rename" && result.result !== "failed") result = { ...result, result: "renamed" };
     }
     // A lead that failed verification still has a thread; its children can
     // nest under it. Only a lead without any thread blocks the rest.

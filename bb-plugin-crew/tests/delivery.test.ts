@@ -23,7 +23,7 @@ describe("addresses", () => {
   it("negative: an unknown member or crew is an error, and nothing is stored", async () => {
     const { service, port, store } = setup();
     const { self } = await running(service, port);
-    await expect(service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-nobody", body: "hi" })).rejects.toThrow('No member "dev-nobody"');
+    await expect(service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-nobody", body: "hi" })).rejects.toThrow('Unknown member "dev-nobody"');
     await expect(service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl@nowhere", body: "hi" })).rejects.toThrow('no crew "nowhere"');
     expect(store.listMessages()).toEqual([]);
   });

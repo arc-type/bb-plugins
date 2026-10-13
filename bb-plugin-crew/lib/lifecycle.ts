@@ -60,7 +60,7 @@ export function createLifecycle(deps: LifecycleDeps) {
   function requireMember(crew: CrewRow, key: string): MemberRow {
     const bare = key.includes("@") ? key.slice(0, key.indexOf("@")) : key;
     const member = store.listMembers(crew.id).find((entry) => entry.key === bare);
-    if (!member) throw new AddressError(`No member "${key}" in crew ${crew.name}.`);
+    if (!member) throw new AddressError(`Unknown member "${key}" in crew ${crew.name}.`);
     return member;
   }
 

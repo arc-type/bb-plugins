@@ -66,7 +66,7 @@ export function createQueue(deps: QueueDeps) {
 
   function memberByKey(crew: CrewRow, key: string): MemberRow {
     const member = store.listMembers(crew.id).find((entry) => entry.key === key || entry.address === key);
-    if (!member) throw new AddressError(`No member "${key}" in crew ${crew.name}.`);
+    if (!member) throw new AddressError(`Unknown member "${key}" in crew ${crew.name}.`);
     return member;
   }
 

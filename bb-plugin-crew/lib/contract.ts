@@ -67,7 +67,7 @@ export function createContract(deps: {
     if (target.kind !== "member") throw new AddressError(`"${address}" is not a member address (member@crew).`);
     const crews = target.crew ? [store.findCrew(projectId, target.crew)].filter((crew) => crew !== null) : store.listCrews(projectId);
     const matches = crews.flatMap((crew) => store.listMembers(crew.id).filter((member) => member.key === target.key).map((member) => ({ crew, member })));
-    if (matches.length === 0) throw new AddressError(`No member "${address}" in this project.`);
+    if (matches.length === 0) throw new AddressError(`Unknown member "${address}" in this project.`);
     if (matches.length > 1) throw new AddressError(`"${address}" exists in several crews; write member@crew.`);
     return matches[0]!;
   }

@@ -27,3 +27,12 @@ empty selection means *all* projects; "Clear selection" returns to that state.
 checkboxes and keyboard control. Ticked options stay on top even when they do
 not match the search. The project filter is one; the Focus dropdown is to be
 another.
+
+**Member key** — a member's name inside its crew; the address is
+`<member key>@<crew>`. By default the key is `<group>-<member>`
+(`orch-lead`); with short keys it is the member id alone (`lead`), and member
+ids must then be unique across all groups of the crew.
+
+**Rename (crew plan)** — a member whose key changes while it stays the same
+member (same group and id). It keeps its thread and history instead of being
+removed and spawned again.

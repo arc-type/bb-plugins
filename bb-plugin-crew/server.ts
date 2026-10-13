@@ -62,14 +62,15 @@ const memberSchema = z.object({
 const planItemSchema = z.object({
   key: z.string(),
   address: z.string(),
-  action: z.enum(["reuse", "unarchive", "spawn", "update", "remove"]),
+  action: z.enum(["reuse", "unarchive", "spawn", "update", "remove", "rename"]),
+  from: z.string().optional(),
   reasons: z.array(z.string()),
   threadId: z.string().nullable(),
 });
 const resultSchema = z.object({
   key: z.string(),
   address: z.string(),
-  result: z.enum(["reused", "unarchived", "spawned", "updated", "removed", "failed"]),
+  result: z.enum(["reused", "unarchived", "spawned", "updated", "removed", "renamed", "failed"]),
   threadId: z.string().nullable(),
   shift: z.number().nullable(),
   detail: z.string().nullable(),

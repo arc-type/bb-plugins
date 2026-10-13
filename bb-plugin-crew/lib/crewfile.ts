@@ -4,7 +4,7 @@
 // so comments and the order the human chose survive. Pure: text in, text out;
 // the caller validates and applies.
 import YAML, { isMap, isSeq, type Document, type YAMLMap, type YAMLSeq } from "yaml";
-import { memberKey, PERMISSIONS, type Permission } from "./spec";
+import { memberKey, memberKeysOf, PERMISSIONS, type Permission } from "./spec";
 
 export class CrewFileEditError extends Error {}
 
@@ -61,9 +61,13 @@ export function addMemberToFile(yaml: string, member: NewMember): string {
   }
   const members = group.get("members", true);
   if (!isSeq(members)) throw new CrewFileEditError(`Group ${member.group} has no members list.`);
-  if (members.items.some((node) => idOf(node) === member.id)) {
-    throw new CrewFileEditError(`${memberKey(member.group, member.id)} is already in the crew file.`);
-  }
+  const mode = memberKeysOf(doc.get("memberKeys"));
+  const key = memberKey(mode, member.group, member.id);
+  const taken = groups.items.some((g) => {
+    const list = isMap(g) ? (g as YAMLMap).get("members", true) : null;
+    return isSeq(list) && list.items.some((node) => memberKey(mode, idOf(g), idOf(node)) === key);
+  });
+  if (taken) throw new CrewFileEditError(`${key} is already in the crew file.`);
   const entry: Record<string, unknown> = { id: member.id };
   for (const key of ["provider", "model", "reasoningLevel", "serviceTier", "permissions", "role", "kickoff"] as const) {
     const value = member[key];
@@ -83,6 +87,7 @@ export function addMemberToFile(yaml: string, member: NewMember): string {
 export function removeMemberFromFile(yaml: string, key: string): string {
   const doc = parse(yaml);
   const groups = groupsOf(doc);
+  const mode = memberKeysOf(doc.get("memberKeys"));
   let found = false;
   for (const node of [...groups.items]) {
     if (!isMap(node)) continue;
@@ -90,7 +95,7 @@ export function removeMemberFromFile(yaml: string, key: string): string {
     const members = group.get("members", true);
     if (!isSeq(members)) continue;
     for (const candidate of [...members.items]) {
-      if (!isMap(candidate) || memberKey(idOf(group), idOf(candidate)) !== key) continue;
+      if (!isMap(candidate) || memberKey(mode, idOf(group), idOf(candidate)) !== key) continue;
       if ((candidate as YAMLMap).get("lead") === true) {
         throw new CrewFileEditError(`${key} is the lead; make another member lead first.`);
       }

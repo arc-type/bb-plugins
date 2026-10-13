@@ -155,6 +155,21 @@ describe("crew tools", () => {
     expect(isError(bad)).toBe(true);
   });
 
+  it("memberKeys: short — crew_send, crew_work_create(owner) and links resolve short keys (BBP-255)", async () => {
+    const yaml = trioYaml({ memberKeys: "short", links: [{ from: "lead", to: "impl", kind: "assigns_to" }] });
+    const env = await withHost({ yaml });
+    expect(Object.keys(env.threads).sort()).toEqual(["impl", "lead", "review"]);
+    const sent = await env.harness.behavior.callAgentTool("crew_send", { to: "impl", body: "go" }, { threadId: env.threads["lead"]! });
+    expect(isError(sent)).toBe(false);
+    expect(text(sent)).toMatch(/impl@trio: delivered/);
+    const created = await env.harness.behavior.callAgentTool("crew_work_create", { title: "Build", owner: "impl" }, { threadId: env.threads["lead"]! });
+    expect(isError(created)).toBe(false);
+    expect(text(created)).toContain("owner impl@trio");
+    const old = await env.harness.behavior.callAgentTool("crew_send", { to: "dev-impl", body: "go" }, { threadId: env.threads["lead"]! });
+    expect(isError(old)).toBe(true);
+    expect(text(old)).toMatch(/unknown member/i);
+  });
+
   it("crew_send kind info reports no answer expected; default to the human stays a question (BBP-23)", async () => {
     const env = await withHost();
     const info = await env.harness.behavior.callAgentTool("crew_send", { to: "human", body: "status: done", kind: "info" }, { threadId: env.threads["dev-impl"]! });

@@ -466,12 +466,15 @@ const toCrew = (row: Raw): CrewRow => ({
   updatedAt: Number(row.updated_at),
 });
 
+/** A member's key is the part of its stored address before `@`. */
+const keyFromAddress = (address: unknown): string => String(address).split("@")[0];
+
 const toMember = (row: Raw): MemberRow => ({
   id: String(row.id),
   crewId: String(row.crew_id),
   groupId: String(row.group_id),
   memberId: String(row.member_id),
-  key: `${row.group_id}-${row.member_id}`,
+  key: keyFromAddress(row.address),
   address: String(row.address),
   lead: Number(row.lead) === 1,
   config: JSON.parse(String(row.config_json)) as Record<string, unknown>,
@@ -665,7 +668,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
       lead: boolean;
       config: Record<string, unknown>;
     }): MemberRow {
-      const id = memberRowId(crewId, `${input.groupId}-${input.memberId}`);
+      const id = memberRowId(crewId, keyFromAddress(input.address));
       db.prepare(
         `INSERT INTO members (id, crew_id, group_id, member_id, address, lead, config_json, removed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
@@ -673,6 +676,25 @@ export function createStore(db: Database, now: () => number = Date.now) {
            config_json = excluded.config_json, removed_at = NULL`,
       ).run(id, crewId, input.groupId, input.memberId, input.address, input.lead ? 1 : 0, JSON.stringify(input.config));
       return this.getMember(id)!;
+    },
+    /**
+     * Rename a member in place (memberKeys switch): its row gets the new key and
+     * address, and every row that points at it follows, in one transaction.
+     * Messages keep their stored addresses; links are rewritten by apply.
+     */
+    renameMember(crewId: string, fromKey: string, toKey: string, address: string): void {
+      const from = memberRowId(crewId, fromKey);
+      const to = memberRowId(crewId, toKey);
+      db.transaction(() => {
+        db.prepare("UPDATE members SET id = ?, address = ? WHERE id = ?").run(to, address, from);
+        db.prepare("UPDATE crews SET lead_member_id = ? WHERE lead_member_id = ?").run(to, from);
+        for (const table of ["member_bindings", "member_ops", "member_needs", "member_env", "member_state", "handovers", "graph_runs"]) {
+          db.prepare(`UPDATE ${table} SET member_id = ? WHERE member_id = ?`).run(to, from);
+        }
+        db.prepare("UPDATE work_items SET owner_member = ? WHERE owner_member = ?").run(to, from);
+        db.prepare("UPDATE messages SET from_member = ? WHERE from_member = ?").run(to, from);
+        db.prepare("UPDATE messages SET to_member = ? WHERE to_member = ?").run(to, from);
+      })();
     },
     getMember(id: string): MemberRow | null {
       const row = db.prepare("SELECT * FROM members WHERE id = ?").get(id) as Raw | undefined;
@@ -1406,13 +1428,13 @@ export function createStore(db: Database, now: () => number = Date.now) {
       return (
         db
           .prepare(
-            `SELECT b.member_id, b.thread_id, b.shift, b.retired_at, m.group_id, m.member_id AS mid, m.lead FROM member_bindings b
+            `SELECT b.member_id, b.thread_id, b.shift, b.retired_at, m.address, m.lead FROM member_bindings b
              JOIN members m ON m.id = b.member_id WHERE m.crew_id = ? ORDER BY m.rowid, b.shift`,
           )
           .all(crewId) as Raw[]
       ).map((row) => ({
         memberId: String(row.member_id),
-        key: `${row.group_id}-${row.mid}`,
+        key: keyFromAddress(row.address),
         lead: Number(row.lead) === 1,
         threadId: String(row.thread_id),
         shift: Number(row.shift),

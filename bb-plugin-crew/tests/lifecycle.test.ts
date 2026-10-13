@@ -118,7 +118,7 @@ describe("reset", () => {
 
   it("negative: an unknown member and a member in handover are refused", async () => {
     const t = await trio();
-    await expect(t.service.lifecycle.reset(t.crew, "dev-ghost", "clear")).rejects.toThrow(/No member "dev-ghost"/);
+    await expect(t.service.lifecycle.reset(t.crew, "dev-ghost", "clear")).rejects.toThrow(/Unknown member "dev-ghost"/);
     await t.service.lifecycle.handover(t.crew, "dev-impl");
     await expect(t.service.lifecycle.reset(t.crew, "dev-impl", "clear")).rejects.toThrow(/in a handover/);
   });
@@ -310,6 +310,13 @@ describe("crew file edits", () => {
   it("negative: unknown member, bad ids", () => {
     expect(() => removeMemberFromFile(base, "g-z")).toThrow(/no member g-z/);
     expect(() => addMemberToFile(base, { group: "g", id: "a.b" })).toThrow(/letters, digits/);
+  });
+  it("memberKeys: short — remove by member id; the same id in another group is refused", () => {
+    const short = base.replace("name: c\n", "name: c\nmemberKeys: short\n").replace("{ from: g-a, to: g-b,", "{ from: a, to: b,");
+    const noB = removeMemberFromFile(short, "b");
+    expect(noB).not.toContain("id: b");
+    expect(noB).not.toContain("to: b");
+    expect(() => addMemberToFile(short, { group: "h", id: "a" })).toThrow(/a is already in the crew file/);
   });
 });
 

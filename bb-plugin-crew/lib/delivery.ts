@@ -177,7 +177,7 @@ export function createDelivery(deps: DeliveryDeps) {
         .map((member) => ({ kind: "member" as const, member, crew })),
     );
     if (matches.length === 0) {
-      throw new AddressError(`No member "${address.key}"${crews.length === 1 ? ` in crew ${crews[0]!.name}` : " in this project"}.`);
+      throw new AddressError(`Unknown member "${address.key}"${crews.length === 1 ? ` in crew ${crews[0]!.name}` : " in this project"}.`);
     }
     if (matches.length > 1) {
       throw new AddressError(`"${address.key}" exists in several crews (${matches.map((m) => m.crew.name).join(", ")}); write ${address.key}@<crew>.`);
