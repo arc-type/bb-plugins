@@ -485,6 +485,25 @@ describe("templates", () => {
     expect(result.problems).toEqual([]);
     expect(result.members.filter((m) => m.lead)).toHaveLength(1);
   });
+  it.each([["pair", "dev-check"], ["trio", "dev-review"]])("%s gives its reviewer %s a per-item context", (id, key) => {
+    const template = TEMPLATES.find((t) => t.id === id)!;
+    const members = validateCrew(template.spec).members;
+    expect(members.find((m) => m.key === key)!.context).toBe("per-item");
+    expect(members.filter((m) => m.context === "per-item").map((m) => m.key)).toEqual([key]);
+  });
+  it("pair: dev-owner assigns to dev-check, no works_with and no escalation back to the author", () => {
+    const links = validateCrew(TEMPLATES[0]!.spec).spec!.links;
+    expect(links).toContainEqual({ from: "dev-owner", to: "dev-check", kind: "assigns_to" });
+    expect(links.filter((l) => l.kind === "works_with" || (l.from === "dev-check" && l.to === "dev-owner"))).toEqual([]);
+  });
+  it("trio: no works_with between dev-impl and dev-review", () => {
+    const links = validateCrew(TEMPLATES[1]!.spec).spec!.links;
+    expect(links.filter((l) => l.kind === "works_with")).toEqual([]);
+  });
+  it.each([["pair", 0], ["trio", 1]] as const)("%s reviewer only checks what the work item names", (_id, index) => {
+    const reviewer = validateCrew(TEMPLATES[index]!.spec).members.find((m) => m.context === "per-item")!;
+    expect(reviewer.role).toContain("acceptance criteria and gate result from the work item");
+  });
   it("trio has 3 members with writer and reader placements", () => {
     const members = validateCrew(TEMPLATES[1]!.spec).members;
     expect(members.map((m) => [m.key, m.placement.kind])).toEqual([

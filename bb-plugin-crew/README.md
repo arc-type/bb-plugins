@@ -55,10 +55,10 @@ groups:
         provider: claude-code
         model: claude-sonnet-5
         permissions: ask
-        role: Checks exactly the candidate named in the handoff.
+        context: per-item # default: persistent
+        role: Checks only the commit, acceptance criteria and gate result from the work item.
 links:
-  - { from: dev-owner, to: dev-check, kind: works_with }
-  - { from: dev-check, to: dev-owner, kind: escalates_to }
+  - { from: dev-owner, to: dev-check, kind: assigns_to }
 ```
 
 Provider and model always sit on the member itself. Writing members get their
@@ -81,6 +81,16 @@ groups:
 links:
   - { from: owner, to: check, kind: works_with }
 ```
+
+`context:` on a member is `persistent` (default) or `per-item`. A per-item
+member starts a new shift for every work item assigned to it (`crew_work_create`
+with an owner, `crew_work_handoff`): the old thread ends, the new one starts
+with the kickoff brief and the work item, nothing else. While it still has a
+claimed, unfinished item, a new assignment waits as a normal message instead.
+Use it for reviewers, so every review starts without the previous candidate.
+The plan warns with `review-reads-author` when a member whose role mentions
+review or check has `can_read` or `works_with` on a member that assigns it
+work; it is only a warning, apply still runs.
 
 `skills:` and `graphs:` are optional on crew, group and member, and inherit
 the same way `instructions` does (crew → group → member, each name kept
@@ -110,6 +120,17 @@ The same file format carries several shapes, chosen by the links and
   only up and down (the `trio` template).
 - **Hybrid** — any mix: some members isolated, others sharing a channel,
   several groups under one lead.
+
+The templates `pair` and `trio` give their reviewer an independent context:
+
+- `pair`: `dev-check` has `context: per-item`; the `works_with` between
+  `dev-owner` and `dev-check` and the escalation from `dev-check` back to
+  `dev-owner` are replaced by `assigns_to` `dev-owner` → `dev-check`. The
+  checker escalates to the human, as every member can.
+- `trio`: `dev-review` has `context: per-item`; the `works_with` between
+  `dev-impl` and `dev-review` is gone.
+- Both reviewers' roles: check only the commit, acceptance criteria and gate
+  result from the work item.
 
 Isolation is a design choice the format makes explicit, not an afterthought:
 a member only ever sees what the lead or its declared links hand it. Nothing

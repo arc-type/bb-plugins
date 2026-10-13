@@ -25,14 +25,14 @@ const pair: CrewSpecInput = {
           provider: "claude-code",
           model: "claude-sonnet-5",
           permissions: "ask",
-          role: "Checks exactly the candidate named in the handoff.",
+          context: "per-item",
+          role: "Checks only the commit, acceptance criteria and gate result from the work item.",
         },
       ],
     },
   ],
   links: [
-    { from: "dev-owner", to: "dev-check", kind: "works_with" },
-    { from: "dev-check", to: "dev-owner", kind: "escalates_to" },
+    { from: "dev-owner", to: "dev-check", kind: "assigns_to" },
   ],
 };
 
@@ -68,7 +68,8 @@ const trio: CrewSpecInput = {
           provider: "claude-code",
           model: "claude-sonnet-5",
           permissions: "ask",
-          role: "Reviews exactly the candidate named in the handoff.",
+          context: "per-item",
+          role: "Reviews only the commit, acceptance criteria and gate result from the work item.",
         },
       ],
     },
@@ -76,7 +77,6 @@ const trio: CrewSpecInput = {
   links: [
     { from: "orch-lead", to: "dev-impl", kind: "assigns_to" },
     { from: "orch-lead", to: "dev-review", kind: "assigns_to" },
-    { from: "dev-impl", to: "dev-review", kind: "works_with" },
     { from: "dev-review", to: "orch-lead", kind: "escalates_to" },
   ],
 };
