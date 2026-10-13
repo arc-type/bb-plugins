@@ -269,7 +269,23 @@ export function createIntegration(deps: IntegrationDeps) {
   }
 
   async function returnToHuman(merge: MergeRequestRow, reason: string, checksOutput?: string): Promise<MergeRequestRow> {
-    return store.updateMerge(merge.id, { state: "returned", reason, ...(checksOutput !== undefined ? { checksOutput } : {}) });
+    const returned = store.updateMerge(merge.id, { state: "returned", reason, ...(checksOutput !== undefined ? { checksOutput } : {}) });
+    const crew = store.getCrew(merge.crewId);
+    if (crew) tellLead(crew, `Merge request ${merge.id} returned to the human`, `${reason}\n\n${describe(crew, merge)}`);
+    return returned;
+  }
+
+  /** "MR …, branch …, ticket …" — the facts a submitting lead needs to match the outcome to its delivery. */
+  function describe(crew: CrewRow, merge: MergeRequestRow): string {
+    const task = models(crew).spec?.task;
+    return `MR ${merge.id}, branch ${merge.branch}${merge.commitSha ? `, commit ${merge.commitSha.slice(0, 10)}` : ""}${task ? `, ticket ${task}` : ""}`;
+  }
+
+  /** One waking message to the submitting crew's lead (BBP-250); skipped when the lead did it itself. */
+  function tellLead(crew: CrewRow, subject: string, body: string, by?: string): void {
+    const crewLead = lead(crew);
+    if (!crewLead || crewLead.address === by) return;
+    delivery.send({ projectId: crew.projectId, from: { kind: "system" }, to: crewLead.address, subject, body, crew: crew.name });
   }
 
   /** Red-check rejections this crew racked up right before `excludeId`, most recent first, stopping at a merge or a non-checks reason. */
@@ -297,7 +313,7 @@ export function createIntegration(deps: IntegrationDeps) {
         from: { kind: "system" },
         to: crewLead.address,
         subject: `Merge request ${merge.id}: checks failed`,
-        body: `${reason}\n\n${tailLines(output, 40)}\n\nfix, then crew_deliver again`,
+        body: `${reason} (${describe(crew, merge)})\n\n${tailLines(output, 40)}\n\nfix, then crew_deliver again`,
         crew: crew.name,
       });
     }
@@ -314,15 +330,17 @@ export function createIntegration(deps: IntegrationDeps) {
     const outcome = await git.merge(env.path, merge.branch, merge.base, `Merge ${merge.branch} (crew ${crew.name}${task ? `, ${task}` : ""}) into ${merge.base}`);
     if (!outcome.ok) return returnToHuman(merge, outcome.conflict ? `merge conflict: ${outcome.detail}` : `merge failed: ${outcome.detail}`);
     const merged = store.updateMerge(merge.id, { state: "merged", commitSha: outcome.commit, mergedBy: by, reason: null });
+    tellLead(crew, `Merge request ${merged.id} merged`, `${describe(crew, merged)} merged into ${merged.base} by ${by}.`, by);
     await mainMoved(crew, merged);
     await deps.onMerged?.(merged);
     return merged;
   }
 
-  /** Non-waking note to every running crew's lead in the project (§3.9.1). */
+  /** Non-waking note to every other running crew's lead in the project (§3.9.1); the source crew got its own message. */
   async function mainMoved(source: CrewRow, merge: MergeRequestRow): Promise<void> {
     const task = models(source).spec?.task;
     for (const crew of store.listCrews(source.projectId)) {
+      if (crew.id === source.id) continue;
       if (crew.status !== "running" && crew.status !== "degraded") continue;
       const crewLead = lead(crew);
       if (!crewLead) continue;
@@ -462,7 +480,7 @@ export function createIntegration(deps: IntegrationDeps) {
           from: { kind: "human" },
           to: crewLead.address,
           subject: `Merge request ${id} rejected`,
-          body: `The human rejected merging ${merge.branch}${note ? `: ${note}` : "."}`,
+          body: `The human rejected merging ${merge.branch}${note ? `: ${note}` : "."}\n\n${describe(crew, merge)}`,
           crew: crew.name,
         });
       }

@@ -42,7 +42,7 @@ describe("merge requests (human merges by default)", () => {
     expect(view!.question).toContain(`bb crew approve ${merge.id}`);
   });
 
-  it("a second request returns the open one; approve merges, clears Needs you and tells every running lead without waking them", async () => {
+  it("a second request returns the open one; approve merges, clears Needs you and tells every other running lead without waking them", async () => {
     const { service, alpha, beta, needs, git, port, store } = await twoCrews();
     const first = await service.integration.request(alpha.crew, "core-lead@alpha");
     const again = await service.integration.request(alpha.crew, "core-lead@alpha");
@@ -55,7 +55,7 @@ describe("merge requests (human merges by default)", () => {
     expect(git.count("checks")).toBe(0);
     expect(await needs(alpha, "core-lead")).not.toContain("merge-request");
     const notes = store.listMessages().filter((m) => m.subject === "main moved");
-    expect(notes.map((m) => m.toAddress).sort()).toEqual(["core-lead@alpha", "core-lead@beta"]);
+    expect(notes.map((m) => m.toAddress).sort()).toEqual(["core-lead@beta"]);
     expect(notes.every((m) => m.kind === "system" && m.deliveryMode === "ui")).toBe(true);
     // The only turn started is beta's dependency wake; the notes themselves wake nobody.
     expect(sends(port).slice(before).map((call) => (call.args as { text: string }).text.includes("main moved"))).not.toContain(true);
@@ -384,5 +384,81 @@ describe("local git backend", () => {
   it("checks(): a normal non-zero exit is a test failure", async () => {
     const git = createLocalGit(async () => ({ code: 1, stdout: "1 failing", stderr: "" }));
     expect((await git.checks("/wt", "npm test")).kind).toBe("failed");
+  });
+});
+
+describe("merge outcome reaches the submitting lead (BBP-250)", () => {
+  const toLead = (env: Awaited<ReturnType<typeof twoCrews>>) => env.store.listMessages({ toMember: env.alpha.members["core-lead"]!.id });
+
+  it("merge by another crew's integrator: the submitting lead gets exactly one waking message with MR, commit and ticket, and no 'main moved'", async () => {
+    const env = await twoCrews({ integrator: true, alpha: { checks: "npm test" } });
+    const { merge } = await env.service.integration.request(env.alpha.crew, "core-lead@alpha");
+    const before = toLead(env).length;
+    await env.service.integration.integratorMerge(merge.id, env.ops!.members["ops-int"]!);
+    await env.service.flush();
+    const after = toLead(env).slice(before);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.kind).toBe("message");
+    expect(after[0]!.subject).toBe(`Merge request ${merge.id} merged`);
+    expect(after[0]!.body).toContain(merge.id);
+    expect(after[0]!.body).toContain("abc1234def");
+    expect(after[0]!.body).toContain("CRD-1");
+    expect(after[0]!.body).toContain("ops-int@ops");
+    // Other crews still get the non-waking note.
+    expect(env.store.listMessages().filter((m) => m.subject === "main moved").map((m) => m.toAddress).sort()).toEqual(["core-lead@beta", "ops-int@ops"]);
+  });
+
+  it("merge by the human: the submitting lead gets the merged message as well", async () => {
+    const env = await twoCrews();
+    const { merge } = await env.service.integration.request(env.alpha.crew, "core-lead@alpha");
+    const before = toLead(env).length;
+    await env.service.integration.approve(merge.id);
+    const after = toLead(env).slice(before);
+    expect(after.map((m) => m.subject)).toEqual([`Merge request ${merge.id} merged`]);
+  });
+
+  it("merge by the crew's own integrator who is the lead: no message, the tool result is the report", async () => {
+    const env = setup();
+    const own = await running(env.service, env.port, duoYaml({ name: "solo", task: "CRD-9", checks: "npm test", groups: [{ id: "core", members: [{ id: "lead", lead: true, integrator: true, role: "Leads and merges." }] }] }));
+    const leadRow = own.members["core-lead"]!;
+    const { merge } = await env.service.integration.request(own.crew, leadRow.address);
+    const before = env.store.listMessages({ toMember: leadRow.id }).length;
+    const after = await env.service.integration.integratorMerge(merge.id, leadRow);
+    expect(after.state).toBe("merged");
+    expect(env.store.listMessages({ toMember: leadRow.id }).slice(before)).toEqual([]);
+  });
+
+  it("negative: a conflict (returned to the human) is reported to the submitting lead with reason, MR and ticket", async () => {
+    const env = await twoCrews({ integrator: true, alpha: { checks: "npm test" } });
+    env.git.mergeResult = { ok: false, conflict: true, detail: "CONFLICT in a.txt" };
+    const { merge } = await env.service.integration.request(env.alpha.crew, "core-lead@alpha");
+    const before = toLead(env).length;
+    await env.service.integration.integratorMerge(merge.id, env.ops!.members["ops-int"]!);
+    const after = toLead(env).slice(before);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.kind).toBe("message");
+    expect(after[0]!.subject).toBe(`Merge request ${merge.id} returned to the human`);
+    expect(after[0]!.body).toContain("merge conflict");
+    expect(after[0]!.body).toContain("CRD-1");
+  });
+
+  it("negative: red checks (rejected) name the ticket in the message to the lead", async () => {
+    const env = await twoCrews({ integrator: true, alpha: { checks: "npm test" } });
+    env.git.checksResult = { kind: "failed", code: 1, output: "1 failing" };
+    const { merge } = await env.service.integration.request(env.alpha.crew, "core-lead@alpha");
+    await env.service.integration.integratorMerge(merge.id, env.ops!.members["ops-int"]!);
+    expect(toLead(env).at(-1)!.body).toContain("CRD-1");
+  });
+});
+
+describe("human reject names the delivery (BBP-250)", () => {
+  it("the lead's reject message carries MR, branch and ticket", async () => {
+    const { service, alpha, store } = await twoCrews();
+    const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
+    await service.integration.reject(merge.id, "needs tests");
+    const body = store.listMessages({ toMember: alpha.members["core-lead"]!.id }).at(-1)!.body;
+    expect(body).toContain(`MR ${merge.id}`);
+    expect(body).toContain("ticket CRD-1");
+    expect(body).toContain("needs tests");
   });
 });
