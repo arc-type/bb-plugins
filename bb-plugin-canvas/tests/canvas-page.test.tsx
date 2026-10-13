@@ -439,3 +439,52 @@ describe("the Canvas Active only toggle (BBP-288)", () => {
     expect(await screen.findByRole("button", { name: /^Quiet chat — / })).toBeTruthy();
   });
 });
+
+// BBP-290 (BBP-237): J cycles through the running threads and gives the one
+// it lands on a halo; shortcuts typed into a field stay in the field.
+describe("the Canvas keyboard jump", () => {
+  const sdk = (threads: unknown[]) => ({ projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { list: async () => threads } });
+  const root = () => document.querySelector("[data-canvas-view]") as HTMLElement;
+  const pressed = (name: RegExp) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
+  const halo = (name: RegExp) => screen.getByRole("button", { name }).getAttribute("data-halo");
+
+  it("J jumps to a running thread, then the next, and wraps; the target has a halo", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Run one", { status: "active" }), row("t2", "p1", "Quiet"), row("t3", "p1", "Run two", { status: "active", updatedAt: Date.now() - 1000 })]));
+    await screen.findByRole("button", { name: /^Run one — / });
+    fireEvent.keyDown(root(), { key: "j" });
+    expect(pressed(/^Run one — /)).toBe("true");
+    expect(halo(/^Run one — /)).toBe("true");
+    fireEvent.keyDown(root(), { key: "j" });
+    expect(pressed(/^Run two — /)).toBe("true");
+    expect(halo(/^Run two — /)).toBe("true");
+    expect(halo(/^Run one — /)).toBeNull();
+    fireEvent.keyDown(root(), { key: "j" });
+    expect(pressed(/^Run one — /)).toBe("true");
+  });
+
+  it("J does nothing when nothing runs", async () => {
+    canvasPanel(sdk([row("t2", "p1", "Quiet")]));
+    await screen.findByRole("button", { name: /^Quiet — / });
+    fireEvent.keyDown(root(), { key: "j" });
+    expect(pressed(/^Quiet — /)).toBe("false");
+    expect(document.querySelector("[data-halo]")).toBeNull();
+  });
+
+  it("ignores shortcuts typed into a field", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Run one", { status: "active" })]));
+    await screen.findByRole("button", { name: /^Run one — / });
+    const input = screen.getByRole("spinbutton", { name: "Thread limit" });
+    const jKey = fireEvent.keyDown(input, { key: "j" });
+    expect(pressed(/^Run one — /)).toBe("false");
+    // Not swallowed either: "0" must still reach the number field.
+    expect(fireEvent.keyDown(input, { key: "0" })).toBe(true);
+    expect(jKey).toBe(true);
+  });
+
+  it("a click selects without a halo", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Run one", { status: "active" })]));
+    fireEvent.click(await screen.findByRole("button", { name: /^Run one — / }));
+    expect(pressed(/^Run one — /)).toBe("true");
+    expect(halo(/^Run one — /)).toBeNull();
+  });
+});
