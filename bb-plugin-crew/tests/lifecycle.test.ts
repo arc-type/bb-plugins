@@ -118,7 +118,7 @@ describe("reset", () => {
 
   it("negative: an unknown member and a member in handover are refused", async () => {
     const t = await trio();
-    await expect(t.service.lifecycle.reset(t.crew, "dev-ghost", "clear")).rejects.toThrow(/No member "dev-ghost"/);
+    await expect(t.service.lifecycle.reset(t.crew, "dev-ghost", "clear")).rejects.toThrow(/Unknown member "dev-ghost"/);
     await t.service.lifecycle.handover(t.crew, "dev-impl");
     await expect(t.service.lifecycle.reset(t.crew, "dev-impl", "clear")).rejects.toThrow(/in a handover/);
   });

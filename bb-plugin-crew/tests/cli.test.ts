@@ -172,7 +172,7 @@ describe("bb crew messaging commands", () => {
     expect((await run(service, ["send", "dev-impl@trio"])).exitCode).toBe(1);
     const unknown = await run(service, ["send", "dev-ghost@trio", "hi"]);
     expect(unknown.exitCode).toBe(1);
-    expect(unknown.stderr).toContain('No member "dev-ghost"');
+    expect(unknown.stderr).toContain('Unknown member "dev-ghost"');
   });
 
   it("broadcast reaches the crew or one group", async () => {
@@ -295,6 +295,14 @@ describe("bb crew — E4 lifecycle commands", () => {
     expect(restored.stdout).toMatch(/binding\s+orch-lead\s+th_1\s+shift 1\s+same/);
     expect(restored.stdout).toMatch(/unarchived\s+dev-impl@trio/);
     expect((await run(service, ["restore", "snap_nope"])).exitCode).toBe(1);
+  });
+
+  it("memberKeys: short — show and reset use the short key (BBP-255)", async () => {
+    const { service, port } = setup();
+    await running(service, port, trioYaml({ memberKeys: "short", links: [] }));
+    expect((await run(service, ["show", "trio"])).stdout).toContain("impl@trio");
+    expect((await run(service, ["reset", "impl@trio"])).stdout).toMatch(/updated\s+impl@trio\s+th_\d+\s+shift 2/);
+    expect((await run(service, ["reset", "dev-impl@trio"])).exitCode).toBe(1);
   });
 
   it("reset, handover with --brief, add-member, remove-member", async () => {

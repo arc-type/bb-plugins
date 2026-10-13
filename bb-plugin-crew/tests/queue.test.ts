@@ -72,7 +72,7 @@ describe("work items", () => {
     q.fail(crew, member("dev-impl"), created.id, "blocked");
     await expect(q.done(crew, member("dev-impl"), created.id, "")).rejects.toThrow("is failed");
     expect(() => q.create(crew, human, { title: " " })).toThrow("needs a title");
-    expect(() => q.create(crew, human, { title: "x", owner: "dev-ghost" })).toThrow('No member "dev-ghost"');
+    expect(() => q.create(crew, human, { title: "x", owner: "dev-ghost" })).toThrow('Unknown member "dev-ghost"');
     expect(() => q.claim(crew, human, created.id)).toThrow();
   });
 
