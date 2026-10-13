@@ -22,6 +22,7 @@ import {
   type TurnFirstLinePort,
 } from "../vendor/bb-canvas/lib/canvas-threads";
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
+import { ActivitySection } from "./activity-section";
 import { CanvasFilters } from "./canvas-filters";
 
 type State = { projects: ProjectLike[]; threads: readonly ThreadListItem[] } | { error: string } | null;
@@ -41,12 +42,15 @@ function turnFirstLinePort(sdk: Sdk): TurnFirstLinePort {
   return { turnDetails: (turnId, threadId, start, end) => turnDetails(sdk, threadId, turnId, start, end) };
 }
 
-/** Keeps only the newest `limit` turn nodes (and the edges among what is left). */
+/** Keeps only the newest `limit` turn nodes, plus the `pinned` ones (and the
+ *  edges among what is left). */
 function limitTurnNodes<R extends { nodes: CanvasNode[]; edges?: CanvasEdge[] }>(
   result: R,
   limit: number | null,
+  pinned: ReadonlySet<string> = new Set(),
 ): R {
   const kept = new Set(limitTurns(result.nodes.filter((node) => node.kind === "turn"), limit).map((node) => node.id));
+  for (const id of pinned) kept.add(id);
   const nodes = result.nodes.filter((node) => node.kind !== "turn" || kept.has(node.id));
   const ids = new Set(nodes.map((node) => node.id));
   const edges = result.edges?.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
@@ -56,12 +60,18 @@ function limitTurnNodes<R extends { nodes: CanvasNode[]; edges?: CanvasEdge[] }>
 /** A turn shows its newest this many steps; older ones sit behind "+N earlier". */
 const STEPS_PER_TURN = 10;
 
-export async function loadChildren(sdk: Sdk, node: CanvasNode, turnsPerThread: number | null = DEFAULT_THREAD_FILTER.turnsPerThread) {
+/** `pinned`: turn node ids the Activity list brought into view past the limit. */
+export async function loadChildren(
+  sdk: Sdk,
+  node: CanvasNode,
+  turnsPerThread: number | null = DEFAULT_THREAD_FILTER.turnsPerThread,
+  pinned: ReadonlySet<string> = new Set(),
+) {
   const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};
   if (typeof threadId !== "string") return { nodes: [] };
   if (node.kind === "thread") {
     const response = await sdk.threads.timeline({ threadId });
-    const result = limitTurnNodes(timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] }), turnsPerThread);
+    const result = limitTurnNodes(timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] }), turnsPerThread, pinned);
     return { ...result, nodes: await enrichTurnNodes(result.nodes, turnFirstLinePort(sdk)) };
   }
   if (node.kind === "turn" && typeof turnId === "string" && typeof sourceSeqStart === "number" && typeof sourceSeqEnd === "number") {
@@ -167,6 +177,17 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
   // Per thread node: bumped on every `thread:changed`; CanvasView reloads
   // only the threads whose turns are already loaded.
   const [reloads, setReloads] = useState<ReadonlyMap<string, number>>(new Map());
+  const reloadThread = (id: string) => setReloads((prev) => new Map(prev).set(id, (prev.get(id) ?? 0) + 1));
+  // Turns the Activity list brought into view past the turn limit (BBP-291).
+  const pinned = useRef(new Set<string>());
+  const [reveal, setReveal] = useState<{ id: string; seq: number } | null>(null);
+  const revealEntry = (threadId: string, nodeId: string, inCanvas: boolean) => {
+    if (!inCanvas && !pinned.current.has(nodeId)) {
+      pinned.current.add(nodeId);
+      reloadThread(threadNodeId(threadId));
+    }
+    setReveal((prev) => ({ id: nodeId, seq: (prev?.seq ?? 0) + 1 }));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -210,7 +231,7 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
                 : prev,
             );
           const id = threadNodeId(threadId);
-          setReloads((prev) => new Map(prev).set(id, (prev.get(id) ?? 0) + 1));
+          reloadThread(id);
         },
       }),
     [sdk],
@@ -330,7 +351,21 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
             (node.kind === "thread" && typeof node.meta?.threadId === "string") ||
             (node.kind === "turn" && typeof node.meta?.summaryCount === "number" && node.meta.summaryCount > 0)
           }
-          loadChildren={(node) => loadChildren(sdk, node, turnsPerThread.current)}
+          loadChildren={(node) => loadChildren(sdk, node, turnsPerThread.current, pinned.current)}
+          reveal={reveal}
+          renderSidebarExtra={(node) => {
+            const threadId = node.kind === "thread" ? node.meta?.threadId : undefined;
+            if (typeof threadId !== "string") return null;
+            return (
+              <ActivitySection
+                sdk={sdk}
+                threadId={threadId}
+                turnsPerThread={filter.turnsPerThread}
+                version={reloads.get(node.id) ?? 0}
+                onReveal={(nodeId, inCanvas) => revealEntry(threadId, nodeId, inCanvas)}
+              />
+            );
+          }}
           reloadChildren={reloads}
           onOpenThread={(threadId) => navigate.toThread(threadId)}
           className="h-full"
