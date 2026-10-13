@@ -1,8 +1,8 @@
 // The canvas page's last level (BBP-131 WI4): a crew member's bound thread,
 // and — lazily, once that thread node is opened — its turns and tool calls
 // from the SDK timeline. Pure mapping, so it is testable without the SDK.
-import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
-import { formatTimeRange } from "../vendor/bb-canvas/lib/format";
+import type { CanvasEdge, CanvasNode } from "./types";
+import { formatTimeRange } from "./format";
 import type { ThreadLike } from "./canvas-details";
 
 export const threadNodeId = (threadId: string): string => `thread:${threadId}`;

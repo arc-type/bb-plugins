@@ -34,8 +34,8 @@ import {
   type ThreadTitlePort,
   type TimelineRowLike,
   type TurnFirstLinePort,
-} from "../lib/canvas-threads";
-import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
+} from "../vendor/bb-canvas/lib/canvas-threads";
+import { loadNodeDetails, type ThreadLike } from "../vendor/bb-canvas/lib/canvas-details";
 import { crewNameFromFrameId } from "../lib/canvas-layer";
 import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
 import { CrewFrameEditPanel } from "./crew-frame-edit-panel";
