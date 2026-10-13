@@ -48,3 +48,8 @@ removed and spawned again.
 crew file it is compared against (its template): members added or removed,
 or a member's provider or model changed. The crew file version is a
 per-crew counter and is not compared across crews.
+
+**Crew section** — the sidebar thread section named after a crew that holds
+its lead and member threads. It replaces grouping by parent thread, since
+members have no parent. Removing the crew removes the section; the threads
+stay.

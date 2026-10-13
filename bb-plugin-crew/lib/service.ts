@@ -509,6 +509,10 @@ export function createCrewService(deps: ServiceDeps) {
         }
         if (deletedWorkers > 0) warnings.push(`deleted ${deletedWorkers} graph run worker thread(s)`);
       }
+      // BBP-263: the crew's sidebar section goes with it; the threads stay.
+      await deps.port.removeSection(crew.name).catch((error: unknown) => {
+        warnings.push(`section ${crew.name} was not removed: ${error instanceof Error ? error.message : String(error)}`);
+      });
       const rows = store.deleteCrewRows(crew.id);
       directoryChanged(crew, "was deleted");
       await flush();

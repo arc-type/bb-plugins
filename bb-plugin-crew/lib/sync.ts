@@ -257,9 +257,28 @@ export async function apply(ctx: SyncContext, input: ApplyInput): Promise<ApplyO
     results.push(result);
   }
 
+  // Also files threads that exist already, so crews filed by hand or never filed heal.
+  await fileInCrewSection(ctx, crew.name, results.map((result) => result.threadId));
+
   const status: CrewStatus = results.some((result) => result.result === "failed") ? "degraded" : "running";
   store.setCrewStatus(crew.id, status);
   return { crew: store.getCrew(crew.id)!, results };
+}
+
+/**
+ * File threads into the sidebar section named after the crew (BBP-263):
+ * members have no parent thread (ADR 0003), so the section groups them.
+ * Grouping is cosmetic: a failure never fails apply or a spawn.
+ */
+export async function fileInCrewSection(ctx: SyncContext, crewName: string, threadIds: readonly (string | null)[]): Promise<void> {
+  const ids = threadIds.filter((id): id is string => id !== null);
+  if (ids.length === 0) return;
+  try {
+    const sectionId = await ctx.port.ensureSection(crewName);
+    for (const threadId of ids) await ctx.port.fileInSection(threadId, sectionId).catch(() => undefined);
+  } catch {
+    // No section today; the next apply files the threads again.
+  }
 }
 
 function failed(member: ResolvedMember, threadId: string | null, detail: string): MemberResult {
@@ -406,6 +425,7 @@ export async function spawnMember(
   }
   journal.done(opId, thread.id);
   store.bind(row.id, thread.id, shift);
+  await fileInCrewSection(ctx, crew.name, [thread.id]);
 
   // Verify what BB actually chose (§6). Provider comes back on the thread,
   // the model only through defaultExecutionOptions.

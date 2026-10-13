@@ -44,6 +44,10 @@
 // - `threads.events.list` takes `limit` as a string (d.ts:16650–16658) but
 //   refuses anything above 100 with HTTP 400 — found live in E4; the E2
 //   marker check asked for 200 and failed silently until then.
+// - BBP-263: sidebar sections (`threadSections.list/create/delete`, global,
+//   not per project) group a crew now that members have no parent thread.
+//   A thread is filed with `threads.update({ sectionId })`; deleting a section
+//   removes the assignments, the threads stay.
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { replyFromEvents, type ReplyEvent, type TurnReply } from "./reply";
 import type { Permission } from "./spec";
@@ -155,6 +159,12 @@ export interface ThreadPort {
   open(threadId: string, split: OpenSplit): Promise<void>;
   /** The first answer after the text carrying `marker` reached the thread. */
   reply(threadId: string, marker: string): Promise<TurnReply>;
+  /** Id of the sidebar section named `name`; created when missing, never duplicated. */
+  ensureSection(name: string): Promise<string>;
+  /** File the thread into a sidebar section. */
+  fileInSection(threadId: string, sectionId: string): Promise<void>;
+  /** Delete every section named `name`; its threads stay, unfiled. */
+  removeSection(name: string): Promise<void>;
 }
 
 export function permissionModeFor(permissions: Permission): "accept-edits" | "auto" | "full" {
@@ -451,6 +461,18 @@ export function createSdkThreadPort(bb: BbPluginApi, options: { backoff?: Backof
       }
       return replyFromEvents(events, marker);
     },
+    async ensureSection(name) {
+      const existing = (await bb.sdk.threadSections.list()).find((section) => section.name === name);
+      return existing ? existing.id : (await bb.sdk.threadSections.create({ name })).id;
+    },
+    async fileInSection(threadId, sectionId) {
+      await threads().update({ threadId, sectionId });
+    },
+    async removeSection(name) {
+      for (const section of await bb.sdk.threadSections.list()) {
+        if (section.name === name) await bb.sdk.threadSections.delete({ id: section.id });
+      }
+    },
   };
 }
 
@@ -466,6 +488,8 @@ export type FakeThread = ThreadInfo & {
   interactions: OpenInteraction[];
   /** Event log the fake answers `reply` from; tests append turns to it. */
   events: ReplyEvent[];
+  /** Sidebar section the thread is filed in; null = none. */
+  sectionId: null | string;
 };
 
 export type FakeThreadPort = ThreadPort & {
@@ -491,6 +515,10 @@ export type FakeThreadPort = ThreadPort & {
   /** Append a finished turn answering the delivered text that carries `marker`. */
   answer(threadId: string, marker: string, text: string, status?: "completed" | "failed"): void;
   opened: { threadId: string; split: OpenSplit }[];
+  /** Sidebar sections, id → name (global in BB, like here). */
+  sections: Map<string, string>;
+  /** Makes the next section calls fail with this error (one entry per call). */
+  sectionFailures: unknown[];
 };
 
 export const FAKE_LOCAL_HOST = "host_local";
@@ -506,7 +534,12 @@ export function createFakeThreadPort(): FakeThreadPort {
     return thread;
   };
   // A copy without the fake-only fields, like the SDK port returns.
-  const info = ({ model: _m, metadata: _md, request: _r, inbox: _i, interactions: _x, events: _e, ...rest }: FakeThread): ThreadInfo => ({ ...rest });
+  const info = ({ model: _m, metadata: _md, request: _r, inbox: _i, interactions: _x, events: _e, sectionId: _s, ...rest }: FakeThread): ThreadInfo => ({ ...rest });
+  let sections = 0;
+  const sectionFailure = () => {
+    const failure = port.sectionFailures.shift();
+    if (failure !== undefined) throw failure;
+  };
   let seq = 0;
   const logEvent = (thread: FakeThread, type: string, data: unknown) => thread.events.push({ seq: ++seq, type, data });
   const port: FakeThreadPort = {
@@ -544,6 +577,7 @@ export function createFakeThreadPort(): FakeThreadPort {
         inbox: [],
         interactions: [],
         events: [],
+        sectionId: null,
       };
       threads.set(id, thread);
       logEvent(thread, "client/turn/requested", { requestId: `req_${seq + 1}`, input: [{ type: "text", text: request.prompt }] });
@@ -653,6 +687,31 @@ export function createFakeThreadPort(): FakeThreadPort {
       return replyFromEvents(require(threadId).events, marker);
     },
     opened: [],
+    sections: new Map(),
+    sectionFailures: [],
+    async ensureSection(name) {
+      record("ensureSection", name);
+      sectionFailure();
+      const existing = [...port.sections].find(([, value]) => value === name);
+      if (existing) return existing[0];
+      const id = `sec_${++sections}`;
+      port.sections.set(id, name);
+      return id;
+    },
+    async fileInSection(threadId, sectionId) {
+      record("fileInSection", { threadId, sectionId });
+      sectionFailure();
+      require(threadId).sectionId = sectionId;
+    },
+    async removeSection(name) {
+      record("removeSection", name);
+      sectionFailure();
+      for (const [id, value] of port.sections) {
+        if (value !== name) continue;
+        port.sections.delete(id);
+        for (const thread of threads.values()) if (thread.sectionId === id) thread.sectionId = null;
+      }
+    },
     addForeign(input) {
       const thread: FakeThread = {
         providerId: "claude-code",
@@ -668,6 +727,7 @@ export function createFakeThreadPort(): FakeThreadPort {
         inbox: [],
         interactions: [],
         events: [],
+        sectionId: null,
         ...input,
       };
       threads.set(thread.id, thread);
