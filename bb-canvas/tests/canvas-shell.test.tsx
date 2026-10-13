@@ -281,6 +281,14 @@ describe("startFitOptions (BBP-196)", () => {
     const options = startFitOptions(tree) as Record<string, unknown>;
     expect(options.maxZoom).toBeUndefined();
   });
+
+  it("keeps the floor above BBP-196's original 0.6 now that root/project nodes are the shorter 'group' tier (BBP-214)", () => {
+    // Root and its direct children (what startFitOptions frames) render as
+    // group-tier headers (28px) instead of the old uniform 64px card; the
+    // floor needs to be higher than before or the start view reads as too
+    // small on reload in a large window.
+    expect(START_MIN_ZOOM).toBeGreaterThan(0.6);
+  });
 });
 
 // BBP-196 fix: a restored project filter plus restored expanded threads/turns

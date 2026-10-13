@@ -176,8 +176,17 @@ function wheelZoomDelta(event: { deltaY: number; deltaMode: number }): number {
 
 /** Lower bound for the first fit only (BBP-196): with 34 projects, fitting
  *  the whole tree shrank the cards below reading size. Manual zoom still goes
- *  down to 0.2, and "Collapse all"/`0` still fit the whole visible tree. */
-export const START_MIN_ZOOM = 0.6;
+ *  down to 0.2, and "Collapse all"/`0` still fit the whole visible tree.
+ *
+ *  Raised from the original 0.6 for BBP-214's three tiers: root and project
+ *  nodes — exactly what the start fit frames — are "group" tier now (28px
+ *  tall) instead of the old uniform 64px card. A tall tree in a large window
+ *  needs much less zoom-out to make its (now much shorter) bounding box fit,
+ *  but the 0.6 floor let it zoom out that far anyway, leaving the title text
+ *  too small to read on reload. 0.75 is estimated from the tier shrink, not
+ *  measured on a live tree — confirm at acceptance like the original value
+ *  was. */
+export const START_MIN_ZOOM = 0.75;
 
 /** The first fit frames the roots and their direct children, never deeper
  *  levels, and never zooms out past `START_MIN_ZOOM`. A floor, not a fixed
