@@ -198,6 +198,14 @@ export type TimelineRowLike = {
   workflowName?: string | null;
   taskType?: string;
   summary?: string | null;
+  /** A `"conversation"` row's own request classification (BBP-228) — not yet
+   *  used by `turnTitle` (reserved for a future kind-specific form). */
+  systemMessageKind?: string;
+  /** A `"conversation"` row's own structured detail for its `[bb system]`
+   *  notice (BBP-228 R2) — for a single child-thread completion, `threadName`
+   *  is that child's display name, already resolved server-side; `turnTitle`
+   *  uses it instead of ever showing the bare thread id. */
+  systemMessageSubject?: { kind?: string; threadId?: string; threadName?: string } | null;
 };
 
 const TURN_STATUS: Record<string, CanvasNode["status"]> = {
@@ -240,13 +248,119 @@ function duration(startedAt?: number, completedAt?: number): string | undefined 
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** The first line of the first conversation row with `role: "user"` among
- *  `rows` — the turn's own request. Untruncated; callers pick their own
- *  length (the card label and the sidebar field truncate differently). */
-function firstUserLine(rows: readonly TimelineRowLike[] | null | undefined): string | undefined {
-  const request = (rows ?? []).find((row) => row.kind === "conversation" && row.role === "user");
-  const line = request?.text?.split("\n").find((candidate) => candidate.trim() !== "");
-  return line || undefined;
+/** The first conversation row with `role: "user"` among `rows` — the turn's
+ *  own request, as found in its (always-null-on-real-pages) `children`, kept
+ *  only as the `turnDetailsToCanvas`/`enrichTurnNodes` fallback path's
+ *  source of truth (BBP-228 moved the primary source to thread-level rows,
+ *  see `timelineToCanvas`). */
+function firstUserConversation(rows: readonly TimelineRowLike[] | null | undefined): TimelineRowLike | undefined {
+  return (rows ?? []).find((row) => row.kind === "conversation" && row.role === "user");
+}
+
+/** Derives a turn's card title from the raw text of its triggering request
+ *  (BBP-228): a crew message's `From: … → To: …` header becomes `"from
+ *  <sender>: <subject>"` (or, lacking a `Subject:` line, the first line after
+ *  the `---` separator); a kickoff brief becomes `"Kickoff: <name>"`; a `[bb
+ *  message from thread:…]` becomes `"from thread: <line>"`; a `[bb system]`
+ *  notice keeps just its own first line; anything else is used as-is. Never
+ *  empty — a request with no usable line after stripping its prefix falls
+ *  back to `"Turn"`. `systemMessageKind` is accepted for a future
+ *  kind-specific form but not evaluated this round; `systemMessageSubject`
+ *  is used for exactly one shape — a single child-thread completion
+ *  (`"@thread:<id> completed:"`) — where its `threadName` replaces the id
+ *  (BBP-228 R2: a title must never show a bare thread id). */
+export function turnTitle(
+  text: string,
+  _systemMessageKind?: string,
+  systemMessageSubject?: TimelineRowLike["systemMessageSubject"],
+): string {
+  const trimmed = (text ?? "").trim();
+  if (trimmed === "") return "Turn";
+  const lines = trimmed.split("\n");
+  const firstLine = lines[0]!.trim();
+
+  const kickoff = firstLine.match(/^\[crew\] Kickoff brief for (.+)$/);
+  if (kickoff) {
+    const name = kickoff[1]!.trim();
+    return name ? `Kickoff: ${name}` : "Turn";
+  }
+
+  const fromTo = firstLine.match(/^\[crew\] From: (.+?) → To: .+$/);
+  if (fromTo) {
+    const sender = fromTo[1]!.split(/[@→]/)[0]!.trim();
+    const subjectLine = lines.slice(1).find((line) => /^Subject:/.test(line.trim()));
+    if (subjectLine) {
+      const subject = subjectLine.trim().replace(/^Subject:\s*/, "").trim();
+      if (subject) return `from ${sender}: ${subject}`;
+    }
+    const sepIndex = lines.findIndex((line) => line.trim() === "---");
+    if (sepIndex >= 0) {
+      const firstAfter = lines.slice(sepIndex + 1).find((line) => line.trim() !== "");
+      if (firstAfter) return firstAfter.trim();
+    }
+    return "Turn";
+  }
+
+  const threadMessage = trimmed.match(/^\[bb message from thread:[^\]]*\]\s*([\s\S]*)$/);
+  if (threadMessage) {
+    const line = (threadMessage[1] ?? "").split("\n").find((candidate) => candidate.trim() !== "");
+    return line ? `from thread: ${line.trim()}` : "Turn";
+  }
+
+  const system = trimmed.match(/^\[bb system\]\s*([\s\S]*)$/);
+  if (system) {
+    const restLines = (system[1] ?? "").split("\n");
+    const firstIdx = restLines.findIndex((candidate) => candidate.trim() !== "");
+    if (firstIdx === -1) return "Turn";
+    const line = restLines[firstIdx]!.trim();
+    const childDone = line.match(/^@thread:\S+\s+completed:$/);
+    if (childDone) {
+      const name = systemMessageSubject?.threadName?.trim();
+      const label = name ? `${name} done` : "thread done";
+      const contentLine = restLines.slice(firstIdx + 1).find((candidate) => candidate.trim() !== "");
+      return contentLine ? `${label}: ${contentLine.trim()}` : label;
+    }
+    return line;
+  }
+
+  const firstNonEmpty = lines.find((line) => line.trim() !== "");
+  return firstNonEmpty ? firstNonEmpty.trim() : "Turn";
+}
+
+/** Strips a request's own header/footer noise for the sidebar's "Request"
+ *  field (BBP-228 R2) — the raw text (with every prefix/header line intact)
+ *  stays available as `meta.requestRaw`, behind "Debug", so nothing is lost.
+ *  A crew message's `From/To`/`Sent`/`Subject` header is dropped up to its
+ *  `---` separator (or, lacking one, just its first line); a trailing
+ *  "Reply with crew_send(...)" footer (the crew tool's own boilerplate) is
+ *  dropped; a kickoff brief loses only its own first line; a `[bb system]`/
+ *  `[bb message from thread:…]` notice loses just its prefix, and a single
+ *  child completion also its bare "@thread:<id> completed:" line. Anything else
+ *  passes through unchanged. */
+export function cleanRequestText(text: string): string {
+  const raw = text ?? "";
+  const lines = raw.split("\n");
+  const firstLine = (lines[0] ?? "").trim();
+  let body: string;
+
+  if (/^\[crew\] Kickoff brief for /.test(firstLine)) {
+    body = lines.slice(1).join("\n");
+  } else if (/^\[crew\] From: .+ → To: .+$/.test(firstLine)) {
+    let i = 1;
+    while (i < lines.length && lines[i]!.trim() !== "---" && lines[i]!.trim() !== "") i++;
+    if (lines[i]?.trim() === "---") i++;
+    body = lines.slice(i).join("\n");
+  } else {
+    const threadMessage = raw.match(/^\[bb message from thread:[^\]]*\]\s*([\s\S]*)$/);
+    const system = raw.match(/^\[bb system\]\s*([\s\S]*)$/);
+    body = threadMessage ? (threadMessage[1] ?? "") : system ? (system[1] ?? "") : raw;
+  }
+
+  body = body.replace(/\n?-{3,}\s*\nReply with crew_send\([\s\S]*$/, "");
+  // A child-completion notice's "@thread:<id> completed:" line is only the
+  // bare id — the title already names the child ("steps-impl done: …").
+  body = body.replace(/^\s*@thread:\S+\s+completed:[ \t]*(\n|$)/, "");
+  return body.trim();
 }
 
 function fileName(path: string | null | undefined): string | undefined {
@@ -537,44 +651,111 @@ function mapRows(rows: readonly TimelineRowLike[], parentId: string, threadId?: 
  * conversation and work rows) become its canvas children; every other
  * top-level row hangs directly off the thread.
  */
+/** Maps each turn to the raw text of the thread-level request that triggered
+ *  it (BBP-228): a `"conversation"`/`role: "user"` row's `turnId` names its
+ *  turn directly; a row with no `turnId` (observed on Pi threads) is instead
+ *  assigned to the next `"turn"` row that follows it in `sourceSeqStart`
+ *  order, as long as that turn has no request yet — a trailing row with no
+ *  turn left to follow stays unassigned. Every matched or Pi-style user row
+ *  is excluded from the returned index so the thread never also renders it
+ *  as its own node (only engaged when the page has at least one turn row at
+ *  all, so a page of bare conversation rows keeps its original rendering). */
+function requestsByTurn(rows: readonly TimelineRowLike[]): { byTurnKey: Map<string, TimelineRowLike>; consumed: ReadonlySet<number> } {
+  const byTurnKey = new Map<string, TimelineRowLike>();
+  const consumed = new Set<number>();
+  const turnKeys = new Set(rows.filter((row) => row.kind === "turn").map((row) => row.turnId ?? row.id));
+  if (turnKeys.size === 0) return { byTurnKey, consumed };
+
+  rows.forEach((row, index) => {
+    if (row.kind !== "conversation" || row.role !== "user") return;
+    consumed.add(index);
+    if (typeof row.turnId === "string" && turnKeys.has(row.turnId) && !byTurnKey.has(row.turnId) && row.text) {
+      byTurnKey.set(row.turnId, row);
+    }
+  });
+
+  const turnsBySeq = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.kind === "turn" && typeof row.sourceSeqStart === "number")
+    .sort((a, b) => a.row.sourceSeqStart! - b.row.sourceSeqStart!);
+  const orphans = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row, index }) => consumed.has(index) && (row.turnId === undefined || row.turnId === null) && typeof row.sourceSeqStart === "number")
+    .sort((a, b) => a.row.sourceSeqStart! - b.row.sourceSeqStart!);
+  for (const { row } of orphans) {
+    const key = row.turnId ?? undefined;
+    if (key !== undefined && byTurnKey.has(key)) continue;
+    const next = turnsBySeq.find(({ row: turn }) => turn.sourceSeqStart! > row.sourceSeqStart! && !byTurnKey.has(turn.turnId ?? turn.id));
+    if (next && row.text) byTurnKey.set(next.row.turnId ?? next.row.id, row);
+  }
+
+  return { byTurnKey, consumed };
+}
+
+/** The text of the last `"conversation"`/`role: "assistant"` row sharing a
+ *  given turn's `turnId` — its answer preview (BBP-228). Only matches by
+ *  `turnId` (no Pi fallback for the answer side, per spec). */
+function answersByTurn(rows: readonly TimelineRowLike[]): Map<string, string> {
+  const byTurnKey = new Map<string, string>();
+  for (const row of rows) {
+    if (row.kind === "conversation" && row.role === "assistant" && typeof row.turnId === "string" && row.text) {
+      byTurnKey.set(row.turnId, row.text);
+    }
+  }
+  return byTurnKey;
+}
+
 export function timelineToCanvas(
   threadId: string,
   response: { rows: readonly TimelineRowLike[] },
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
   const parent = threadNodeId(threadId);
+  const { byTurnKey: requestRows, consumed } = requestsByTurn(response.rows);
+  const answerText = answersByTurn(response.rows);
   const nodes: CanvasNode[] = [];
   let pending: TimelineRowLike[] = [];
   const flush = () => {
     nodes.push(...mapRows(pending, parent, threadId));
     pending = [];
   };
-  for (const row of response.rows) {
+  response.rows.forEach((row, index) => {
     if (row.kind !== "turn") {
-      pending.push(row);
-      continue;
+      if (!consumed.has(index)) pending.push(row);
+      return;
     }
     flush();
     const turnNodeId = `row:${row.id}`;
+    const turnKey = row.turnId ?? row.id;
     const summaryCount = row.summaryCount ?? (row.children?.length ?? 0);
-    const firstLine = truncate(firstUserLine(row.children) ?? "", 120);
+    const requestRow = requestRows.get(turnKey) ?? firstUserConversation(row.children);
+    const requestFullText = requestRow?.text;
+    const title = requestFullText !== undefined ? turnTitle(requestFullText, requestRow?.systemMessageKind, requestRow?.systemMessageSubject) : undefined;
+    const answerPreview = answerText.get(turnKey);
     nodes.push({
       id: turnNodeId,
       kind: "turn",
-      label: `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
+      label: title ? truncate(title, 48) : `Turn · ${summaryCount} ${summaryCount === 1 ? "step" : "steps"}`,
       ...(row.status && TURN_STATUS[row.status] ? { status: TURN_STATUS[row.status] } : {}),
       parentId: parent,
       meta: {
         rowId: row.id,
         threadId,
-        turnId: row.turnId ?? row.id,
+        turnId: turnKey,
         sourceSeqStart: row.sourceSeqStart,
         sourceSeqEnd: row.sourceSeqEnd,
         summaryCount,
-        ...(firstLine ? { firstLine } : {}),
+        ...(title ? { firstLine: title } : {}),
+        // The sidebar's own rows: the cleaned request (the card title is
+        // only its first line; the raw text with every header/footer line
+        // intact stays behind "Debug" as requestRaw, BBP-228 R2), the
+        // answer, and how long the turn took.
+        ...(requestFullText?.trim() ? { request: cleanRequestText(requestFullText), requestRaw: requestFullText.trim() } : {}),
+        ...(answerPreview ? { answerPreview } : {}),
+        ...(duration(row.startedAt, row.completedAt) ? { duration: duration(row.startedAt, row.completedAt) } : {}),
       },
     });
     nodes.push(...mapRows(row.children ?? [], turnNodeId, threadId));
-  }
+  });
   flush();
   return { nodes, edges: [] };
 }
@@ -627,13 +808,14 @@ export async function enrichTurnNodes(nodes: readonly CanvasNode[], port: TurnFi
       }
       try {
         const { rows } = await port.turnDetails(turnId, threadId, sourceSeqStart, sourceSeqEnd);
-        const line = firstUserLine(rows);
-        if (!line) return;
+        const request = firstUserConversation(rows);
+        if (!request?.text) return;
+        const title = turnTitle(request.text, request.systemMessageKind, request.systemMessageSubject);
         byId.set(node.id, {
           ...node,
           // The step count is already the card's subtitle ("Turn · n steps").
-          label: truncate(line, 48),
-          meta: { ...node.meta, firstLine: truncate(line, 120) },
+          label: truncate(title, 48),
+          meta: { ...node.meta, firstLine: title, request: cleanRequestText(request.text), requestRaw: request.text.trim() },
         });
       } catch {
         // Turn steps unreadable: the plain "Turn · n steps" label stands.

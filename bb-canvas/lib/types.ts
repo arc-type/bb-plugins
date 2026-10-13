@@ -95,7 +95,8 @@ const CURATED_KEYS: Partial<Record<CanvasNodeKind, readonly string[]>> = {
   // `state` is the thread's own BB status, loaded on selection; the node-level
   // pill is the status of whatever the thread hangs under, not the thread.
   thread: ["title", "state", "provider", "model", "turns", "created", "updated"],
-  turn: ["from", "firstLine", "summaryCount", "text"],
+  // `firstLine` is the card title, already the sidebar header — not repeated.
+  turn: ["from", "request", "answerPreview", "duration", "summaryCount", "text"],
   "tool-call": [
     "toolName",
     "command",
@@ -159,6 +160,9 @@ const FIELD_LABELS: Record<string, string> = {
   created: "Created",
   updated: "Updated",
   firstLine: "First line",
+  request: "Request",
+  requestRaw: "Request (raw)",
+  answerPreview: "Answer",
   toolName: "Tool",
   command: "Command",
   toolArgs: "Input",
@@ -218,6 +222,9 @@ const TECHNICAL_KEYS: ReadonlySet<string> = new Set([
   // A step's raw provider status ("completed", "error") — the card's status
   // pill already says it; a kind that means it (subagent) curates it.
   "status",
+  // A turn's untouched request text (BBP-228 R2) — "request" above is the
+  // cleaned version a reader wants; this is only for checking the cleanup.
+  "requestRaw",
 ]);
 
 function fieldLabel(key: string): string {
