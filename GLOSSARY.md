@@ -31,6 +31,10 @@ another.
 **Shift** — one stretch of work by a crew member between two resets. A reset
 starts a new shift; reports from an earlier shift are out of date.
 
+**Kickoff brief** — the first message of a shift: the member's role, peers and
+messaging rules. After a reset it waits until the member's next real message
+and travels with it, so a reset alone never starts work.
+
 **Child-completed notice** — the message BB itself sends to a parent thread
 whenever a child thread finishes a turn. It is not a crew message. Crew members
 are not child threads of their lead, so the lead does not get these notices.
