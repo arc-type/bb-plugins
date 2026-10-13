@@ -352,6 +352,20 @@ describe("the canvas page", () => {
     expect(screen.getByRole("group", { name: "Projects" })).toBeTruthy();
   });
 
+  // BBP-227: checking a project with the mouse must leave focus in the
+  // search field, also across the canvas remount the filter change causes.
+  it("clicking a project in the Projects dropdown puts focus back into the search field", async () => {
+    canvasPanel({ projectId: null, sdk: TWO_PROJECTS });
+    await screen.findByRole("button", { name: new RegExp("^Blog — ") });
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    const shop = screen.getByRole("checkbox", { name: "Shop" });
+    fireEvent.mouseDown(shop);
+    fireEvent.click(shop);
+    await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp("^Blog — ") })).toBeNull());
+    expect(screen.getByRole("searchbox")).toBe(document.activeElement);
+  });
+
   // BBP-216: a search that matches nothing must say so and hide "Select all
   // matches", while a project that's already checked stays visible under a
   // "Selected" heading instead of vanishing or looking like a real match.

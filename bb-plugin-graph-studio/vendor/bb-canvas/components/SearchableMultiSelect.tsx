@@ -86,6 +86,10 @@ export function SearchableMultiSelect({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const itemRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [place, setPlace] = useState<{ offset: number; width: number } | null>(null);
+  // The row under the pointer and the row holding keyboard focus get the same
+  // full-width tint, so the active row reads clearly, not just the checkbox ring.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   // Measured on open: the canvas may sit in a slim panel, and the button's
   // spot in a wrapped toolbar is only known once laid out.
@@ -155,7 +159,27 @@ export function SearchableMultiSelect({
   itemRefs.current = [];
 
   const renderOption = (option: SearchableMultiSelectOption) => (
-    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+    <label
+      key={option.id}
+      // A mouse press must not move focus onto the row (BBP-227): focus goes
+      // back to the search field so further typing lands there. Keyboard
+      // toggles never fire mousedown, so arrow navigation keeps its row.
+      onMouseDown={(event) => {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }}
+      onMouseEnter={() => setHoveredId(option.id)}
+      onMouseLeave={() => setHoveredId((id) => (id === option.id ? null : id))}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "4px 8px",
+        borderRadius: 4,
+        background: hoveredId === option.id || focusedId === option.id ? "var(--accent, rgba(127, 127, 127, 0.15))" : "transparent",
+        cursor: "pointer",
+      }}
+    >
       <input
         ref={(el) => {
           itemRefs.current[visibleOptions.indexOf(option)] = el;
@@ -164,6 +188,8 @@ export function SearchableMultiSelect({
         aria-label={option.name}
         checked={selected.includes(option.id)}
         onChange={() => toggle(option.id)}
+        onFocus={() => setFocusedId(option.id)}
+        onBlur={() => setFocusedId((id) => (id === option.id ? null : id))}
       />
       <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
     </label>
@@ -200,6 +226,18 @@ export function SearchableMultiSelect({
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
           moveActive(event.key === "ArrowDown" ? 1 : -1);
+        } else if (
+          event.key.length === 1 &&
+          event.key !== " " &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          itemRefs.current.includes(document.activeElement as HTMLInputElement)
+        ) {
+          // Typing on a row continues the search (BBP-227).
+          event.preventDefault();
+          setQuery((value) => value + event.key);
+          searchRef.current?.focus();
         } else if (event.key === " " || event.key === "Enter") {
           const active = document.activeElement;
           if (active instanceof HTMLInputElement && active.type === "checkbox") {

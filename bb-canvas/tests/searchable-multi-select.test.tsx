@@ -430,4 +430,41 @@ describe("SearchableMultiSelect", () => {
     );
     expect(screen.getByRole("button", { name: "Focus (2)" })).toBeTruthy();
   });
+  // BBP-227: checking a row with the mouse hands focus back to the search
+  // field, so typing goes on into the search instead of onto the row.
+  it("clicking a row with the mouse puts focus back into the search field", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    const beta = screen.getByRole("checkbox", { name: "Beta" });
+    fireEvent.mouseDown(beta);
+    fireEvent.click(beta);
+    expect(onChange).toHaveBeenLastCalledWith(["p2"]);
+    expect(screen.getByRole("searchbox")).toBe(document.activeElement);
+  });
+
+  it("checking a row with Space keeps focus on that row", () => {
+    const onChange = vi.fn();
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={onChange} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: " " });
+    expect(onChange).toHaveBeenLastCalledWith(["p1"]);
+    expect(screen.getByRole("checkbox", { name: "Alpha" })).toBe(document.activeElement);
+  });
+
+  it("typing a character on a row jumps into the search field and appends it", () => {
+    render(<SearchableMultiSelect label="Projects" options={options} selected={[]} onChange={() => {}} emptyText="No projects yet." />);
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "g" });
+    const search = screen.getByRole("searchbox") as HTMLInputElement;
+    expect(search).toBe(document.activeElement);
+    expect(search.value).toBe("g");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Gamma" }), { key: "Backspace" });
+    expect(screen.getByRole("checkbox", { name: "Gamma" })).toBe(document.activeElement);
+    expect(search.value).toBe("g");
+  });
 });
