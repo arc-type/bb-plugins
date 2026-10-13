@@ -359,6 +359,7 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
         if (params.due && !Number.isFinite(dueAt)) return failure(`"${params.due}" is not a time.`);
         const item = work.create(self.crew, actor(self), { title: params.title, body: params.body, owner: params.owner ?? null, tier: params.tier, dueAt, taskKey: params.task ?? null });
         if (item.ownerMember && item.ownerMember !== self.member.id) {
+          await work.beforeAssign(self.crew, item.ownerMember);
           await service.send({
             projectId: self.crew.projectId,
             from: self,

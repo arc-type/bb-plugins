@@ -203,6 +203,69 @@ describe("crew tools", () => {
     expect(env.store.listMessages().slice(before)).toHaveLength(1);
   });
 
+  describe("context: per-item starts a new shift on assignment (BBP-280, ADR 0005)", () => {
+    const perItem = () => trioYaml({ groups: [
+      { id: "orch", members: [{ id: "lead", lead: true, role: "Plans." }] },
+      { id: "dev", members: [{ id: "impl", role: "Builds." }, { id: "review", permissions: "ask", role: "Reviews.", context: "per-item" }] },
+    ] });
+    const create = (env: Awaited<ReturnType<typeof withHost>>, title: string, owner: string) =>
+      env.harness.behavior.callAgentTool("crew_work_create", { title, owner }, { threadId: env.threads["orch-lead"]! });
+    const bound = (env: Awaited<ReturnType<typeof withHost>>, key: string) => env.store.currentBinding(env.members[key]!.id)!;
+
+    it("two items in a row give two shifts; the second thread holds only the kickoff brief and the second item", async () => {
+      const env = await withHost({ yaml: perItem() });
+      const spawns = env.port.countCalls("spawn");
+      await create(env, "first review", "dev-review");
+      const first = bound(env, "dev-review");
+      expect([first.shift, env.port.countCalls("spawn")]).toEqual([2, spawns + 1]);
+      expect(env.port.threads.get(env.threads["dev-review"]!)!.archived).toBe(true);
+      const item = env.service.queue.list(env.crew, { owner: "dev-review" })[0]!;
+      env.service.queue.claim(env.crew, { kind: "human" }, item.id, "dev-review");
+      await env.service.queue.done(env.crew, { kind: "human" }, item.id, "ok");
+      await create(env, "second review", "dev-review");
+      const second = bound(env, "dev-review");
+      expect([second.shift, env.port.countCalls("spawn")]).toEqual([3, spawns + 2]);
+      const thread = env.port.threads.get(second.threadId)!;
+      expect(thread.request!.prompt).toContain("Kickoff brief for dev-review@trio");
+      expect(thread.request!.prompt).toContain("second review");
+      expect(thread.request!.prompt).not.toContain("first review");
+      expect(thread.inbox).toEqual([]);
+      expect(env.port.threads.get(first.threadId)!.archived).toBe(true);
+    });
+
+    it("a handoff to a per-item member starts a new shift too", async () => {
+      const env = await withHost({ yaml: perItem() });
+      const item = env.service.queue.create(env.crew, { kind: "human" }, { title: "look at this", owner: "dev-impl" });
+      await env.harness.behavior.callAgentTool("crew_work_handoff", { id: item.id, to: "dev-review", note: "please" }, { threadId: env.threads["orch-lead"]! });
+      const binding = bound(env, "dev-review");
+      expect(binding.shift).toBe(2);
+      expect(env.port.threads.get(binding.threadId)!.request!.prompt).toContain("look at this");
+    });
+
+    it("a persistent member keeps one shift for two items", async () => {
+      const env = await withHost({ yaml: perItem() });
+      const spawns = env.port.countCalls("spawn");
+      await create(env, "build a", "dev-impl");
+      await create(env, "build b", "dev-impl");
+      expect(bound(env, "dev-impl")).toMatchObject({ shift: 1, threadId: env.threads["dev-impl"] });
+      expect(env.port.countCalls("spawn")).toBe(spawns);
+    });
+
+    it("negative: an assignment while the member holds a claimed, open item resets nothing; the notice goes to the running thread", async () => {
+      const env = await withHost({ yaml: perItem() });
+      await create(env, "first review", "dev-review");
+      const first = bound(env, "dev-review");
+      env.port.threads.get(first.threadId)!.status = "idle";
+      const item = env.service.queue.list(env.crew, { owner: "dev-review" })[0]!;
+      env.service.queue.claim(env.crew, { kind: "human" }, item.id, "dev-review");
+      const spawns = env.port.countCalls("spawn");
+      await create(env, "second review", "dev-review");
+      expect(bound(env, "dev-review")).toMatchObject({ shift: 2, threadId: first.threadId });
+      expect(env.port.countCalls("spawn")).toBe(spawns);
+      expect(env.port.threads.get(first.threadId)!.inbox.at(-1)!.text).toContain("second review");
+    });
+  });
+
   it("crew_work_create's description says the owner is notified, so no crew_send is needed (BBP-259)", async () => {
     const { harness, threads, meta } = await withHost();
     const config = await harness.behavior.resolveAgentConfiguration(context(threads["dev-impl"]!, meta("dev-impl")));

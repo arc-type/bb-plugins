@@ -142,7 +142,15 @@ export function createCrewService(deps: ServiceDeps) {
       await dependencies.poll({ onlyMerged: true });
     },
   });
-  const queue = createQueue({ store, models, delivery, integration, now: deps.now, newId: shortId ? () => shortId("wi") : undefined });
+  const queue = createQueue({
+    store,
+    models,
+    delivery,
+    integration,
+    now: deps.now,
+    newId: shortId ? () => shortId("wi") : undefined,
+    newShift: (member) => lifecycle.newShiftOnAssignment(member),
+  });
   /**
    * BBP-87: a member's open human question is stale once the crew's own task
    * is done — there is no per-question task link (`MessageRow` has none), so
