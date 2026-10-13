@@ -7,11 +7,16 @@
 // tree read left to right (agents → project → crew → member → …), not a
 // flow chart. Siblings (several members, several run steps) stack as rows
 // within their shared column.
+import { selectedPathEdges } from "./selected-path";
 import type { CanvasEdge, CanvasEdgeState, CanvasFrame, CanvasNode } from "./types";
+import { sizeOf, TIER_SIZE } from "./tiers";
 
-export const NODE_WIDTH = 180;
-export const NODE_HEIGHT = 64;
-export const COLUMN_GAP = 96;
+/** Card tier's size, kept as the default export for callers that still want
+ *  one constant (tests, the back-edge lane) — every node's own size now
+ *  comes from `sizeOf(node.kind)` instead. */
+export const NODE_WIDTH = TIER_SIZE.card.width;
+export const NODE_HEIGHT = TIER_SIZE.card.height;
+export const COLUMN_GAP = 44;
 export const ROW_GAP = 16;
 export const MARGIN = 24;
 /** How far a back edge's arc bows out past the right edge of its column. */
@@ -73,12 +78,17 @@ export type TreeLayout = {
  * messages); the parent/child line for every visible node is drawn
  * automatically and needs no entry here. An edge touching a node that is not
  * currently visible is dropped along with it.
+ *
+ * `selectedId` (BBP-220) highlights the flow edges from the root down to it
+ * with `"selected-path"`, unless a given edge is already `"now"` — a running
+ * child takes precedence over the selection.
  */
 export function layoutTree(
   nodes: readonly CanvasNode[],
   expanded: ReadonlySet<string>,
   edges: readonly CanvasEdge[] = [],
   frames?: readonly CanvasFrame[],
+  selectedId?: string | null,
 ): TreeLayout {
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
@@ -110,10 +120,13 @@ export function layoutTree(
   };
   visit(null, 0);
 
-  // Every visible leaf takes the next free row; a parent sits centred on the
-  // rows its open subtree spans. With 20 members under one crew the crew
-  // card then sits beside the middle of its members instead of above the
-  // first one, so the fan of edges stays short and symmetric.
+  // Every visible leaf takes the next free vertical slot, stacked by its own
+  // tier height rather than a uniform row height — a "row"-tier leaf and a
+  // "card"-tier leaf in the same column must not overlap. A parent centres
+  // on the vertical span its open subtree's first and last child occupy, so
+  // with 20 members under one crew the crew card sits beside the middle of
+  // its members instead of above the first one and the fan of edges stays
+  // short and symmetric.
   const visibleChildren = new Map<string, string[]>();
   for (const id of order) {
     const parentId = parentIdOf.get(id)!;
@@ -122,38 +135,60 @@ export function layoutTree(
     list.push(id);
     visibleChildren.set(parentId, list);
   }
-  const rowOf = new Map<string, number>();
-  let nextRow = 0;
-  const placeRows = (id: string): number => {
+  const centerYOf = new Map<string, number>();
+  let nextY = MARGIN;
+  const placeCenters = (id: string): number => {
     const kids = visibleChildren.get(id) ?? [];
     if (kids.length === 0) {
-      rowOf.set(id, nextRow);
-      return nextRow++;
+      const height = sizeOf(byId.get(id)!.kind).height;
+      const top = nextY;
+      nextY = top + height + ROW_GAP;
+      const center = top + height / 2;
+      centerYOf.set(id, center);
+      return center;
     }
-    const rows = kids.map(placeRows);
-    const row = (rows[0] + rows[rows.length - 1]) / 2;
-    rowOf.set(id, row);
-    return row;
+    const centers = kids.map(placeCenters);
+    const center = (centers[0]! + centers[centers.length - 1]!) / 2;
+    centerYOf.set(id, center);
+    return center;
   };
-  for (const id of order) if (parentIdOf.get(id) === null) placeRows(id);
+  for (const id of order) if (parentIdOf.get(id) === null) placeCenters(id);
+
+  // Column x grows by the widest node actually placed in the previous
+  // column, not a single global width — a "group" and a "row" tier share
+  // the same 220px today, but columns are free to differ.
+  const columnWidth = new Map<number, number>();
+  for (const id of order) {
+    const column = columnOf.get(id)!;
+    const width = sizeOf(byId.get(id)!.kind).width;
+    columnWidth.set(column, Math.max(columnWidth.get(column) ?? 0, width));
+  }
+  const columnX = new Map<number, number>();
+  let nextX = MARGIN;
+  for (let column = 0; column <= Math.max(...[...columnOf.values()], -1); column++) {
+    columnX.set(column, nextX);
+    nextX += (columnWidth.get(column) ?? 0) + COLUMN_GAP;
+  }
 
   const placed = new Map<string, PlacedNode>();
   for (const id of order) {
     const column = columnOf.get(id)!;
+    const { width, height } = sizeOf(byId.get(id)!.kind);
     placed.set(id, {
       id,
-      x: MARGIN + column * (NODE_WIDTH + COLUMN_GAP),
-      y: MARGIN + rowOf.get(id)! * (NODE_HEIGHT + ROW_GAP),
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      x: columnX.get(column)!,
+      y: centerYOf.get(id)! - height / 2,
+      width,
+      height,
       column,
     });
   }
 
+  const onSelectedPath = selectedPathEdges(selectedId ?? null, parentIdOf);
   const flowEdges: PlacedEdge[] = order.flatMap((id) => {
     const parentId = parentIdOf.get(id)!;
     if (parentId === null) return [];
-    return [flowEdge(placed.get(parentId)!, placed.get(id)!, byId.get(id)!)];
+    return [flowEdge(placed.get(parentId)!, placed.get(id)!, byId.get(id)!, onSelectedPath.has(id))];
   });
 
   const declaredEdges: PlacedEdge[] = edges.flatMap((edge) => {
@@ -163,10 +198,16 @@ export function layoutTree(
     return [edge.variant === "back" ? backEdge(from, to, edge) : messageEdge(from, to, edge)];
   });
 
-  const maxColumn = Math.max(...[...columnOf.values()], 0);
-  const maxRow = nextRow;
-  const width = MARGIN * 2 + (maxColumn + 1) * NODE_WIDTH + maxColumn * COLUMN_GAP + BACK_EDGE_LANE;
-  const height = MARGIN * 2 + maxRow * (NODE_HEIGHT + ROW_GAP) - (maxRow > 0 ? ROW_GAP : 0) + NODE_HEIGHT;
+  // Derived from the actual placed extents rather than a per-column/per-row
+  // constant — columns and rows now mix tier sizes, so only the nodes
+  // themselves know how far the layout reaches.
+  const allPlaced = [...placed.values()];
+  const width =
+    allPlaced.length === 0
+      ? MARGIN * 2
+      : MARGIN + Math.max(...allPlaced.map((p) => p.x + p.width)) + BACK_EDGE_LANE;
+  const height =
+    allPlaced.length === 0 ? MARGIN * 2 : MARGIN + Math.max(...allPlaced.map((p) => p.y + p.height));
 
   const layout: TreeLayout = {
     positions: [...placed.values()],
@@ -221,25 +262,26 @@ function placeFrames(
  *  draws the plain neutral line like anything else — "taken" is gone
  *  (BBP-214 stage 1): a line to a `done` step must not look like ongoing
  *  activity. */
-function flowEdgeState(child: CanvasNode): CanvasEdgeState | undefined {
-  return child.status === "running" ? "now" : undefined;
+function flowEdgeState(child: CanvasNode, onSelectedPath: boolean): CanvasEdgeState | undefined {
+  if (child.status === "running") return "now";
+  return onSelectedPath ? "selected-path" : undefined;
 }
 
-function flowEdge(from: PlacedNode, to: PlacedNode, toNode: CanvasNode): PlacedEdge {
+function flowEdge(from: PlacedNode, to: PlacedNode, toNode: CanvasNode, onSelectedPath: boolean): PlacedEdge {
   const fromX = from.x + from.width;
   const fromY = from.y + from.height / 2;
   const toX = to.x;
   const toY = to.y + to.height / 2;
   const midX = (fromX + toX) / 2;
   const path = [`M ${fromX} ${fromY}`, `C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`].join(" ");
-  const state = flowEdgeState(toNode);
+  const state = flowEdgeState(toNode, onSelectedPath);
   return { from: from.id, to: to.id, variant: "flow", path, label: "", isBack: false, ...(state ? { state } : {}) };
 }
 
 /** Bows out past the right edge of the column the edge starts in, so a loop
  *  reads as a loop instead of hiding behind the nodes between its ends. */
 function backEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdge {
-  const laneX = Math.max(from.x, to.x) + NODE_WIDTH + BACK_EDGE_LANE;
+  const laneX = Math.max(from.x + from.width, to.x + to.width) + BACK_EDGE_LANE;
   const fromX = from.x + from.width;
   const fromY = from.y + from.height / 2;
   const toX = to.x + to.width;
@@ -257,13 +299,31 @@ function backEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdg
   };
 }
 
+/** The straight-line shape for every declared edge that isn't a back
+ *  reference — a literal chat `message`, but also a relation (BBP-202,
+ *  `relation: true`) declared with variant `"flow"` when it runs forward
+ *  through the columns rather than looping back (`canvas-layer.ts`,
+ *  `pathBetween`). The placed edge keeps the *declared* variant rather than
+ *  always stamping `"message"`: `StatusEdge`'s dash pattern is keyed by
+ *  variant, and a `"flow"`-shaped relation stamped `"message"` picked up a
+ *  dash it never asked for (BBP-214 feedback 2) — only an edge actually
+ *  declared `"message"` should look like one. */
 function messageEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdge {
   const fromX = from.x + from.width / 2;
   const fromY = from.y + from.height / 2;
   const toX = to.x + to.width / 2;
   const toY = to.y + to.height / 2;
   const path = `M ${fromX} ${fromY} L ${toX} ${toY}`;
-  return { from: from.id, to: to.id, variant: "message", path, label: edge.label ?? "", isBack: false, ...relationOf(edge) };
+  return {
+    from: from.id,
+    to: to.id,
+    variant: edge.variant,
+    path,
+    label: edge.label ?? "",
+    isBack: false,
+    ...(edge.state ? { state: edge.state } : {}),
+    ...relationOf(edge),
+  };
 }
 
 function relationOf(edge: CanvasEdge): Pick<PlacedEdge, "relation" | "emphasis"> {

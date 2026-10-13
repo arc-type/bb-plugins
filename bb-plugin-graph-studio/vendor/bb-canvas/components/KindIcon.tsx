@@ -98,6 +98,12 @@ export function describeNode(kind: CanvasNodeKind, childCount: number, meta?: Re
   // A message row is a turn's request or its reply, not another turn.
   if (kind === "turn" && meta?.from === "User") return "Request";
   if (kind === "turn" && meta?.from === "Agent") return "Reply";
+  // A crew that is "running" (not stopped) with every member idle must not
+  // read as active (BBP-214 feedback 1) — the member count alone can't tell
+  // the two apart, so the layer hands over how many are actually active.
+  if (kind === "crew" && typeof meta?.members === "number" && typeof meta?.active === "number") {
+    return `${KIND_LABEL.crew} · ${meta.active} of ${meta.members} active`;
+  }
   const parts = [KIND_LABEL[kind]];
   // An enriched turn's label is its first line, so the step count moves here.
   const steps = meta?.summaryCount;

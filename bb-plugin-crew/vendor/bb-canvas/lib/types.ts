@@ -45,12 +45,15 @@ export type CanvasFrame = {
 
 export type CanvasEdgeVariant = "flow" | "back" | "message";
 
-/** Whether this edge leads to a node that is running right now (animated).
- *  Undefined draws a plain `--border` line — the state before BBP-146, and
- *  also a finished or failed child since BBP-214 stage 1 ("taken" removed: a
- *  done step must not look like ongoing activity). A `message` edge never
- *  carries this: that is BBP-97's. */
-export type CanvasEdgeState = "now";
+/** Whether this edge leads to a node that is running right now (animated),
+ *  or sits on the path from the root to the current selection
+ *  (`"selected-path"`, BBP-220, solid and unanimated). Undefined draws a
+ *  plain `--border` line — the state before BBP-146, and also a finished or
+ *  failed child since BBP-214 stage 1 ("taken" removed: a done step must not
+ *  look like ongoing activity). `"now"` takes precedence over
+ *  `"selected-path"` when both would apply. A `message` edge never carries
+ *  this: that is BBP-97's. */
+export type CanvasEdgeState = "now" | "selected-path";
 
 /**
  * An edge beyond the tree itself: `layoutTree` draws the parent/child line for

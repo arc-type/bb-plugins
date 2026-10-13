@@ -28,6 +28,16 @@ vi.mock("@xyflow/react", async (importOriginal) => {
   };
 });
 
+// jsdom never lays elements out, so clientWidth/clientHeight are always 0 —
+// CanvasShell's start-fit effect (BBP-214 feedback 3 round 2) waits for a
+// non-zero size on its host element before fitting, which would hang every
+// test in this file that doesn't care about that gate. Scoped to this file
+// only (vitest isolates test files), so it can't affect e.g. Sidebar's own
+// real use of clientWidth in sidebar.test.tsx. The one describe block below
+// that cares about the gate overrides this per-element.
+Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, value: 800 });
+Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: 600 });
+
 const { CanvasShell, colorLightness, START_MIN_ZOOM, startFitOptions } = await import("@/components/CanvasShell");
 const { CanvasView } = await import("@/components/CanvasView");
 type CanvasEdge = import("@/lib/types").CanvasEdge;
@@ -85,13 +95,6 @@ describe("CanvasShell", () => {
     expect(card.className).toContain("bb-canvas-pulse");
   });
 
-  it("tints a neutral card by kind when colorMode is 'type'", () => {
-    render(
-      <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} colorMode="type" />,
-    );
-    const card = screen.getByRole("button", { name: new RegExp("^steps-impl — ") });
-    expect(card.style.border).not.toContain("var(--border)");
-  });
 });
 
 describe("CanvasShell frames (BBP-165)", () => {
@@ -288,6 +291,7 @@ describe("startFitOptions (BBP-196)", () => {
     const options = startFitOptions(tree) as Record<string, unknown>;
     expect(options.maxZoom).toBeUndefined();
   });
+
 });
 
 // BBP-196 fix: a restored project filter plus restored expanded threads/turns
@@ -376,5 +380,131 @@ describe("CanvasShell start-view refit across async growth (BBP-196)", () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(fitViewCalls.length).toBe(callsAfterZoom);
+  });
+});
+
+// BBP-214 feedback 3 round 2: the customer saw the start view rendered far
+// too small — root off-centre, barely readable — right after a reload in a
+// large (2539px-wide) window. Round 1's theory (smaller BBP-221 tier sizes
+// need a higher zoom floor) was backwards: a smaller fitted bounding box
+// needs *less* zoom-out, so it would bind the floor *less* often, not more
+// (confirmed by reading `getViewportForBounds` in `@xyflow/system`).
+//
+// The real mechanism: `@xyflow/react`'s own `useResizeHandler` measures
+// `domNode.offsetWidth/offsetHeight` once on mount and falls back to a
+// 500x500 guess if that reads 0 — plausible right after a reload, before
+// BB's own layout has given the host panel its real (here: much larger)
+// size. `fitView` run against that guess bakes a zoom meant for a 500x500
+// box into the viewport and nothing ever re-fits just because the container
+// later resizes, so the camera is stuck looking too small/off-centre.
+describe("CanvasShell start fit waits for a real host size (BBP-214 feedback 3 round 2)", () => {
+  const nodes: CanvasNode[] = [
+    { id: "root", kind: "agents", label: "bb", parentId: null },
+    { id: "project", kind: "project", label: "bb-plugins", parentId: "root" },
+  ];
+
+  function setHostSize(host: HTMLElement, width: number, height: number) {
+    Object.defineProperty(host, "clientWidth", { configurable: true, value: width });
+    Object.defineProperty(host, "clientHeight", { configurable: true, value: height });
+  }
+
+  function hostOf(container: HTMLElement): HTMLElement {
+    return container.querySelector(".react-flow")!.parentElement as HTMLElement;
+  }
+
+  it("does not fit while the host panel still measures 0x0, the way it can right after a reload", async () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
+    setHostSize(hostOf(container), 0, 0);
+
+    // Several frames, not just one: a real stall would otherwise slip
+    // through on a single early check.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(fitViewCalls.length).toBe(0);
+  });
+
+  it("fits once the host panel reports its real size, however large", async () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
+    const host = hostOf(container);
+    setHostSize(host, 0, 0);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(fitViewCalls.length).toBe(0);
+
+    // The host panel settles into its real, large size — as it would once
+    // BB's own layout catches up after a reload.
+    setHostSize(host, 2539, 1200);
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+  });
+
+  it("fits immediately when the host panel already has a real size on mount, same as before", async () => {
+    render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
+    // This file's own default stub (above) gives every element a non-zero
+    // size unless a test overrides it, so the gate should not add any delay
+    // to the common case.
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+  });
+
+  // Review follow-up (round 2, 01M4SPYFVTBJ3GB42MD80N83CJ): the two tests
+  // above exercise "large container starts at 0" in isolation, and the
+  // BBP-196 describe block above exercises "restored state + async growth"
+  // in isolation — but, because this file's own default stub gives every
+  // element a non-zero size from the start, neither test ever combines a
+  // host panel that starts at 0x0 with a restored `initialExpanded` plus an
+  // async `loadChildren` resolving after mount. That combination is exactly
+  // the customer's real scenario (a reload with previously expanded threads
+  // reopening, in a large window) and is the one case the size-gate and the
+  // nodes-growth-refit effects could in principle race each other on.
+  it("fits once, readably and on the grown tree, when restored state finishes loading before the host panel is sized", async () => {
+    let resolveLoad!: (value: { nodes: CanvasNode[] }) => void;
+    const loadChildren = () => new Promise<{ nodes: CanvasNode[] }>((resolve) => (resolveLoad = resolve));
+    const baseNodes: CanvasNode[] = [
+      { id: "root", kind: "agents", label: "bb", parentId: null },
+      { id: "project", kind: "project", label: "bb-plugins", parentId: "root" },
+      { id: "member", kind: "member", label: "a", parentId: "project" },
+      { id: "thread", kind: "thread", label: "Thread", parentId: "member", meta: { threadId: "t1" } },
+    ];
+
+    const { container } = render(
+      <CanvasView
+        nodes={baseNodes}
+        // A thread already expanded from a restored (persisted) state, like
+        // `localStorage` replaying a prior session's open nodes.
+        initialExpanded={new Set(["root", "project", "member", "thread"])}
+        loadChildren={loadChildren}
+        canLoadChildren={(node) => node.kind === "thread"}
+      />,
+    );
+    const host = hostOf(container);
+    setHostSize(host, 0, 0);
+
+    // The host panel is still 0x0 — same as a reload where BB's own layout
+    // hasn't settled yet — while the restored thread's children arrive.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(fitViewCalls.length).toBe(0);
+
+    resolveLoad({
+      nodes: [{ id: "turn-1", kind: "turn", label: "Turn · 1 step", parentId: "thread" }],
+    });
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    // The grown tree landed, but the host panel is still unsized — the gate
+    // must still hold the fit off rather than fit against the stale 500x500
+    // guess the moment it finally does get a size.
+    expect(fitViewCalls.length).toBe(0);
+
+    // The host panel settles into its real, large size — matching the
+    // customer's reported window — only now, after the restored children
+    // have already landed. The size-gate and the growth-refit must combine
+    // rather than deadlock each other: the view still ends up fitted and
+    // readable, framing root and its first level.
+    setHostSize(host, 2539, 1200);
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+    const lastCall = fitViewCalls[fitViewCalls.length - 1] as { nodes?: { id: string }[] };
+    const framedIds = (lastCall.nodes ?? []).map((n) => n.id);
+    expect(framedIds).toEqual(expect.arrayContaining(["root", "project"]));
   });
 });

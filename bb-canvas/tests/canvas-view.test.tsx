@@ -199,16 +199,6 @@ describe("CanvasView run/edit mode (BBP-166)", () => {
     expect(card(new RegExp("^outsider — ")).getAttribute("aria-disabled")).toBe("true");
   });
 
-  it("forces type colour mode while editing, without touching the saved status/type preference", () => {
-    const root = renderEditableView();
-    const neutral = card(new RegExp("^steps-impl — "));
-    expect(neutral.style.border).toContain("var(--border)"); // starts in status mode, neutral
-    fireEvent.click(card(new RegExp("^orch-lead — ")));
-    fireEvent.keyDown(root, { key: "e" });
-    expect(card(new RegExp("^steps-impl — ")).style.border).not.toContain("var(--border)");
-    fireEvent.keyDown(root, { key: "Escape" });
-    expect(card(new RegExp("^steps-impl — ")).style.border).toContain("var(--border)");
-  });
 });
 
 describe("CanvasView frame editor slot (BBP-170 WI6)", () => {

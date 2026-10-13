@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { layoutTree, type PlacedEdge, type TreeLayout } from "../lib/layout";
-import { NodeCard, type NodeCardColorMode, type NodeCardProps } from "./NodeCard";
+import { NodeCard, type NodeCardProps } from "./NodeCard";
 import { Frame, type FrameProps } from "./Frame";
 import { describeNode, KindIcon } from "./KindIcon";
 import { StatusEdge, type StatusEdgeData } from "./StatusEdge";
@@ -176,7 +176,14 @@ function wheelZoomDelta(event: { deltaY: number; deltaMode: number }): number {
 
 /** Lower bound for the first fit only (BBP-196): with 34 projects, fitting
  *  the whole tree shrank the cards below reading size. Manual zoom still goes
- *  down to 0.2, and "Collapse all"/`0` still fit the whole visible tree. */
+ *  down to 0.2, and "Collapse all"/`0` still fit the whole visible tree.
+ *
+ *  BBP-214 feedback 3 round 1 raised this to 0.75, reasoning that BBP-221's
+ *  smaller tier sizes shrank the fitted bounding box — backwards: a smaller
+ *  box needs *less* zoom-out to fit, so the floor should bind less often, not
+ *  more (`getViewportForBounds` in `@xyflow/system` confirms the formula).
+ *  Reverted to 0.6; the real cause was the start fit racing the host
+ *  container's first real-size measurement (see the fit effect below). */
 export const START_MIN_ZOOM = 0.6;
 
 /** The first fit frames the roots and their direct children, never deeper
@@ -206,10 +213,6 @@ export type CanvasShellProps = {
   /** Node and frame ids outside the frame being edited (BBP-166) — faded,
    *  locked, no `onSelect`. */
   dimmedIds?: ReadonlySet<string>;
-  /** "status" (default) borders a card by its run state; "type" tints a
-   *  neutral card by `kind` instead. An error or needs-input border always
-   *  wins over either. */
-  colorMode?: NodeCardColorMode;
   /** Nodes whose lazy load failed (BBP-179) — shown as a visible error on
    *  the card instead of an empty one, and retried on the next toggle. */
   failedLoads?: ReadonlySet<string>;
@@ -250,7 +253,6 @@ function toFlow(
   frames: readonly CanvasFrame[],
   selectedId: string | null | undefined,
   onSelect: ((id: string) => void) | undefined,
-  colorMode: NodeCardColorMode,
   dimmedIds: ReadonlySet<string>,
   expanded: ReadonlySet<string>,
   expandable: ReadonlySet<string>,
@@ -271,7 +273,6 @@ function toFlow(
       icon: <KindIcon kind={node.kind} />,
       status: node.status,
       kind: node.kind,
-      colorMode,
       selected: node.id === selectedId,
       onClick: onSelect ? () => onSelect(node.id) : undefined,
       dimmed: dimmedIds.has(node.id),
@@ -334,7 +335,6 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     frames = [],
     selectedId,
     onSelect,
-    colorMode: cardColorMode = "status",
     dimmedIds = EMPTY_DIMMED,
     failedLoads = EMPTY_DIMMED,
     className,
@@ -343,11 +343,14 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
 ) {
   const [hostRef, themeMode] = useHostColorMode();
   const flow = useReactFlow();
-  const layout = useMemo(() => layoutTree(nodes, expanded, edges, frames), [nodes, expanded, edges, frames]);
+  const layout = useMemo(
+    () => layoutTree(nodes, expanded, edges, frames, selectedId),
+    [nodes, expanded, edges, frames, selectedId],
+  );
   const { flowNodes, flowEdges } = useMemo(
     () =>
-      toFlow(layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads),
-    [layout, nodes, frames, selectedId, onSelect, cardColorMode, dimmedIds, expanded, expandable, onToggle, failedLoads],
+      toFlow(layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads),
+    [layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads],
   );
 
   const reducedMotion = usePrefersReducedMotion();
@@ -368,13 +371,34 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   // Re-fitting to `startFit` on every `nodes` change — not just the first —
   // keeps the start view matching the tree as it grows, until the user
   // interacts.
+  //
+  // BBP-214 feedback 3 (round 2): React Flow measures its own container via
+  // `domNode.offsetWidth/offsetHeight` on mount and falls back to a 500x500
+  // guess whenever that reads as 0 (`useResizeHandler` in `@xyflow/react`),
+  // with no re-measure until the next resize event. If our host panel is
+  // still 0-sized the instant this mounts — plausible right after a reload,
+  // before BB's own layout has settled — `fitView` bakes a zoom/pan meant
+  // for a 500x500 box into the viewport, and it never corrects itself: a
+  // later resize updates React Flow's stored dimensions, but nothing calls
+  // `fitView` again just because of that. Gate the fit on our *own* host
+  // element reporting a real size first, polling a frame at a time, so we
+  // never fit against a guess.
   useEffect(() => {
     if (userInteracted.current) return;
-    // A frame later: React Flow takes the new nodes into its store in its
-    // own effect, and fitting before that fits the old tree.
-    const frame = requestAnimationFrame(() => void flow.fitView(startFit));
+    let frame = 0;
+    const tryFit = () => {
+      const host = hostRef.current;
+      if (!host || host.clientWidth === 0 || host.clientHeight === 0) {
+        frame = requestAnimationFrame(tryFit);
+        return;
+      }
+      // A frame later still: React Flow takes the new nodes into its store
+      // in its own effect, and fitting before that fits the old tree.
+      frame = requestAnimationFrame(() => void flow.fitView(startFit));
+    };
+    frame = requestAnimationFrame(tryFit);
     return () => cancelAnimationFrame(frame);
-  }, [startFit, flow]);
+  }, [startFit, flow, hostRef]);
 
   useEffect(() => {
     if (fitRequest === 0) return;

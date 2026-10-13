@@ -3,23 +3,18 @@
 // field and the others do not — one shape, and the kind says itself through
 // the label and the icon slot the caller fills in.
 //
-// Status always wins the border: a failed or needs-input card must never
-// blend into the background, in either colour mode (BBP-146). Type colour is
-// the quieter signal underneath it, for a reader who wants to scan "what
-// kind of thing is this" before "is it in trouble".
+// Colour means state, nothing else (BBP-214): a neutral card outside an
+// error/running/waiting state never carries a colour of its own. `kind` is
+// kept only for the caller's icon and the card's ARIA label, not the border.
 import type { ReactNode } from "react";
 import type { CanvasNodeKind, CanvasStatus } from "../lib/types";
-
-export type NodeCardColorMode = "status" | "type";
+import { TIER_OF, TIER_TYPOGRAPHY, type Tier } from "../lib/tiers";
 
 export type NodeCardProps = {
   label: string;
   subtitle?: string;
   status?: CanvasStatus;
   kind?: CanvasNodeKind;
-  /** "status" (default) leaves a neutral card outside an error/running
-   *  state; "type" tints that same neutral card by `kind` instead. */
-  colorMode?: NodeCardColorMode;
   /** A single-colour line icon, left of the label. */
   icon?: ReactNode;
   selected?: boolean;
@@ -36,23 +31,6 @@ export type NodeCardProps = {
    *  simply has nothing — the destructive border wins even over a neutral
    *  `status`, and clicking the card (or its chevron) retries. */
   loadFailed?: boolean;
-};
-
-/** One fixed accent per kind — not derived from the id, unlike aside's
- *  per-project badge colours: every card of one kind should read the same
- *  everywhere, not get its own hash. */
-const KIND_COLOR: Record<CanvasNodeKind, string> = {
-  agents: "#64748b",
-  project: "#2563eb",
-  crew: "#7c3aed",
-  member: "#0d9488",
-  "graph-run": "#ea580c",
-  step: "#0891b2",
-  thread: "#db2777",
-  turn: "#65a30d",
-  "tool-call": "#d97706",
-  subagent: "#4f46e5",
-  "system-event": "#64748b",
 };
 
 const AMBER = "var(--warning)";
@@ -80,26 +58,45 @@ function ensurePulseStyles(): void {
   document.head.appendChild(style);
 }
 
-type Border = { border: string; pulse: boolean };
+type Visual = { border: string; pulse: boolean; background: string; radius: number };
 
-/** Status beats type beats neutral — an error or a running card must read
- *  the same regardless of which colour mode the toolbar is set to. */
-function borderFor(
-  status: CanvasStatus | undefined,
-  kind: CanvasNodeKind | undefined,
-  colorMode: NodeCardColorMode,
-  loadFailed: boolean,
-): Border {
-  if (loadFailed || status === "failed") return { border: `1.5px solid var(--destructive)`, pulse: false };
+const CARD_RADIUS: Record<Tier, number> = { group: 0, card: 8, row: 6 };
+
+/** A 15%-opacity wash of a status colour over the row's own fill — a plain
+ *  border reads too thin at 26px tall, so a row that needs the human also
+ *  gets a tinted background, not just an outline. */
+function tint(color: string): string {
+  return `color-mix(in oklab, ${color} 15%, var(--muted))`;
+}
+
+/** Only a state colours the border — a neutral card (idle, done, or no
+ *  status at all) always gets the same plain line, regardless of `kind`. A
+ *  group-tier node (agents/project/crew, BBP-221) is a headerless header row
+ *  and never borders at all, whatever its status — it does not pulse either,
+ *  the same accent a border would otherwise carry. A row-tier node (step,
+ *  tool-call, …, BBP-223) borders only for waiting/failed/loadFailed, each
+ *  paired with a tinted fill so the state still reads at its compact height;
+ *  anything else stays the plain `var(--muted)` fill, no border — a running
+ *  row is already shown by its incoming edge's "now" state. */
+function visualFor(status: CanvasStatus | undefined, tier: Tier, loadFailed: boolean): Visual {
+  const radius = CARD_RADIUS[tier];
+  // Transparent: a header row sits on the canvas, not on a card-coloured block.
+  if (tier === "group") return { border: "none", pulse: false, background: "transparent", radius };
+  const failed = loadFailed || status === "failed";
+  if (tier === "row") {
+    if (failed) return { border: `1.5px solid var(--destructive)`, pulse: false, background: tint("var(--destructive)"), radius };
+    if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false, background: tint(AMBER), radius };
+    return { border: "none", pulse: false, background: "var(--muted)", radius };
+  }
+  if (failed) return { border: `1.5px solid var(--destructive)`, pulse: false, background: "var(--card)", radius };
   // 2px, not 1.5: the gaps of a dash take half the ink away, and this is the
   // state that needs the human — it must not read weaker than "running".
-  if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false };
-  if (status === "escalated") return { border: `1.5px solid ${AMBER}`, pulse: false };
+  if (status === "waiting") return { border: `2px dashed ${AMBER}`, pulse: false, background: "var(--card)", radius };
+  if (status === "escalated") return { border: `1.5px solid ${AMBER}`, pulse: false, background: "var(--card)", radius };
   if (status === "running") {
-    return { border: `1.5px solid var(--primary)`, pulse: true };
+    return { border: `1.5px solid var(--primary)`, pulse: true, background: "var(--card)", radius };
   }
-  if (colorMode === "type" && kind) return { border: `1px solid ${KIND_COLOR[kind]}`, pulse: false };
-  return { border: `1px solid var(--border)`, pulse: false };
+  return { border: `1px solid var(--border)`, pulse: false, background: "var(--card)", radius };
 }
 
 export function NodeCard({
@@ -107,7 +104,6 @@ export function NodeCard({
   subtitle,
   status,
   kind,
-  colorMode = "status",
   icon,
   selected = false,
   onClick,
@@ -116,9 +112,16 @@ export function NodeCard({
   loadFailed = false,
 }: NodeCardProps) {
   ensurePulseStyles();
-  const { border, pulse } = borderFor(status, kind, colorMode, loadFailed);
+  const tier: Tier = kind !== undefined ? TIER_OF[kind] : "card";
+  const typo = TIER_TYPOGRAPHY[tier];
+  const { border, pulse, background, radius } = visualFor(status, tier, loadFailed);
   const errorText = loadFailed ? "Could not load activity" : undefined;
   const effectiveSubtitle = errorText ?? subtitle;
+  // Group: the counter rides beside the title, no second line — 28px has
+  // room for one. Card: counter/subtitle sits on its own line below. Row:
+  // no secondary text at all, however compact its title already is.
+  const showInline = tier === "group" && Boolean(effectiveSubtitle);
+  const showBelow = tier === "card" && Boolean(effectiveSubtitle);
   const card = (
     <button
       type="button"
@@ -133,12 +136,14 @@ export function NodeCard({
         gap: 8,
         width: "100%",
         height: "100%",
-        padding: "6px 10px",
-        borderRadius: 10,
+        padding: tier === "card" ? "6px 10px" : "0 10px",
+        borderRadius: radius,
         border,
-        outline: selected ? "2px solid var(--primary)" : "none",
-        outlineOffset: 1,
-        background: "var(--card)",
+        // --ring, the same ink as the selected-path edge, so ring and path read
+        // as one selection rather than as another "running" accent.
+        outline: selected ? "2px solid var(--ring)" : "none",
+        outlineOffset: 2,
+        background,
         color: "var(--foreground)",
         textAlign: "left",
         cursor: dimmed ? "default" : "pointer",
@@ -156,20 +161,49 @@ export function NodeCard({
           {icon}
         </span>
       ) : null}
-      <span style={{ display: "flex", minWidth: 0, flexDirection: "column", flex: 1 }}>
+      <span
+        style={{
+          display: "flex",
+          minWidth: 0,
+          flexDirection: tier === "card" ? "column" : "row",
+          alignItems: tier === "card" ? undefined : "baseline",
+          gap: tier === "group" ? 6 : undefined,
+          flex: 1,
+        }}
+      >
         <span
+          title={label}
           style={{
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            fontSize: 12,
-            fontWeight: 600,
+            fontSize: typo.titleSize,
+            fontWeight: typo.titleWeight,
+            minWidth: tier === "row" ? 0 : undefined,
+            flex: tier === "row" ? 1 : undefined,
           }}
         >
           {label}
         </span>
-        {effectiveSubtitle ? (
+        {showInline ? (
           <span
+            title={effectiveSubtitle}
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              fontSize: typo.subSize,
+              fontWeight: typo.subWeight,
+              color: "var(--muted-foreground)",
+            }}
+          >
+            {effectiveSubtitle}
+          </span>
+        ) : null}
+        {showBelow ? (
+          <span
+            title={effectiveSubtitle}
             style={{
               display: "flex",
               alignItems: "center",
@@ -177,7 +211,8 @@ export function NodeCard({
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
-              fontSize: 11,
+              fontSize: typo.subSize,
+              fontWeight: typo.subWeight,
               color: errorText ? "var(--destructive)" : "var(--muted-foreground)",
             }}
           >
@@ -202,18 +237,24 @@ export function NodeCard({
           </span>
         ) : null}
       </span>
-      {status ? (
-        <span
+      {status === "done" ? (
+        <svg
           aria-hidden
-          title={status}
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            flexShrink: 0,
-            background: "var(--muted-foreground)",
-          }}
-        />
+          data-bb-done-check
+          width={12}
+          height={12}
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="var(--muted-foreground)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0 }}
+        >
+          <path d="M3.5 8.5l3 3 6-7" />
+        </svg>
+      ) : tier !== "group" && status ? (
+        <StatusGlyph status={loadFailed ? "failed" : status} />
       ) : null}
     </button>
   );
@@ -276,5 +317,56 @@ export function NodeCard({
         {count !== null ? <span>{count}</span> : null}
       </button>
     </div>
+  );
+}
+
+const GLYPH_PATHS: Partial<Record<CanvasStatus, { color: string; d: string[] }>> = {
+  failed: { color: "var(--destructive)", d: ["M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5z", "M8 5v3.5M8 11h.01"] },
+  waiting: { color: AMBER, d: ["M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5z", "M8 4.75V8l2.25 1.5"] },
+  escalated: { color: AMBER, d: ["M8 1.75a6.25 6.25 0 1 0 0 12.5 6.25 6.25 0 0 0 0-12.5z", "M8 4.75V8l2.25 1.5"] },
+};
+
+/** The state, said once more at the trailing edge in its own colour: a dot
+ *  for running, a line icon for failed/waiting, nothing for idle. Groups
+ *  never get one — they carry no state colour at all. */
+function StatusGlyph({ status }: { status: CanvasStatus }) {
+  if (status === "running") {
+    return (
+      <span
+        aria-hidden
+        data-bb-status-glyph="running"
+        title="running"
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: "var(--primary)",
+          boxShadow: "0 0 0 3px color-mix(in oklab, var(--primary) 25%, transparent)",
+        }}
+      />
+    );
+  }
+  const glyph = GLYPH_PATHS[status];
+  if (!glyph) return null;
+  return (
+    <svg
+      aria-hidden
+      data-bb-status-glyph={status}
+      width={13}
+      height={13}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke={glyph.color}
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <title>{status}</title>
+      {glyph.d.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
   );
 }

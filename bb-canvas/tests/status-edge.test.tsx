@@ -27,10 +27,24 @@ describe("StatusEdge state (BBP-146)", () => {
     expect(path.getAttribute("class")).toContain("bb-canvas-edge-now");
   });
 
+  it("draws a solid, unanimated ring line for selected-path (BBP-220)", () => {
+    const path = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", state: "selected-path" });
+    expect(path.style.stroke).toBe("var(--ring)");
+    expect(path.style.strokeWidth).toBe("1.75");
+    expect(path.getAttribute("class")).not.toContain("bb-canvas-edge-now");
+    expect(path.style.strokeDasharray).toBe("");
+  });
+
   it("never carries a state on a message edge", () => {
     const path = edge({ variant: "message", path: "M 0 0 L 1 1", label: "" });
     expect(path.getAttribute("class")).not.toContain("bb-canvas-edge-now");
     expect(path.style.strokeDasharray).toBe("4 4");
+  });
+
+  it("negative: a highlighted 'flow' relation draws blue but never dashed (BBP-214 feedback 2)", () => {
+    const path = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", relation: true, emphasis: "highlight" });
+    expect(path.style.stroke).toBe("var(--primary)");
+    expect(path.style.strokeDasharray).toBe("");
   });
 
   it("injects its keyframes once, no matter how many edges render", () => {

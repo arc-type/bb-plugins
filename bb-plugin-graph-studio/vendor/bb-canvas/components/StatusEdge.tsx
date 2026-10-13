@@ -56,6 +56,7 @@ function ensureNowStyles(): void {
 
 function strokeFor(state: CanvasEdgeState | undefined, selected: boolean | undefined): { stroke: string; strokeWidth: number } {
   if (state === "now") return { stroke: "var(--primary)", strokeWidth: 2 };
+  if (state === "selected-path") return { stroke: "var(--ring)", strokeWidth: 1.75 };
   return { stroke: selected ? "var(--primary)" : "var(--border)", strokeWidth: selected ? 2 : 1.5 };
 }
 
