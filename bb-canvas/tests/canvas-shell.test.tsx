@@ -28,6 +28,16 @@ vi.mock("@xyflow/react", async (importOriginal) => {
   };
 });
 
+// jsdom never lays elements out, so clientWidth/clientHeight are always 0 —
+// CanvasShell's start-fit effect (BBP-214 feedback 3 round 2) waits for a
+// non-zero size on its host element before fitting, which would hang every
+// test in this file that doesn't care about that gate. Scoped to this file
+// only (vitest isolates test files), so it can't affect e.g. Sidebar's own
+// real use of clientWidth in sidebar.test.tsx. The one describe block below
+// that cares about the gate overrides this per-element.
+Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, value: 800 });
+Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: 600 });
+
 const { CanvasShell, colorLightness, START_MIN_ZOOM, startFitOptions } = await import("@/components/CanvasShell");
 const { CanvasView } = await import("@/components/CanvasView");
 type CanvasEdge = import("@/lib/types").CanvasEdge;
@@ -282,13 +292,6 @@ describe("startFitOptions (BBP-196)", () => {
     expect(options.maxZoom).toBeUndefined();
   });
 
-  it("keeps the floor above BBP-196's original 0.6 now that root/project nodes are the shorter 'group' tier (BBP-214)", () => {
-    // Root and its direct children (what startFitOptions frames) render as
-    // group-tier headers (28px) instead of the old uniform 64px card; the
-    // floor needs to be higher than before or the start view reads as too
-    // small on reload in a large window.
-    expect(START_MIN_ZOOM).toBeGreaterThan(0.6);
-  });
 });
 
 // BBP-196 fix: a restored project filter plus restored expanded threads/turns
@@ -377,5 +380,68 @@ describe("CanvasShell start-view refit across async growth (BBP-196)", () => {
     );
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(fitViewCalls.length).toBe(callsAfterZoom);
+  });
+});
+
+// BBP-214 feedback 3 round 2: the customer saw the start view rendered far
+// too small — root off-centre, barely readable — right after a reload in a
+// large (2539px-wide) window. Round 1's theory (smaller BBP-221 tier sizes
+// need a higher zoom floor) was backwards: a smaller fitted bounding box
+// needs *less* zoom-out, so it would bind the floor *less* often, not more
+// (confirmed by reading `getViewportForBounds` in `@xyflow/system`).
+//
+// The real mechanism: `@xyflow/react`'s own `useResizeHandler` measures
+// `domNode.offsetWidth/offsetHeight` once on mount and falls back to a
+// 500x500 guess if that reads 0 — plausible right after a reload, before
+// BB's own layout has given the host panel its real (here: much larger)
+// size. `fitView` run against that guess bakes a zoom meant for a 500x500
+// box into the viewport and nothing ever re-fits just because the container
+// later resizes, so the camera is stuck looking too small/off-centre.
+describe("CanvasShell start fit waits for a real host size (BBP-214 feedback 3 round 2)", () => {
+  const nodes: CanvasNode[] = [
+    { id: "root", kind: "agents", label: "bb", parentId: null },
+    { id: "project", kind: "project", label: "bb-plugins", parentId: "root" },
+  ];
+
+  function setHostSize(host: HTMLElement, width: number, height: number) {
+    Object.defineProperty(host, "clientWidth", { configurable: true, value: width });
+    Object.defineProperty(host, "clientHeight", { configurable: true, value: height });
+  }
+
+  function hostOf(container: HTMLElement): HTMLElement {
+    return container.querySelector(".react-flow")!.parentElement as HTMLElement;
+  }
+
+  it("does not fit while the host panel still measures 0x0, the way it can right after a reload", async () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
+    setHostSize(hostOf(container), 0, 0);
+
+    // Several frames, not just one: a real stall would otherwise slip
+    // through on a single early check.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(fitViewCalls.length).toBe(0);
+  });
+
+  it("fits once the host panel reports its real size, however large", async () => {
+    const { container } = render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
+    const host = hostOf(container);
+    setHostSize(host, 0, 0);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(fitViewCalls.length).toBe(0);
+
+    // The host panel settles into its real, large size — as it would once
+    // BB's own layout catches up after a reload.
+    setHostSize(host, 2539, 1200);
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+  });
+
+  it("fits immediately when the host panel already has a real size on mount, same as before", async () => {
+    render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
+    // The jsdom-wide default stub (tests/setup.ts) gives every element a
+    // non-zero size unless a test overrides it, so the gate should not add
+    // any delay to the common case.
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
   });
 });
