@@ -459,3 +459,78 @@ describe("the canvas page", () => {
     });
   });
 });
+
+describe("focus filter (BBP-240)", () => {
+  const crewLayer = {
+    contractVersion: 1,
+    crew: true,
+    nodes: [
+      { id: "agents", kind: "agents", label: "Agents", parentId: null },
+      { id: "project:p1", kind: "project", label: "Shop", parentId: "agents" },
+      { id: "crew:alpha", kind: "crew", label: "Alpha", parentId: "project:p1" },
+      { id: "member:a@alpha", kind: "member", label: "a", parentId: "crew:alpha", meta: { address: "a@alpha" } },
+      { id: "crew:beta", kind: "crew", label: "Beta", parentId: "project:p1" },
+      { id: "member:b@beta", kind: "member", label: "b", parentId: "crew:beta", meta: { address: "b@beta" } },
+    ],
+    edges: [],
+    expanded: ["agents", "project:p1", "crew:alpha", "crew:beta"],
+  };
+
+  it("shows only the focused crew's subtree, hiding the rest, and switches the label to Focus (1)", async () => {
+    canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
+    await screen.findByRole("button", { name: new RegExp("^a — ") });
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
+    expect(await screen.findByRole("button", { name: "Focus (1)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^a — ") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^b — ") })).toBeNull();
+  });
+
+  it("restores everything through Clear selection", async () => {
+    canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
+    await screen.findByRole("button", { name: new RegExp("^a — ") });
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
+    await screen.findByRole("button", { name: "Focus (1)" });
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(await screen.findByRole("button", { name: "All" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp("^b — ") })).toBeTruthy();
+  });
+
+  it("survives a reload (persisted in localStorage)", async () => {
+    canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
+    await screen.findByRole("button", { name: new RegExp("^a — ") });
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
+    await screen.findByRole("button", { name: "Focus (1)" });
+    cleanup();
+    canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
+    expect(await screen.findByRole("button", { name: "Focus (1)" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: new RegExp("^a — ") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: new RegExp("^b — ") })).toBeNull();
+  });
+
+  describe("live updates (BBP-200/197)", () => {
+    beforeEach(() => void vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
+
+    async function poll() {
+      await act(async () => {
+        vi.advanceTimersByTime(POLL_MS);
+      });
+    }
+
+    it("shows a notice with Show all once every focused node has vanished through a live update, instead of an empty canvas", async () => {
+      let nodes = crewLayer.nodes;
+      canvasPanel({ rpc: { canvasLayer: () => ({ ...crewLayer, nodes }) } });
+      await screen.findByRole("button", { name: new RegExp("^a — ") });
+      fireEvent.click(screen.getByRole("button", { name: "All" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
+      await screen.findByRole("button", { name: "Focus (1)" });
+      nodes = crewLayer.nodes.filter((node) => !node.id.includes("alpha"));
+      await poll();
+      expect(await screen.findByText(/Focused items are no longer available/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+      expect(await screen.findByRole("button", { name: new RegExp("^b — ") })).toBeTruthy();
+    });
+  });
+});

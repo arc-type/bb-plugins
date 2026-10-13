@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { ProjectFilter } from "../vendor/bb-canvas/components/ProjectFilter";
+import { FocusFilter } from "../vendor/bb-canvas/components/FocusFilter";
 import { mergeLayers, projectOfCrew } from "../vendor/bb-canvas/lib/layer";
 import {
   initialProjectFilter,
@@ -15,6 +16,12 @@ import {
   visibleProjectIds,
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
+import {
+  loadFocusFilter,
+  missingFocusIds,
+  saveFocusFilter,
+  visibleFocusIds,
+} from "../vendor/bb-canvas/lib/focus-filter";
 import type { CanvasEdge, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import { startVisiblePoll } from "../vendor/bb-canvas/lib/visible-poll";
 import {
@@ -141,6 +148,23 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     saveProjectFilter(ids);
   };
 
+  const [focusSelected, setFocusSelected] = useState<string[]>(() => loadFocusFilter());
+  const chooseFocus = (ids: string[]) => {
+    setFocusSelected(ids);
+    saveFocusFilter(ids);
+  };
+  // BBP-197: a live-update poll must not reset the focus — it is plain React
+  // state here, untouched by the layer-loading effect below.
+  const missingFocused = useMemo(
+    () => (layer ? missingFocusIds(layer.nodes, focusSelected) : []),
+    [layer, focusSelected],
+  );
+  const allFocusedMissing = focusSelected.length > 0 && missingFocused.length === focusSelected.length;
+  const visibleFocused = useMemo(
+    () => (layer ? visibleFocusIds(layer.nodes, focusSelected) : new Set<string>()),
+    [layer, focusSelected],
+  );
+
   useEffect(() => {
     if (shown === null) return;
     let cancelled = false;
@@ -207,6 +231,17 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   if (layer === null) {
     return <div className="p-4 text-sm text-muted-foreground">Loading…</div>;
   }
+  if (allFocusedMissing) {
+    return (
+      <div className="p-4 text-sm text-muted-foreground">
+        Focused items are no longer available.{" "}
+        <button type="button" onClick={() => chooseFocus([])}>
+          Show all
+        </button>
+      </div>
+    );
+  }
+  const shownNodes = layer.nodes.filter((node) => visibleFocused.has(node.id));
 
   return (
     <CanvasView
@@ -215,7 +250,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       // dropdown. `resetKey` resets only the canvas's own per-project-set
       // state; the toolbar keeps its identity across a filter change.
       resetKey={shownKey}
-      nodes={layer.nodes}
+      nodes={shownNodes}
       edges={layer.edges}
       initialExpanded={layer.expanded}
       surface="canvas"
@@ -272,7 +307,12 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
           node,
         )
       }
-      toolbar={<ProjectFilter projects={projects} selected={selected} onChange={choose} />}
+      toolbar={
+        <>
+          <ProjectFilter projects={projects} selected={selected} onChange={choose} />
+          <FocusFilter nodes={layer.nodes} selected={focusSelected} onChange={chooseFocus} />
+        </>
+      }
       onOpenThread={(threadId) => navigate.toThread(threadId)}
       onOpenRun={(runId) => openRun(runId)}
       // BB's navigate API has no way yet to open a thread scrolled to a

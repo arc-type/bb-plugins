@@ -403,4 +403,31 @@ describe("SearchableMultiSelect", () => {
       "Crews",
     ]);
   });
+
+  it("uses a custom summarize to override the default button label (BBP-240)", () => {
+    const summarize = (opts: typeof options, selected: readonly string[]) =>
+      selected.length === 0 ? "All" : `Focus (${selected.length})`;
+    const { rerender } = render(
+      <SearchableMultiSelect
+        label="Focus"
+        options={options}
+        selected={[]}
+        onChange={() => {}}
+        emptyText="Nothing yet."
+        summarize={summarize}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "All" })).toBeTruthy();
+    rerender(
+      <SearchableMultiSelect
+        label="Focus"
+        options={options}
+        selected={["p1", "p2"]}
+        onChange={() => {}}
+        emptyText="Nothing yet."
+        summarize={summarize}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Focus (2)" })).toBeTruthy();
+  });
 });

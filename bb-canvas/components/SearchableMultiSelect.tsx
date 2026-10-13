@@ -39,6 +39,10 @@ export type SearchableMultiSelectProps = {
   selected: readonly string[];
   onChange: (ids: string[]) => void;
   emptyText: string;
+  /** Overrides the default `${label}: ${summarizeSelection(...)}` button
+   *  text (BBP-240) — the Focus dropdown's "All"/"Focus (n)" scheme doesn't
+   *  fit that formula the way Projects' "All"/"<Name>"/"n selected" does. */
+  summarize?: (options: readonly SearchableMultiSelectOption[], selected: readonly string[]) => string;
 };
 
 const POPOVER_WIDTH = 240;
@@ -66,7 +70,14 @@ function highlight(name: string, query: string) {
   );
 }
 
-export function SearchableMultiSelect({ label, options, selected, onChange, emptyText }: SearchableMultiSelectProps) {
+export function SearchableMultiSelect({
+  label,
+  options,
+  selected,
+  onChange,
+  emptyText,
+  summarize,
+}: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [frozenOrder, setFrozenOrder] = useState<readonly SearchableMultiSelectOption[]>(options);
@@ -237,7 +248,7 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
         >
           <path d="M2 4h12l-4.5 5v4l-3-1.5V9z" />
         </svg>
-        {label}: {summarizeSelection(options, selected)}
+        {summarize ? summarize(options, selected) : `${label}: ${summarizeSelection(options, selected)}`}
       </button>
       {open ? (
         <div
