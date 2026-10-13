@@ -25,12 +25,15 @@ const STATUSES: { id: CanvasStatus; name: string }[] = [
 const CONTROL: CSSProperties = {
   font: "inherit",
   fontSize: 11,
-  padding: "2px 6px",
+  padding: "2px 8px",
   border: "1px solid var(--border)",
   borderRadius: 6,
   background: "var(--card)",
   color: "var(--foreground)",
 };
+
+// Label text is secondary to the value it names, like the pills' "Projects:".
+const FIELD: CSSProperties = { display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--muted-foreground)" };
 
 /** Empty or non-positive input means "no limit", never a canvas of zero. */
 function parseLimit(raw: string): number | null {
@@ -69,7 +72,7 @@ export function CanvasFilters({ projects, filter, onChange }: CanvasFiltersProps
           </option>
         ))}
       </select>
-      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+      <label style={FIELD}>
         Threads
         <input
           type="number"
@@ -77,10 +80,10 @@ export function CanvasFilters({ projects, filter, onChange }: CanvasFiltersProps
           aria-label="Thread limit"
           value={filter.limit ?? ""}
           onChange={(event) => set({ limit: parseLimit(event.target.value) })}
-          style={{ ...CONTROL, width: 56 }}
+          style={{ ...CONTROL, width: 48 }}
         />
       </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+      <label style={FIELD}>
         Turns
         <input
           type="number"
@@ -88,15 +91,16 @@ export function CanvasFilters({ projects, filter, onChange }: CanvasFiltersProps
           aria-label="Turns per thread"
           value={filter.turnsPerThread ?? ""}
           onChange={(event) => set({ turnsPerThread: parseLimit(event.target.value) })}
-          style={{ ...CONTROL, width: 56 }}
+          style={{ ...CONTROL, width: 48 }}
         />
       </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+      <label style={FIELD}>
         <input
           type="checkbox"
           aria-label="Hide archived"
           checked={filter.hideArchived}
           onChange={(event) => set({ hideArchived: event.target.checked })}
+          style={{ margin: 0, accentColor: "var(--primary)" }}
         />
         Hide archived
       </label>

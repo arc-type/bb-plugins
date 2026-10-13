@@ -133,6 +133,15 @@ describe("the Canvas filters", () => {
     expect(card("Newer")).toBeTruthy();
   });
 
+  it("resets the filters from the empty state", async () => {
+    const twoDays = Date.now() - 48 * 3_600_000;
+    canvasPanel(sdk([row("t1", "p1", "Stale", { updatedAt: twoDays })]));
+    expect(await screen.findByRole("button", { name: /^Stale — / })).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Time window" }), { target: { value: "24h" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Reset filters" }));
+    expect(await screen.findByRole("button", { name: /^Stale — / })).toBeTruthy();
+  });
+
   it("offers a turns-per-thread limit", async () => {
     canvasPanel(sdk([row("t1", "p1", "Live")]));
     const input = (await screen.findByRole("spinbutton", { name: "Turns per thread" })) as HTMLInputElement;

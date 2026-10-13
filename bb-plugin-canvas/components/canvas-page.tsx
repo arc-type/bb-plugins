@@ -162,7 +162,16 @@ export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focus
     return (
       <div className="flex flex-col">
         <div className="flex flex-wrap items-center gap-1.5 px-2 py-1">{toolbar}</div>
-        <div className="p-4 text-sm text-muted-foreground">No threads match the filters.</div>
+        <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+          No threads match the filters.
+          <button
+            type="button"
+            onClick={() => changeFilter({ ...DEFAULT_THREAD_FILTER, projectIds: [] })}
+            className="rounded px-1 text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary"
+          >
+            Reset filters
+          </button>
+        </div>
       </div>
     );
   const visible = visibleFocusIds(layer.nodes, focusIds);
@@ -177,7 +186,7 @@ export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focus
             role="tab"
             aria-selected={tab === id}
             onClick={() => setTab(id)}
-            className={`px-2 py-1 text-xs ${tab === id ? "border-b-2 border-primary text-foreground" : "text-muted-foreground"}`}
+            className={`-mb-px border-b-2 px-2 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary ${tab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             {id === "graph" ? "Graph" : "Chat"}
           </button>

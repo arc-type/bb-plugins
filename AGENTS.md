@@ -11,7 +11,7 @@ tooling on top — they share no dependency.
 | `bb-plugin-listen` | `listen` | offline speech in and out, 77 tests |
 | `bb-plugin-slim-nav` | `slim-nav` | finished, resting, no tests |
 | `bb-plugin-recall` | `recall` | semantic search over threads and tasks via qmd, new, 50 tests |
-| `bb-plugin-canvas` | `canvas` | every thread as one navigable tree, new, 38 tests |
+| `bb-plugin-canvas` | `canvas` | every thread as one navigable tree, new, 39 tests |
 
 ## Where to work
 
