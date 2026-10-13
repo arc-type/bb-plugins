@@ -343,7 +343,7 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
 
   bb.agents.registerTool({
     name: "crew_work_create",
-    description: "Create a work item in your crew's queue. owner: member key (optional); tier p0 (urgent) … p3; due: ISO time.",
+    description: "Create a work item in your crew's queue. owner: member key (optional); tier p0 (urgent) … p3; due: ISO time. Notifies the owner; no separate crew_send needed.",
     parameters: z.object({
       title: z.string().min(1).max(200),
       body: z.string().max(20_000).optional(),

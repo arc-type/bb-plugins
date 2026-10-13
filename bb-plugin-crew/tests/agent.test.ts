@@ -192,6 +192,24 @@ describe("crew tools", () => {
     expect(empty).toBe("No messages to you yet.");
   });
 
+  it("crew_work_create notifies the owner exactly once; negative: the creator as owner gets no message (BBP-259)", async () => {
+    const env = await withHost();
+    const before = env.store.listMessages().length;
+    await env.harness.behavior.callAgentTool("crew_work_create", { title: "fix it", owner: "dev-review" }, { threadId: env.threads["dev-impl"]! });
+    const sent = env.store.listMessages().slice(before);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.toAddress).toBe("dev-review@trio");
+    await env.harness.behavior.callAgentTool("crew_work_create", { title: "mine", owner: "dev-impl" }, { threadId: env.threads["dev-impl"]! });
+    expect(env.store.listMessages().slice(before)).toHaveLength(1);
+  });
+
+  it("crew_work_create's description says the owner is notified, so no crew_send is needed (BBP-259)", async () => {
+    const { harness, threads, meta } = await withHost();
+    const config = await harness.behavior.resolveAgentConfiguration(context(threads["dev-impl"]!, meta("dev-impl")));
+    const tool = config.tools.find((entry) => entry.name === "crew_work_create")!;
+    expect(tool.description).toContain("Notifies the owner; no separate crew_send needed.");
+  });
+
   it("negative: a thread that is not a member gets an error from every tool, whatever its metadata says", async () => {
     const env = await withHost();
     for (const name of TOOL_NAMES) {
