@@ -45,8 +45,14 @@ function leadOf(groups: ReturnType<typeof groupsOf>): YAMLMap | null {
   return null;
 }
 
-export function addMemberToFile(yaml: string, member: NewMember): string {
+/** The member id without a leading "<group>-": a lead that passes "steps-impl3" for group steps means "impl3" (BBP-248). */
+export function memberIdIn(group: string, id: string): string {
+  return id.startsWith(`${group}-`) && id.length > group.length + 1 ? id.slice(group.length + 1) : id;
+}
+
+export function addMemberToFile(yaml: string, input: NewMember): string {
   const doc = parse(yaml);
+  const member = { ...input, id: memberIdIn(input.group, input.id) };
   if (!/^[A-Za-z0-9][\w-]*$/.test(member.group) || !/^[A-Za-z0-9][\w-]*$/.test(member.id)) {
     throw new CrewFileEditError("Group and member ids are letters, digits, '-' and '_' only.");
   }
@@ -74,10 +80,12 @@ export function addMemberToFile(yaml: string, member: NewMember): string {
     if (value !== undefined && value !== "") entry[key] = value;
   }
   // Members carry their own provider and model. Whatever the caller left out
-  // is copied from the lead and written out, so the new member stands alone.
-  const lead = leadOf(groups);
+  // is copied from the first member of the same group (from the lead when the
+  // group is new) and written out, so the new member stands alone.
+  const sibling = members.items.find(isMap) as YAMLMap | undefined;
+  const source = sibling ?? leadOf(groups);
   for (const key of ["provider", "model"] as const) {
-    if (entry[key] === undefined && lead?.get(key) !== undefined) entry[key] = lead.get(key);
+    if (entry[key] === undefined && source?.get(key) !== undefined) entry[key] = source.get(key);
   }
   members.add(doc.createNode(entry));
   return doc.toString({ lineWidth: 0 });

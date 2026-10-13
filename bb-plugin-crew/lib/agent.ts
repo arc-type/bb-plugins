@@ -8,6 +8,7 @@
 import type { BbPluginApi, PluginAgentConfiguration, PluginAgentToolResult } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { formatChannelLine } from "./channel";
+import { memberIdIn } from "./crewfile";
 import { AddressError, messagingRules, skillsText, type Sender } from "./delivery";
 import { directoryRefusal, formatDirectory } from "./directory";
 import { formatContextShare } from "./format";
@@ -545,13 +546,11 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
 
   bb.agents.registerTool({
     name: "crew_add_member",
-    description: "Lead only: add a member to your crew (the crew file changes, then apply spawns its thread). permissions full asks the human first.",
+    description: "Lead only: add a member to your crew (the crew file changes, then apply spawns its thread). Provider and model come from the crew file (the group's first member, else the lead). permissions full asks the human first.",
     parameters: z.object({
       group: z.string().min(1).max(64),
       id: z.string().min(1).max(64),
       role: z.string().max(2000).optional(),
-      provider: z.string().max(80).optional(),
-      model: z.string().max(120).optional(),
       permissions: z.enum(["ask", "accept-edits", "auto", "full"]).optional(),
       kickoff: z.string().max(4000).optional(),
     }),
@@ -560,7 +559,7 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
       leadOnly(async (self) => {
         const file = store.crewFile(self.crew.id);
         const parsed = file ? (parseCrewYaml(file.yaml).value as { memberKeys?: unknown } | null) : null;
-        const key = memberKey(memberKeysOf(parsed?.memberKeys), params.group, params.id);
+        const key = memberKey(memberKeysOf(parsed?.memberKeys), params.group, memberIdIn(params.group, params.id));
         let confirmFull = false;
         if (params.permissions === "full") {
           if (!options.confirm) return failure("permissions: full needs the human's confirmation, which is not available here. Ask the human to run bb crew add-member … --confirm-full.");

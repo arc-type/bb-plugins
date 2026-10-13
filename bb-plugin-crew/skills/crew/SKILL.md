@@ -22,6 +22,7 @@ bb crew plan <crew|template|file.yaml>    # read-only: one action per member
 bb crew apply <crew|template|file.yaml> [--fresh <member>…] [--confirm-full]
 bb crew list                              # crews of the project with status
 bb crew show <crew>                       # members, provider/model, thread, shift
+bb crew show <crew> --against <file|template>  # plus one "Drift from file" line (plan prints it too)
 bb crew ps [<crew>]                       # same, for all crews when none is named
 bb crew stop <crew> [--archive]           # stop running turns; --archive archives
 bb crew delete <crew> [--threads archive|delete|keep] [--force]   # remove a stopped crew for good
@@ -249,7 +250,9 @@ bb crew import crew.yaml                    # stores the file, prints the plan, 
 Lead-only tools: `crew_add_member`, `crew_remove_member`, `crew_reset`,
 `crew_status`. Other members do not get them, and a call from an older
 session is refused. Removing a member and adding one with `full` ask the
-human in the lead's thread first (a Confirm / Decline form).
+human in the lead's thread first (a Confirm / Decline form). `crew_add_member`
+takes provider and model from the crew file (the group's first member, else the
+lead), never from the caller.
 
 In chat, `::crew{crew="<name>"}` renders a live card of the crew. The thread
 header of a member thread shows `address · Shift n` with Reset, Handover and

@@ -15,7 +15,7 @@ import type { MemberResult } from "./sync";
 
 export const CLI_COMMANDS = [
   { name: "list", summary: "List the crews of the project", usage: "bb crew list [--project <id|name>]" },
-  { name: "show", summary: "Show a crew: file version, status, members", usage: "bb crew show <crew>" },
+  { name: "show", summary: "Show a crew: file version, status, members", usage: "bb crew show <crew> [--against <crew|template|file.yaml>]" },
   { name: "plan", summary: "Preview what apply would do (read-only)", usage: "bb crew plan <crew|template|file.yaml> [--fresh <member>…] [--confirm-full] [--confirm-gates]" },
   {
     name: "apply",
@@ -130,6 +130,7 @@ const VALUE_OPTIONS = new Set([
   "--permissions",
   "--kickoff",
   "--threads",
+  "--against",
 ]);
 
 export function parseArgs(argv: readonly string[]): Parsed {
@@ -577,6 +578,7 @@ export async function runCli(
             : [];
         if (!target && command === "show") return fail("Usage: bb crew show <crew>");
         if (crews.length === 0) return fail(target ? `No crew "${target}" in this project.` : "No crews in this project.");
+        const against = command === "show" && args.values.against ? await service.resolveFile(projectId, args.values.against, ctx.cwd) : null;
         const lines: string[] = [];
         for (const crew of crews) {
           lines.push(`${crew.name}  ${crew.status}  file v${crew.fileVersion}`);
@@ -594,6 +596,7 @@ export async function runCli(
               }`,
             );
           }
+          if (against) lines.push(`  ${await service.driftFrom(crew, against.yaml)} (against ${against.label})`);
         }
         return ok(lines);
       }
@@ -654,7 +657,7 @@ export async function runCli(
         const file = await service.resolveFile(projectId, target, ctx.cwd);
         const options = { fresh: args.fresh, confirmFull: args.flags.has("--confirm-full"), confirmGates: args.flags.has("--confirm-gates") };
         if (command === "plan") {
-          const { validation, items, limit, behind, remote } = await service.plan(projectId, file.yaml, options);
+          const { validation, items, limit, behind, remote, drift } = await service.plan(projectId, file.yaml, options);
           const lines = [
             `Plan for ${validation.spec?.name ?? target} (${file.label})`,
             ...formatProblems(validation.problems),
@@ -662,6 +665,7 @@ export async function runCli(
             ...(limit ? [`  ${limit}`] : []),
             ...(behind !== null ? [`  Crew branch is ${behind} commit(s) behind ${validation.spec?.baseBranch ?? "main"}`] : []),
             ...remote.map((line) => `  ${line}`),
+            ...(drift ? [`  ${drift}`] : []),
           ];
           return hasErrors(validation.problems) ? fail(lines.join("\n")) : ok(lines);
         }
