@@ -364,3 +364,69 @@ describe("kickoff brief", () => {
     expect(kickoffBrief(validation.spec!, validation.members[0]!, validation.members)).toContain("Wait for instructions from your lead.");
   });
 });
+
+describe("rename (memberKeys: short)", () => {
+  const shortYaml = (overrides = {}) =>
+    trioYaml({
+      memberKeys: "short",
+      links: [
+        { from: "lead", to: "impl", kind: "assigns_to" },
+        { from: "lead", to: "review", kind: "assigns_to" },
+      ],
+      ...overrides,
+    });
+
+  it("plan: a member with the same group and id under a new key is one rename item, not remove + spawn", async () => {
+    const { service } = setup();
+    await service.apply(PROJECT, trioYaml());
+    const { items } = await service.plan(PROJECT, shortYaml());
+    expect(items.map((i) => [i.action, i.from ?? null, i.key])).toEqual([
+      ["rename", "orch-lead", "lead"],
+      ["rename", "dev-impl", "impl"],
+      ["rename", "dev-review", "review"],
+    ]);
+    expect(items[1]!.reasons[0]).toBe("rename dev-impl → impl");
+  });
+
+  it("apply: renames in place — same threads, new titles, work items follow, old key is gone", async () => {
+    const { service, store, port } = setup();
+    const first = await service.apply(PROJECT, trioYaml());
+    const crewId = first.crew.id;
+    const implThread = first.results[1]!.threadId!;
+    store.insertWork({ id: "wi_1", crewId, title: "t", body: "b", ownerMember: memberRowId(crewId, "dev-impl"), createdBy: "x", tier: "p2", dueAt: null, taskKey: null });
+    const spawnsBefore = port.countCalls("spawn");
+
+    const { results } = await service.apply(PROJECT, shortYaml());
+
+    expect(results.map((r) => [r.key, r.result])).toEqual([
+      ["lead", "renamed"],
+      ["impl", "renamed"],
+      ["review", "renamed"],
+    ]);
+    expect(port.countCalls("spawn")).toBe(spawnsBefore);
+    expect(results[1]!.threadId).toBe(implThread);
+    expect(port.threads.get(implThread)!.title).toBe("impl@trio");
+    expect(store.getWork("wi_1")!.ownerMember).toBe(memberRowId(crewId, "impl"));
+    expect(store.currentBinding(memberRowId(crewId, "impl"))!.threadId).toBe(implThread);
+    expect(store.listMembers(crewId, true).map((m) => m.key)).toEqual(["lead", "impl", "review"]);
+    expect(store.getCrew(crewId)!.leadMemberId).toBe(memberRowId(crewId, "lead"));
+  });
+
+  it("negative: a member deleted from the file is still remove", async () => {
+    const { service } = setup();
+    await service.apply(PROJECT, shortYaml());
+    const yaml = shortYaml({
+      groups: [
+        { id: "orch", members: [{ id: "lead", lead: true, role: "Plans." }] },
+        { id: "dev", members: [{ id: "impl", role: "Builds." }] },
+      ],
+      links: [{ from: "lead", to: "impl", kind: "assigns_to" }],
+    });
+    const { items } = await service.plan(PROJECT, yaml);
+    expect(items.map((i) => [i.action, i.key])).toEqual([
+      ["reuse", "lead"],
+      ["reuse", "impl"],
+      ["remove", "review"],
+    ]);
+  });
+});

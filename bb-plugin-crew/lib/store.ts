@@ -668,7 +668,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
       lead: boolean;
       config: Record<string, unknown>;
     }): MemberRow {
-      const id = memberRowId(crewId, `${input.groupId}-${input.memberId}`);
+      const id = memberRowId(crewId, keyFromAddress(input.address));
       db.prepare(
         `INSERT INTO members (id, crew_id, group_id, member_id, address, lead, config_json, removed_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
@@ -676,6 +676,25 @@ export function createStore(db: Database, now: () => number = Date.now) {
            config_json = excluded.config_json, removed_at = NULL`,
       ).run(id, crewId, input.groupId, input.memberId, input.address, input.lead ? 1 : 0, JSON.stringify(input.config));
       return this.getMember(id)!;
+    },
+    /**
+     * Rename a member in place (memberKeys switch): its row gets the new key and
+     * address, and every row that points at it follows, in one transaction.
+     * Messages keep their stored addresses; links are rewritten by apply.
+     */
+    renameMember(crewId: string, fromKey: string, toKey: string, address: string): void {
+      const from = memberRowId(crewId, fromKey);
+      const to = memberRowId(crewId, toKey);
+      db.transaction(() => {
+        db.prepare("UPDATE members SET id = ?, address = ? WHERE id = ?").run(to, address, from);
+        db.prepare("UPDATE crews SET lead_member_id = ? WHERE lead_member_id = ?").run(to, from);
+        for (const table of ["member_bindings", "member_ops", "member_needs", "member_env", "member_state", "handovers", "graph_runs"]) {
+          db.prepare(`UPDATE ${table} SET member_id = ? WHERE member_id = ?`).run(to, from);
+        }
+        db.prepare("UPDATE work_items SET owner_member = ? WHERE owner_member = ?").run(to, from);
+        db.prepare("UPDATE messages SET from_member = ? WHERE from_member = ?").run(to, from);
+        db.prepare("UPDATE messages SET to_member = ? WHERE to_member = ?").run(to, from);
+      })();
     },
     getMember(id: string): MemberRow | null {
       const row = db.prepare("SELECT * FROM members WHERE id = ?").get(id) as Raw | undefined;
