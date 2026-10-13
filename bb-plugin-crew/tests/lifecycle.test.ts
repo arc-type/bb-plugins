@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import YAML from "yaml";
 import { addMemberToFile, CrewFileEditError, removeMemberFromFile } from "../lib/crewfile";
 import { AddressError } from "../lib/delivery";
 import { openLayout } from "../lib/layout";
@@ -310,6 +311,19 @@ describe("crew file edits", () => {
   it("negative: unknown member, bad ids", () => {
     expect(() => removeMemberFromFile(base, "g-z")).toThrow(/no member g-z/);
     expect(() => addMemberToFile(base, { group: "g", id: "a.b" })).toThrow(/letters, digits/);
+  });
+  it("an id that already carries the group prefix is not prefixed twice (BBP-248)", () => {
+    const added = addMemberToFile(base, { group: "g", id: "g-c" });
+    expect(added).toMatch(/- id: c\n/);
+    expect(added).not.toContain("g-g-c");
+    expect(() => addMemberToFile(base, { group: "g", id: "g-b" })).toThrow(/g-b is already in the crew file/);
+  });
+  it("a new member takes provider and model from its group sibling, a new group from the lead (BBP-248)", () => {
+    const mixed = base.replace("        lead: true\n", "        lead: true\n        model: opus\n").replace("links:", "  - id: h\n    members:\n      - id: x\n        provider: q\n        model: sonnet\nlinks:");
+    const sibling = YAML.parse(addMemberToFile(mixed, { group: "h", id: "y" })).groups[1].members[1];
+    expect(sibling).toMatchObject({ id: "y", provider: "q", model: "sonnet" });
+    const fresh = YAML.parse(addMemberToFile(mixed, { group: "k", id: "c" })).groups[2].members[0];
+    expect(fresh).toMatchObject({ id: "c", model: "opus" });
   });
   it("memberKeys: short — remove by member id; the same id in another group is refused", () => {
     const short = base.replace("name: c\n", "name: c\nmemberKeys: short\n").replace("{ from: g-a, to: g-b,", "{ from: a, to: b,");

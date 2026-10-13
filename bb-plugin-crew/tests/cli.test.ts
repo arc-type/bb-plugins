@@ -278,6 +278,33 @@ describe("bb crew (E3)", () => {
   });
 });
 
+describe("bb crew — drift from the file (BBP-248)", () => {
+  const changed = trioYaml().replaceAll("claude-haiku-4-5-20251001", "claude-sonnet-4-5");
+  const fileOnly = (service: ReturnType<typeof setup>["service"]) => {
+    const original = service.resolveFile.bind(service);
+    (service as unknown as { resolveFile: typeof service.resolveFile }).resolveFile = async (projectId, ref, cwd) =>
+      ref === "other.yaml" ? { yaml: changed, source: "file", label: "other.yaml" } : original(projectId, ref, cwd);
+  };
+
+  it("plan of an existing crew prints the drift line; a fresh crew has none", async () => {
+    const { service, port } = setup();
+    expect((await runCli(service, ["plan", "trio"], ctx, project)).stdout).not.toContain("Drift from file");
+    await running(service, port);
+    expect((await runCli(service, ["plan", "trio"], ctx, project)).stdout).toContain("Drift from file: none; stored file v1");
+    fileOnly(service);
+    expect((await runCli(service, ["plan", "other.yaml"], ctx, project)).stdout).toMatch(/Drift from file: models .*orch-lead \(claude-haiku-4-5-20251001→claude-sonnet-4-5\)/);
+  });
+
+  it("show --against prints the same line; show alone does not", async () => {
+    const { service, port } = setup();
+    await running(service, port);
+    fileOnly(service);
+    expect((await runCli(service, ["show", "trio"], ctx, project)).stdout).not.toContain("Drift from file");
+    const against = await runCli(service, ["show", "trio", "--against", "other.yaml"], ctx, project);
+    expect(against.stdout).toMatch(/Drift from file: models .*dev-impl \(claude-haiku-4-5-20251001→claude-sonnet-4-5\).*; stored file v1/);
+  });
+});
+
 describe("bb crew — E4 lifecycle commands", () => {
   const run = (service: ReturnType<typeof setup>["service"], argv: string[]) => runCli(service, argv, ctx, project);
 

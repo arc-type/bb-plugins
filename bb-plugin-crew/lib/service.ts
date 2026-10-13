@@ -1,5 +1,6 @@
 // One service behind the CLI and the RPC, so `bb crew apply` and the panel
 // can never behave differently. Pure over its dependencies.
+import { formatDrift } from "./format";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { createActivityTracker, type ActivityView } from "./activity";
@@ -366,7 +367,14 @@ export function createCrewService(deps: ServiceDeps) {
       const crew = validation.spec ? store.findCrew(projectId, validation.spec.name) : null;
       const behind = crew ? await integration.behind(crew) : null;
       const remote = validation.spec ? await integration.remoteHosts(projectId, crew, validation.members) : [];
-      return { validation: { ...validation, problems: [...validation.problems, ...extra.problems] }, items, limit: extra.limit, behind, remote };
+      const drift = crew ? formatDrift(await describeMembers(ctx, crew), validation.members, crew.fileVersion) : null;
+      return { validation: { ...validation, problems: [...validation.problems, ...extra.problems] }, items, limit: extra.limit, behind, remote, drift };
+    },
+
+    /** `bb crew show --against`: the drift line of a crew against any crew file (BBP-248). */
+    async driftFrom(crew: CrewRow, yaml: string): Promise<string> {
+      const validation = await validate(crew.projectId, yaml, true, true);
+      return formatDrift(await describeMembers(ctx, crew), validation.members, crew.fileVersion);
     },
 
     async apply(

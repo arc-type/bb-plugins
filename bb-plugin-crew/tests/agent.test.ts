@@ -240,6 +240,18 @@ describe("lead-only tools (§4.5)", () => {
     expect(status).toContain("- orch-lead (lead) shift 1");
   });
 
+  it("a model the lead passes is ignored: the new member takes its group's, and a doubled prefix is dropped (BBP-248)", async () => {
+    const env = await withHost();
+    const added = await env.harness.behavior.callAgentTool("crew_add_member", { group: "dev", id: "dev-docs", provider: "codex", model: "gpt-x" }, { threadId: env.threads["orch-lead"]! });
+    expect(isError(added)).toBe(false);
+    expect(text(added)).toContain("spawned dev-docs@trio");
+    const yaml = env.store.crewFile(env.crew.id)!.yaml;
+    expect(yaml).not.toContain("dev-dev-docs");
+    expect(yaml).not.toContain("gpt-x");
+    expect(yaml).not.toContain("codex");
+    expect(env.store.listMembers(env.crew.id).find((member) => member.key === "dev-docs")).toBeDefined();
+  });
+
   it("removing a member asks the human: confirmed → archived; declined → nothing changes", async () => {
     const asked: string[] = [];
     let answer = false;
