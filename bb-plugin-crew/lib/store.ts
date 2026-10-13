@@ -466,12 +466,15 @@ const toCrew = (row: Raw): CrewRow => ({
   updatedAt: Number(row.updated_at),
 });
 
+/** A member's key is the part of its stored address before `@`. */
+const keyFromAddress = (address: unknown): string => String(address).split("@")[0];
+
 const toMember = (row: Raw): MemberRow => ({
   id: String(row.id),
   crewId: String(row.crew_id),
   groupId: String(row.group_id),
   memberId: String(row.member_id),
-  key: `${row.group_id}-${row.member_id}`,
+  key: keyFromAddress(row.address),
   address: String(row.address),
   lead: Number(row.lead) === 1,
   config: JSON.parse(String(row.config_json)) as Record<string, unknown>,
@@ -1406,13 +1409,13 @@ export function createStore(db: Database, now: () => number = Date.now) {
       return (
         db
           .prepare(
-            `SELECT b.member_id, b.thread_id, b.shift, b.retired_at, m.group_id, m.member_id AS mid, m.lead FROM member_bindings b
+            `SELECT b.member_id, b.thread_id, b.shift, b.retired_at, m.address, m.lead FROM member_bindings b
              JOIN members m ON m.id = b.member_id WHERE m.crew_id = ? ORDER BY m.rowid, b.shift`,
           )
           .all(crewId) as Raw[]
       ).map((row) => ({
         memberId: String(row.member_id),
-        key: `${row.group_id}-${row.mid}`,
+        key: keyFromAddress(row.address),
         lead: Number(row.lead) === 1,
         threadId: String(row.thread_id),
         shift: Number(row.shift),
