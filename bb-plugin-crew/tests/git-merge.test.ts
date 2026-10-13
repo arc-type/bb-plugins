@@ -73,13 +73,37 @@ describe("GitBackend.merge without the working tree (BBP-269)", () => {
     expect(git(main, "stash", "list")).toBe("");
   });
 
-  it("negative: a dirty main checkout is still refused and left untouched", async () => {
+  it("dirty main checkout: the merge is parked on refs/crew/integration/main, main and the files stay put (BBP-270)", async () => {
     const { main, wt } = repo();
     commit(wt, "a.txt", "crew\n");
     writeFileSync(join(main, "b.txt"), "wip\n");
     const before = git(main, "rev-parse", "main");
-    expect(await createLocalGit().merge(wt, "bb/x", "main", "m")).toMatchObject({ ok: false, conflict: false, detail: expect.stringContaining("uncommitted") });
+    const outcome = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    expect(outcome).toMatchObject({ ok: true, parked: true });
+    expect(git(main, "rev-parse", "refs/crew/integration/main")).toBe(outcome.ok ? outcome.commit : "");
+    expect(git(main, "rev-parse", "refs/crew/integration/main^1")).toBe(before);
     expect(git(main, "rev-parse", "main")).toBe(before);
     expect(readFileSync(join(main, "b.txt"), "utf8")).toBe("wip\n");
+    expect(readFileSync(join(main, "a.txt"), "utf8")).toBe("a\n");
+    expect(git(main, "stash", "list")).toBe("");
+  });
+
+  it("a second merge behind a dirty checkout builds on the parked ref, so it holds both commits (BBP-270)", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    writeFileSync(join(main, "b.txt"), "wip\n");
+    const first = await createLocalGit().merge(wt, "bb/x", "main", "Merge 1");
+    git(main, "branch", "bb/y", "main");
+    git(wt, "switch", "-q", "bb/y");
+    writeFileSync(join(wt, "c.txt"), "second\n");
+    git(wt, "add", "c.txt");
+    git(wt, "commit", "-qm", "add c.txt");
+    const second = await createLocalGit().merge(wt, "bb/y", "main", "Merge 2");
+    expect(second).toMatchObject({ ok: true, parked: true });
+    const ref = git(main, "rev-parse", "refs/crew/integration/main");
+    expect(git(main, "rev-parse", `${ref}^1`)).toBe(first.ok ? first.commit : "");
+    expect(git(main, "show", `${ref}:a.txt`)).toBe("crew");
+    expect(git(main, "show", `${ref}:c.txt`)).toBe("second");
+    expect(git(main, "stash", "list")).toBe("");
   });
 });

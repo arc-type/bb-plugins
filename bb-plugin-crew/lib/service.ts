@@ -170,6 +170,7 @@ export function createCrewService(deps: ServiceDeps) {
         mergeRequest: open
           ? `Merge request ${open.id} (${open.state}): ${open.branch} → ${open.base}${open.reason ? ` — ${open.reason}` : ""}. bb crew approve ${open.id} | bb crew reject ${open.id}`
           : null,
+        parkedMerge: member.lead ? (store.listMerges({ crewId: crew.id, states: ["parked"] })[0]?.reason ?? null) : null,
         escalated: queue.escalatedToHuman(member).length,
         ...(staleQuestion ? { humanQuestion: null } : {}),
       };
@@ -419,7 +420,7 @@ export function createCrewService(deps: ServiceDeps) {
           }
         }
       }
-      for (const merge of store.listMerges({ crewId: crew.id, states: ["open", "returned"] })) {
+      for (const merge of store.listMerges({ crewId: crew.id, states: ["open", "returned", "parked"] })) {
         blockers.push(`merge request ${merge.id} (${merge.state}): ${merge.branch} → ${merge.base}`);
       }
       return blockers;

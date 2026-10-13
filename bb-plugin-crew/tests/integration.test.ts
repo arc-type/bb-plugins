@@ -72,6 +72,21 @@ describe("merge requests (human merges by default)", () => {
     expect(await needs(alpha, "core-lead")).toContain("merge-request");
   });
 
+  it("BBP-270: a merge behind a dirty main checkout is parked, never merged: no main moved, no onMerged, lead on Needs you (merge-parked)", async () => {
+    const { service, alpha, beta, git, needs, store } = await twoCrews();
+    git.mergeResult = { ok: true, commit: "p1", parked: true };
+    const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
+    const after = await service.integration.approve(merge.id);
+    await service.flush();
+    expect(after).toMatchObject({ state: "parked", commitSha: "p1" });
+    expect(after.reason).toContain("refs/crew/integration/main");
+    expect(store.listMessages().filter((m) => m.subject === "main moved")).toEqual([]);
+    expect(store.listDependencies(beta.crew.id).every((dependency) => dependency.state === "open")).toBe(true);
+    expect(await needs(alpha, "core-lead")).toContain("merge-parked");
+    expect(await needs(alpha, "core-lead")).not.toContain("merge-request");
+    expect(store.listMerges({ projectId: PROJECT, states: ["merged"] })).toEqual([]);
+  });
+
   it("reject closes the request and tells the lead; a closed request cannot be approved", async () => {
     const { service, alpha, store, needs } = await twoCrews();
     const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
@@ -331,6 +346,7 @@ describe("local git backend", () => {
       if (args[0] === "worktree") return { code: 0, stdout: "worktree /repo\nHEAD 1\nbranch refs/heads/main\n\nworktree /wt\nbranch refs/heads/bb/x\n", stderr: "" };
       if (args[0] === "merge-tree") return { code: 0, stdout: "tree1\n", stderr: "" };
       if (args[0] === "commit-tree") return { code: 0, stdout: "c1\n", stderr: "" };
+      if (args.includes("--verify")) return { code: 1, stdout: "", stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     });
     expect(await git.merge("/wt", "bb/x", "main", "m")).toEqual({ ok: true, commit: "c1" });
@@ -338,13 +354,20 @@ describe("local git backend", () => {
     expect(calls.some((call) => call.includes("--no-ff") || call.includes("update-ref"))).toBe(false);
   });
 
-  it("negative: a dirty main worktree is not merged into", async () => {
-    const git = createLocalGit(async (args) => {
+  it("BBP-270: a dirty main worktree is never merged into: the commit is parked on refs/crew/integration/main", async () => {
+    const calls: string[] = [];
+    const git = createLocalGit(async (args, cwd) => {
+      calls.push(`${cwd}: ${args.join(" ")}`);
       if (args[0] === "worktree") return { code: 0, stdout: "worktree /repo\nbranch refs/heads/main\n", stderr: "" };
       if (args[0] === "status") return { code: 0, stdout: " M a.txt\n", stderr: "" };
-      throw new Error(`unexpected git ${args.join(" ")}`);
+      if (args.includes("--verify")) return { code: 1, stdout: "", stderr: "" };
+      if (args[0] === "merge-tree") return { code: 0, stdout: "tree1\n", stderr: "" };
+      if (args[0] === "commit-tree") return { code: 0, stdout: "c1\n", stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
     });
-    expect(await git.merge("/wt", "bb/x", "main", "m")).toMatchObject({ ok: false, conflict: false, detail: expect.stringContaining("uncommitted") });
+    expect(await git.merge("/wt", "bb/x", "main", "m")).toEqual({ ok: true, commit: "c1", parked: true });
+    expect(calls).toContain("/wt: update-ref refs/crew/integration/main c1");
+    expect(calls.some((call) => (call.startsWith("/repo:") && !call.startsWith("/repo: status")) || call.includes("refs/heads/main") || call.includes("stash"))).toBe(false);
   });
 
   it("checks(): NODE_ENV is left out of the process env (the server's NODE_ENV=production must not reach vitest)", async () => {

@@ -28,7 +28,7 @@ import { isIntegrator, type ResolvedMember } from "./spec";
 import { memberRowId, type CrewRow, type MemberEnvRow, type MemberRow, type MergeRequestRow, type Store } from "./store";
 import type { ThreadPort } from "./thread-port";
 
-export type MergeOutcome = { ok: true; commit: string } | { ok: false; conflict: boolean; detail: string };
+export type MergeOutcome = { ok: true; commit: string; parked?: boolean } | { ok: false; conflict: boolean; detail: string };
 export type RebaseOutcome = { ok: true; head: string } | { ok: false; conflict: boolean; files: string[]; detail: string };
 
 export interface GitBackend {
@@ -113,17 +113,26 @@ export function createLocalGit(run: Run = runProcess): GitBackend {
     async merge(cwd, branch, base, message) {
       // The merge commit is always built without a working tree (BBP-269); a checkout of the base only follows by fast-forward.
       const target = await worktreeWith(cwd, base);
-      if (target && (await run(["status", "--porcelain", "--untracked-files=no"], target)).stdout.trim() !== "") {
-        return { ok: false, conflict: false, detail: `the worktree ${target} that has ${base} checked out has uncommitted changes` };
-      }
-      const old = (await run(["rev-parse", base], cwd)).stdout.trim();
-      const tree = await run(["merge-tree", "--write-tree", base, branch], cwd);
+      const dirty = !!target && (await run(["status", "--porcelain", "--untracked-files=no"], target)).stdout.trim() !== "";
+      // An earlier merge parked behind a dirty checkout (BBP-270) is the base to build on, or it would be lost.
+      const parkedRef = `refs/crew/integration/${base}`;
+      const parked = await run(["rev-parse", "--verify", "--quiet", parkedRef], cwd);
+      const parent = parked.code === 0 ? parked.stdout.trim() : (await run(["rev-parse", base], cwd)).stdout.trim();
+      const tree = await run(["merge-tree", "--write-tree", parent, branch], cwd);
       if (tree.code !== 0) return { ok: false, conflict: tree.code === 1, detail: tail(tree.stdout.trim(), 1500) };
-      const commit = await run(["commit-tree", tree.stdout.trim().split("\n")[0]!, "-p", base, "-p", branch, "-m", message], cwd);
+      const commit = await run(["commit-tree", tree.stdout.trim().split("\n")[0]!, "-p", parent, "-p", branch, "-m", message], cwd);
       if (commit.code !== 0) return { ok: false, conflict: false, detail: commit.stderr.trim() };
       const sha = commit.stdout.trim();
+      if (dirty) {
+        // Never stash and never move a checked-out branch under the human's files: park the commit instead (ADR 0004).
+        const park = await run(["update-ref", parkedRef, sha, ...(parked.code === 0 ? [parent] : [])], cwd);
+        if (park.code !== 0) return { ok: false, conflict: false, detail: park.stderr.trim() };
+        return { ok: true, commit: sha, parked: true };
+      }
+      const old = (await run(["rev-parse", base], cwd)).stdout.trim();
       const update = target ? await run(["merge", "--ff-only", sha], target) : await run(["update-ref", `refs/heads/${base}`, sha, old], cwd);
       if (update.code !== 0) return { ok: false, conflict: false, detail: tail(`${update.stdout}${update.stderr}`.trim(), 1500) };
+      if (parked.code === 0) await run(["update-ref", "-d", parkedRef], cwd);
       return { ok: true, commit: sha };
     },
     async rebase(cwd, base) {
@@ -321,6 +330,13 @@ export function createIntegration(deps: IntegrationDeps) {
     const task = models(crew).spec?.task;
     const outcome = await git.merge(env.path, merge.branch, merge.base, `Merge ${merge.branch} (crew ${crew.name}${task ? `, ${task}` : ""}) into ${merge.base}`);
     if (!outcome.ok) return returnToHuman(merge, outcome.conflict ? `merge conflict: ${outcome.detail}` : `merge failed: ${outcome.detail}`);
+    if (outcome.parked) {
+      // Not merged: no "main moved", no dependency release; the lead waits on the human (merge-parked).
+      const reason = `${merge.base} checkout has uncommitted changes; merge parked on refs/crew/integration/${merge.base}; commit or clean up, the next merge/approve releases it`;
+      const parked = store.updateMerge(merge.id, { state: "parked", commitSha: outcome.commit, mergedBy: by, reason });
+      tellLead(crew, `Merge request ${parked.id} parked`, `${describe(crew, parked)}: ${reason}.`, by);
+      return parked;
+    }
     const merged = store.updateMerge(merge.id, { state: "merged", commitSha: outcome.commit, mergedBy: by, reason: null });
     tellLead(crew, `Merge request ${merged.id} merged`, `${describe(crew, merged)} merged into ${merged.base} by ${by}.`, by);
     await mainMoved(crew, merged);
