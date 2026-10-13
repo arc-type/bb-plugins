@@ -334,7 +334,8 @@ export function turnTitle(
  *  `---` separator (or, lacking one, just its first line); a trailing
  *  "Reply with crew_send(...)" footer (the crew tool's own boilerplate) is
  *  dropped; a kickoff brief loses only its own first line; a `[bb system]`/
- *  `[bb message from thread:…]` notice loses just its prefix. Anything else
+ *  `[bb message from thread:…]` notice loses just its prefix, and a single
+ *  child completion also its bare "@thread:<id> completed:" line. Anything else
  *  passes through unchanged. */
 export function cleanRequestText(text: string): string {
   const raw = text ?? "";
@@ -356,6 +357,9 @@ export function cleanRequestText(text: string): string {
   }
 
   body = body.replace(/\n?-{3,}\s*\nReply with crew_send\([\s\S]*$/, "");
+  // A child-completion notice's "@thread:<id> completed:" line is only the
+  // bare id — the title already names the child ("steps-impl done: …").
+  body = body.replace(/^\s*@thread:\S+\s+completed:[ \t]*(\n|$)/, "");
   return body.trim();
 }
 

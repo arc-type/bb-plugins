@@ -1038,7 +1038,17 @@ describe("turnTitle: child-thread completion (BBP-228 R2)", () => {
 
 describe("cleanRequestText (BBP-228 R2)", () => {
   it("strips the [bb system] prefix, keeping the body", () => {
-    expect(cleanRequestText("[bb system]\n\n@thread:thr_x completed:\n\nAlles klar.")).toBe("@thread:thr_x completed:\n\nAlles klar.");
+    expect(cleanRequestText("[bb system]\n\nChild thread updates:\n\n- done")).toBe("Child thread updates:\n\n- done");
+  });
+
+  it("drops a child completion's bare \"@thread:<id> completed:\" line, keeping its content", () => {
+    expect(cleanRequestText("[bb system]\n\n@thread:thr_x completed:\n\nAlles klar.")).toBe("Alles klar.");
+  });
+
+  it("never shows the bare thread id in a real Pi child-completion request", () => {
+    const text = (fixtures.piConversationChildCompleted as Record<string, string>).text;
+    expect(cleanRequestText(text)).not.toMatch(/@thread:/);
+    expect(cleanRequestText(text)).toMatch(/^eapp#122 Paket 1/);
   });
 
   it("strips a crew From/To header up to the --- separator", () => {
