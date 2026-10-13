@@ -412,6 +412,20 @@ describe("rename (memberKeys: short)", () => {
     expect(store.getCrew(crewId)!.leadMemberId).toBe(memberRowId(crewId, "lead"));
   });
 
+  it("a rename whose bound thread is gone respawns under the new key: one row, work items moved", async () => {
+    const { service, store, port } = setup();
+    const first = await service.apply(PROJECT, trioYaml());
+    const crewId = first.crew.id;
+    port.threads.delete(first.results[1]!.threadId!);
+    store.insertWork({ id: "wi_1", crewId, title: "t", body: "b", ownerMember: memberRowId(crewId, "dev-impl"), createdBy: "x", tier: "p2", dueAt: null, taskKey: null });
+
+    const { results } = await service.apply(PROJECT, shortYaml());
+
+    expect(byKey(results).get("impl")!.result).toBe("spawned");
+    expect(store.listMembers(crewId).map((m) => m.key)).toEqual(["lead", "impl", "review"]);
+    expect(store.getWork("wi_1")!.ownerMember).toBe(memberRowId(crewId, "impl"));
+  });
+
   it("negative: a member deleted from the file is still remove", async () => {
     const { service } = setup();
     await service.apply(PROJECT, shortYaml());

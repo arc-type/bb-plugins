@@ -211,8 +211,8 @@ export async function apply(ctx: SyncContext, input: ApplyInput): Promise<ApplyO
   const { store, port, journal } = ctx;
   const { crew } = store.saveCrewFile(projectId, spec.name, input.yaml);
   store.setCrewStatus(crew.id, "starting");
-  // Renames first, so upsertMember below finds the renamed rows.
-  for (const item of items) if (item.action === "rename") store.renameMember(crew.id, item.from!, item.key, item.address);
+  // Renames first (also a rename that respawns), so upsertMember below finds the renamed rows.
+  for (const item of items) if (item.from) store.renameMember(crew.id, item.from!, item.key, item.address);
   const rows = new Map<string, MemberRow>();
   for (const member of validation.members) {
     rows.set(
