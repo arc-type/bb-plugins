@@ -89,7 +89,7 @@ export type OverviewSettings = Pick<ThreadFilter, "windowMs" | "limit" | "turnsP
  * The page's props, fixed up front (BBP-285) so the BBP-283 work items can
  * fill them in parallel. `overview` overrides the default filter; `activeOnly`
  * is the toggle's default until the user flips it (then stored); `layout`
- * takes effect in its own item.
+ * forces split or tabs, else the page width decides.
  */
 export type CanvasPageProps = {
   subPath?: string;
@@ -118,12 +118,29 @@ function saveActiveOnly(value: boolean) {
   }
 }
 
-export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activeOnlyDefault = false }: CanvasPageProps) {
+/** From this page width graph and chat sit side by side (BBP-289). */
+const SPLIT_MIN_WIDTH = 900;
+
+/** The width of `element`, kept current through a ResizeObserver. */
+function useWidth(element: HTMLElement | null): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (element === null) return;
+    const observer = new ResizeObserver((entries) => setWidth(entries[0]?.contentRect.width ?? 0));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return width;
+}
+
+export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activeOnlyDefault = false, layout }: CanvasPageProps) {
   const sdk = useSdk();
   const navigate = useBbNavigate();
   const [state, setState] = useState<State>(null);
   const [focus, setFocus] = useState<string | null>(() => focusThreadId ?? focusFromSubPath(subPath));
   const [tab, setTab] = useState<"graph" | "chat">("graph");
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const width = useWidth(root);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   // The project pick is shared with the Activity Canvas pages via the same
   // stored key; the other filters reset with the page.
@@ -245,25 +262,34 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
     );
   const visible = visibleFocusIds(layer.nodes, focusIds);
   const chatThreadId = selectedThreadId ?? focus;
+  const split = (layout ?? (width >= SPLIT_MIN_WIDTH ? "split" : "tabs")) === "split";
+  const chatPane =
+    chatThreadId !== null ? (
+      <ThreadChat threadId={chatThreadId} variant="compact" />
+    ) : (
+      <div className="p-4 text-sm text-muted-foreground">Select a thread to see its chat.</div>
+    );
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div role="tablist" aria-label="Canvas view" className="flex gap-1 border-b border-border px-2 pt-1">
-        {(["graph", "chat"] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            onClick={() => setTab(id)}
-            className={`-mb-px border-b-2 px-2 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary ${tab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            {id === "graph" ? "Graph" : "Chat"}
-          </button>
-        ))}
-      </div>
+    <div ref={setRoot} className={`flex h-full min-h-0 ${split ? "flex-row" : "flex-col"}`}>
+      {split ? null : (
+        <div role="tablist" aria-label="Canvas view" className="flex gap-1 border-b border-border px-2 pt-1">
+          {(["graph", "chat"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`-mb-px border-b-2 px-2 py-1 text-xs transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary ${tab === id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            >
+              {id === "graph" ? "Graph" : "Chat"}
+            </button>
+          ))}
+        </div>
+      )}
       {/* The graph stays mounted behind the Chat tab so its selection,
           expansion and viewport survive a look at the chat. */}
-      <div role="tabpanel" hidden={tab !== "graph"} className="min-h-0 flex-1">
+      <div role={split ? "region" : "tabpanel"} aria-label={split ? "Graph" : undefined} hidden={!split && tab !== "graph"} className="min-h-0 min-w-0 flex-1">
         <CanvasView
           nodes={layer.nodes.filter((node) => visible.has(node.id))}
           edges={layer.edges}
@@ -286,13 +312,13 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
           className="h-full"
         />
       </div>
-      {tab === "chat" ? (
+      {split ? (
+        <div role="region" aria-label="Chat" className="min-h-0 w-[40%] min-w-[320px] border-l border-border">
+          {chatPane}
+        </div>
+      ) : tab === "chat" ? (
         <div role="tabpanel" className="min-h-0 flex-1">
-          {chatThreadId !== null ? (
-            <ThreadChat threadId={chatThreadId} variant="compact" />
-          ) : (
-            <div className="p-4 text-sm text-muted-foreground">Select a thread to see its chat.</div>
-          )}
+          {chatPane}
         </div>
       ) : null}
     </div>

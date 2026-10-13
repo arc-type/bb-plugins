@@ -401,3 +401,46 @@ describe("the Canvas Active only toggle (BBP-288)", () => {
     expect(await screen.findByRole("button", { name: /^Quiet chat — / })).toBeTruthy();
   });
 });
+
+// BBP-289: from a minimum width, graph and chat side by side; below it the tabs.
+describe("the Canvas chat split", () => {
+  const sdk = (threads: unknown[]) => ({ projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { list: async () => threads } });
+  const chat = () => screen.queryByTestId("bb-thread-chat");
+  const original = globalThis.ResizeObserver;
+  function withWidth(width: number) {
+    globalThis.ResizeObserver = class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.callback([{ target, contentRect: { width } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
+  afterEach(() => {
+    globalThis.ResizeObserver = original;
+  });
+
+  it("shows graph and the selected thread's chat side by side on a wide page, without tabs", async () => {
+    withWidth(1200);
+    canvasPanel(sdk([row("t1", "p1", "First"), row("t2", "p1", "Second")]));
+    fireEvent.click(await screen.findByRole("button", { name: /^Second — / }));
+    await waitFor(() => expect(chat()?.getAttribute("data-thread-id")).toBe("t2"));
+    expect(screen.getByRole("button", { name: /^First — / })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Chat" })).toBeNull();
+  });
+
+  it("shows a hint, not an error, in the split chat without a selection", async () => {
+    withWidth(1200);
+    canvasPanel(sdk([row("t1", "p1", "First")]));
+    expect(await screen.findByText("Select a thread to see its chat.")).toBeTruthy();
+    expect(chat()).toBeNull();
+  });
+
+  it("keeps the tabs on a narrow page", async () => {
+    withWidth(600);
+    canvasPanel(sdk([row("t1", "p1", "First")]));
+    expect(await screen.findByRole("tab", { name: "Chat" })).toBeTruthy();
+    expect(screen.queryByText("Select a thread to see its chat.")).toBeNull();
+  });
+});
