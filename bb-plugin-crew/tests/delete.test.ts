@@ -186,6 +186,15 @@ describe("bb crew delete — threads", () => {
     for (const entry of duoThreads) expect(port.threads.has(entry.threadId)).toBe(true);
   });
 
+  it("delete: members without a parent are found through the bindings; every member thread is gone", async () => {
+    const { service, store, port, trio, bound } = await stoppedTrio();
+    for (const entry of bound) port.threads.get(entry.threadId)!.parentThreadId = null;
+    const result = await service.delete(store.getCrew(trio.crew.id)!, { threads: "delete" });
+    for (const entry of bound) expect(port.threads.has(entry.threadId)).toBe(false);
+    expect(result.threads.map((entry) => entry.threadId).sort()).toEqual(bound.map((entry) => entry.threadId).sort());
+    expect(store.crewThreads(trio.crew.id)).toHaveLength(0);
+  });
+
   it("delete: already deleted threads are skipped without a delete call", async () => {
     const { service, store, port, trio, bound } = await stoppedTrio();
     for (const entry of bound) port.threads.delete(entry.threadId);

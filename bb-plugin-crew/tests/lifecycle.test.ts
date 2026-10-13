@@ -96,7 +96,15 @@ describe("reset", () => {
     expect(store.memberByThread(threads["dev-impl"]!)?.key).toBe("dev-impl");
   });
 
-  it("new: a new thread for shift 2, the old one archived with retired: true, still nested under the lead", async () => {
+  it("clear: a member thread that still has a parent comes out without one", async () => {
+    const t = await trio();
+    t.thread(t.threads["dev-impl"]!).parentThreadId = t.threads["orch-lead"]!;
+    await t.service.lifecycle.reset(t.crew, "dev-impl", "clear");
+    expect(t.thread(t.threads["dev-impl"]!).parentThreadId).toBeNull();
+    expect(t.thread(t.threads["orch-lead"]!).parentThreadId).toBeNull();
+  });
+
+  it("new: a new thread for shift 2, the old one archived with retired: true, the new one without a parent", async () => {
     const t = await trio();
     const { service, store, crew, threads, members } = t;
     const result = await service.lifecycle.reset(crew, "dev-impl", "new");
@@ -105,16 +113,16 @@ describe("reset", () => {
     expect(result.threadId).not.toBe(threads["dev-impl"]);
     expect(t.thread(threads["dev-impl"]!)).toMatchObject({ archived: true });
     expect(t.thread(threads["dev-impl"]!).metadata).toMatchObject({ retired: true, member: "dev-impl" });
-    expect(t.thread(result.threadId!).parentThreadId).toBe(threads["orch-lead"]);
+    expect(t.thread(result.threadId!).parentThreadId).toBeNull();
     expect(store.currentBinding(members["dev-impl"]!.id)!.threadId).toBe(result.threadId);
     expect(t.port.countCalls("clearContext")).toBe(0);
   });
 
-  it("a lead reset with a new thread moves the members under the new lead thread", async () => {
+  it("a lead reset with a new thread leaves the members and the new lead without a parent", async () => {
     const t = await trio();
     const result = await t.service.lifecycle.reset(t.crew, "orch-lead", "new");
-    expect(t.thread(t.threads["dev-impl"]!).parentThreadId).toBe(result.threadId);
-    expect(t.thread(t.threads["dev-review"]!).parentThreadId).toBe(result.threadId);
+    expect(t.thread(result.threadId!).parentThreadId).toBeNull();
+    for (const key of ["dev-impl", "dev-review"]) expect(t.port.calls.some((call) => call.method === "update" && (call.args as { threadId: string }).threadId === t.threads[key])).toBe(false);
   });
 
   it("negative: an unknown member and a member in handover are refused", async () => {
@@ -170,12 +178,13 @@ describe("handover", () => {
     expect(t.port.countCalls("spawn")).toBe(4);
   });
 
-  it("a brief from the human completes at once; a lead handover re-parents the members", async () => {
+  it("a brief from the human completes at once; a lead handover leaves the members untouched", async () => {
     const t = await trio();
     const { handover, result } = await t.service.lifecycle.handover(t.crew, "orch-lead", { brief: "All quiet." });
     expect(handover.state).toBe("done");
     expect(result!.shift).toBe(2);
-    expect(t.thread(t.threads["dev-impl"]!).parentThreadId).toBe(result!.threadId);
+    expect(t.thread(result!.threadId!).parentThreadId).toBeNull();
+    expect(t.port.calls.some((call) => call.method === "update" && (call.args as { threadId: string }).threadId === t.threads["dev-impl"])).toBe(false);
   });
 
   it("crew_handover_note without a running handover starts one itself (self-initiated)", async () => {
@@ -222,7 +231,7 @@ describe("attach and detach", () => {
     expect(t.port.countCalls("send")).toBe(sendsBefore);
     expect(result).toMatchObject({ threadId: "thr_mine", shift: 2 });
     expect(result.kickoff).toMatchObject({ status: "pending", fromAddress: "system", toAddress: "dev-review@trio", kind: "message" });
-    expect(foreign).toMatchObject({ title: "dev-review@trio", parentThreadId: threads["orch-lead"] });
+    expect(foreign).toMatchObject({ title: "dev-review@trio", parentThreadId: null });
     expect(foreign.metadata).toMatchObject({ crew: "trio", member: "dev-review", address: "dev-review@trio", shift: 2, lead: false, retired: false });
     expect(store.memberByThread("thr_mine")?.id).toBe(members["dev-review"]!.id);
 
@@ -256,12 +265,12 @@ describe("attach and detach", () => {
 });
 
 describe("add and remove member", () => {
-  it("add member changes the crew file and applies: a new thread under the lead", async () => {
+  it("add member changes the crew file and applies: a new thread without a parent", async () => {
     const t = await trio();
     const outcome = await t.service.lifecycle.addMember(t.crew, { group: "dev", id: "docs", role: "Writes docs." });
     const added = outcome.results.find((r) => r.key === "dev-docs")!;
     expect(added.result).toBe("spawned");
-    expect(t.thread(added.threadId!).parentThreadId).toBe(t.threads["orch-lead"]);
+    expect(t.thread(added.threadId!).parentThreadId).toBeNull();
     expect(outcome.results.filter((r) => r.key !== "dev-docs").every((r) => r.result === "reused")).toBe(true);
     expect(outcome.crew.fileVersion).toBe(2);
     expect(t.store.crewFile(t.crew.id)!.yaml).toContain("id: docs");

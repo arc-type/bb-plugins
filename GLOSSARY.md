@@ -28,6 +28,13 @@ checkboxes and keyboard control. Ticked options stay on top even when they do
 not match the search. The project filter is one; the Focus dropdown is to be
 another.
 
+**Shift** — one stretch of work by a crew member between two resets. A reset
+starts a new shift; reports from an earlier shift are out of date.
+
+**Child-completed notice** — the message BB itself sends to a parent thread
+whenever a child thread finishes a turn. It is not a crew message. Crew members
+are not child threads of their lead, so the lead does not get these notices.
+
 **Member key** — a member's name inside its crew; the address is
 `<member key>@<crew>`. By default the key is `<group>-<member>`
 (`orch-lead`); with short keys it is the member id alone (`lead`), and member
