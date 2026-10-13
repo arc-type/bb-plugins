@@ -24,6 +24,8 @@ export type QueueDeps = {
   integration: Integration;
   now?: () => number;
   newId?: () => string;
+  /** Ends the member's shift like reset --mode new; the next message spawns the new thread (BBP-280). */
+  newShift?: (member: MemberRow) => Promise<void>;
 };
 
 export type Queue = ReturnType<typeof createQueue>;
@@ -94,7 +96,22 @@ export function createQueue(deps: QueueDeps) {
     await delivery.send({ projectId: crew.projectId, from, to: to.address, subject, body, crew: crew.name });
   }
 
+  /**
+   * BBP-280 (ADR 0005): a per-item member starts a fresh shift before the
+   * notice of a newly assigned item is delivered, unless it still holds a
+   * claimed, unfinished item.
+   */
+  async function beforeAssign(crew: CrewRow, targetId: string): Promise<void> {
+    const target = store.getMember(targetId);
+    if (!deps.newShift || !target) return;
+    if (models(crew).members.find((entry) => entry.key === target.key)?.context !== "per-item") return;
+    if (store.listWork({ crewId: crew.id, states: ["claimed"], owner: target.id }).length > 0) return;
+    await deps.newShift(target);
+  }
+
   return {
+    beforeAssign,
+
     create(
       crew: CrewRow,
       actor: Actor,
@@ -147,6 +164,7 @@ export function createQueue(deps: QueueDeps) {
       const target = memberByKey(crew, to);
       const after = store.transitionWork(id, { state: "open", owner: target.id, bumpEpoch: true }, actorName(actor), note || null);
       if (actor.kind !== "member" || actor.member.id !== target.id) {
+        await beforeAssign(crew, target.id);
         await notify(
           crew,
           target,
