@@ -29,6 +29,8 @@ import { memberRowId, type CrewRow, type MemberEnvRow, type MemberRow, type Merg
 import type { ThreadPort } from "./thread-port";
 
 export type MergeOutcome = { ok: true; commit: string; parked?: boolean } | { ok: false; conflict: boolean; detail: string };
+/** none = no parked merge; held = the checkout is still dirty; released = `base` now points at the parked commit. */
+export type ReleaseOutcome = { kind: "none" | "held" } | { kind: "released"; commit: string } | { kind: "failed"; detail: string };
 export type RebaseOutcome = { ok: true; head: string } | { ok: false; conflict: boolean; files: string[]; detail: string };
 
 export interface GitBackend {
@@ -47,6 +49,8 @@ export interface GitBackend {
   checks(cwd: string, command: string): Promise<{ kind: "ok" | "failed" | "env"; code: number; output: string }>;
   /** Merge `branch` into `base`; never leaves a half-done merge behind. */
   merge(cwd: string, branch: string, base: string, message: string): Promise<MergeOutcome>;
+  /** Move `base` onto a merge parked behind a dirty checkout (BBP-271) once that checkout is clean; never touches a dirty one. */
+  release(cwd: string, base: string): Promise<ReleaseOutcome>;
   /** Rebase the worktree's branch onto `base`; on conflict the rebase is aborted. */
   rebase(cwd: string, base: string): Promise<RebaseOutcome>;
 }
@@ -134,6 +138,19 @@ export function createLocalGit(run: Run = runProcess): GitBackend {
       if (update.code !== 0) return { ok: false, conflict: false, detail: tail(`${update.stdout}${update.stderr}`.trim(), 1500) };
       if (parked.code === 0) await run(["update-ref", "-d", parkedRef], cwd);
       return { ok: true, commit: sha };
+    },
+    async release(cwd, base) {
+      const parkedRef = `refs/crew/integration/${base}`;
+      const parked = await run(["rev-parse", "--verify", "--quiet", parkedRef], cwd);
+      if (parked.code !== 0) return { kind: "none" };
+      const sha = parked.stdout.trim();
+      const target = await worktreeWith(cwd, base);
+      if (target && (await run(["status", "--porcelain", "--untracked-files=no"], target)).stdout.trim() !== "") return { kind: "held" };
+      const old = (await run(["rev-parse", base], cwd)).stdout.trim();
+      const update = target ? await run(["merge", "--ff-only", sha], target) : await run(["update-ref", `refs/heads/${base}`, sha, old], cwd);
+      if (update.code !== 0) return { kind: "failed", detail: tail(`${update.stdout}${update.stderr}`.trim(), 1500) };
+      await run(["update-ref", "-d", parkedRef, sha], cwd);
+      return { kind: "released", commit: sha };
     },
     async rebase(cwd, base) {
       const result = await run(["rebase", base], cwd);
@@ -327,6 +344,10 @@ export function createIntegration(deps: IntegrationDeps) {
     const env = crewLead ? await locate(crewLead) : null;
     if (!env?.path) return returnToHuman(merge, "the crew branch's worktree is unknown");
     const git = await gitFor(env);
+    // A merge parked behind a dirty checkout (BBP-271) lands first, once that checkout is clean.
+    const release = await git.release(env.path, merge.base);
+    if (release.kind === "released") await settleParked(crew.projectId, merge.base, by);
+    if (merge.state === "parked") return requireMerge(merge.id);
     const task = models(crew).spec?.task;
     const outcome = await git.merge(env.path, merge.branch, merge.base, `Merge ${merge.branch} (crew ${crew.name}${task ? `, ${task}` : ""}) into ${merge.base}`);
     if (!outcome.ok) return returnToHuman(merge, outcome.conflict ? `merge conflict: ${outcome.detail}` : `merge failed: ${outcome.detail}`);
@@ -337,11 +358,25 @@ export function createIntegration(deps: IntegrationDeps) {
       tellLead(crew, `Merge request ${parked.id} parked`, `${describe(crew, parked)}: ${reason}.`, by);
       return parked;
     }
-    const merged = store.updateMerge(merge.id, { state: "merged", commitSha: outcome.commit, mergedBy: by, reason: null });
+    // A merge on top of a parked ref takes it along (the ref is gone now), so those requests landed too.
+    await settleParked(crew.projectId, merge.base, by);
+    return landed(crew, store.updateMerge(merge.id, { state: "merged", commitSha: outcome.commit, mergedBy: by, reason: null }), by);
+  }
+
+  async function landed(crew: CrewRow, merged: MergeRequestRow, by: string): Promise<MergeRequestRow> {
     tellLead(crew, `Merge request ${merged.id} merged`, `${describe(crew, merged)} merged into ${merged.base} by ${by}.`, by);
     await mainMoved(crew, merged);
     await deps.onMerged?.(merged);
     return merged;
+  }
+
+  /** Every request parked on `base` is in `base` now: merged, each with its own "main moved" and dependency check. */
+  async function settleParked(projectId: string, base: string, by: string): Promise<void> {
+    for (const parked of store.listMerges({ projectId, states: ["parked"] })) {
+      if (parked.base !== base) continue;
+      const crew = store.getCrew(parked.crewId);
+      if (crew) await landed(crew, store.updateMerge(parked.id, { state: "merged", reason: null }), by);
+    }
   }
 
   /** Non-waking note to every other running crew's lead in the project (§3.9.1); the source crew got its own message. */
@@ -450,7 +485,8 @@ export function createIntegration(deps: IntegrationDeps) {
     /** Human approves: merge now. A failed merge comes back as `returned` with the reason. */
     async approve(id: string): Promise<MergeRequestRow> {
       const merge = requireMerge(id);
-      if (!(AWAITING_HUMAN as readonly string[]).includes(merge.state)) throw new AddressError(`Merge request ${id} is ${merge.state}.`);
+      // A parked request is approved again once its checkout is clean: that only releases it (BBP-271).
+      if (!(AWAITING_HUMAN as readonly string[]).includes(merge.state) && merge.state !== "parked") throw new AddressError(`Merge request ${id} is ${merge.state}.`);
       return perform(merge, "human");
     },
 
@@ -575,6 +611,7 @@ export function createFakeGit() {
     checksResults: [] as { kind: "ok" | "failed" | "env"; code: number; output: string }[],
     mergeResult: { ok: true, commit: "abc1234def" } as MergeOutcome,
     rebaseResult: { ok: true, head: "fff000" } as RebaseOutcome,
+    releaseResult: { kind: "none" } as ReleaseOutcome,
     count: (method: string) => calls.filter((call) => call.method === method).length,
     async behind(...args: [string, string, string]) {
       calls.push({ method: "behind", args });
@@ -595,6 +632,10 @@ export function createFakeGit() {
     async merge(...args: [string, string, string, string]) {
       calls.push({ method: "merge", args });
       return fake.mergeResult;
+    },
+    async release(...args: [string, string]) {
+      calls.push({ method: "release", args });
+      return fake.releaseResult;
     },
     async rebase(...args: [string, string]) {
       calls.push({ method: "rebase", args });

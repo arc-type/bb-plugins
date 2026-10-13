@@ -87,6 +87,51 @@ describe("merge requests (human merges by default)", () => {
     expect(store.listMerges({ projectId: PROJECT, states: ["merged"] })).toEqual([]);
   });
 
+  it("BBP-271: once the checkout is clean, approving the parked request releases it: merged, main moved, dependencies fulfilled", async () => {
+    const { service, alpha, beta, git, needs, store, wakes } = await twoCrews();
+    git.mergeResult = { ok: true, commit: "p1", parked: true };
+    const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
+    await service.integration.approve(merge.id);
+    git.releaseResult = { kind: "released", commit: "p1" };
+    const after = await service.integration.approve(merge.id);
+    await service.flush();
+    expect(after).toMatchObject({ state: "merged", commitSha: "p1", reason: null });
+    expect(git.count("merge")).toBe(1);
+    expect(store.listMessages().filter((m) => m.subject === "main moved").length).toBe(1);
+    expect(store.listDependencies(beta.crew.id).every((dependency) => dependency.state === "satisfied")).toBe(true);
+    expect(wakes(beta).length).toBe(1);
+    expect(await needs(alpha, "core-lead")).not.toContain("merge-parked");
+  });
+
+  it("BBP-271: the next merge releases every parked request first, each merged with its own main moved", async () => {
+    const { service, alpha, beta, ops, git, store } = await twoCrews({ integrator: true });
+    git.mergeResult = { ok: true, commit: "p1", parked: true };
+    const first = (await service.integration.request(alpha.crew, "core-lead@alpha")).merge;
+    await service.integration.approve(first.id);
+    git.releaseResult = { kind: "released", commit: "p1" };
+    git.mergeResult = { ok: true, commit: "m2" };
+    const second = (await service.integration.request(beta.crew, "core-lead@beta")).merge;
+    expect(await service.integration.approve(second.id)).toMatchObject({ state: "merged", commitSha: "m2" });
+    await service.flush();
+    expect(store.getMerge(first.id)).toMatchObject({ state: "merged", commitSha: "p1" });
+    expect(git.calls.findIndex((call) => call.method === "release")).toBeLessThan(git.calls.findIndex((call) => call.method === "merge" && call.args[1] === second.branch));
+    expect(store.listMessages({ toMember: ops!.members["ops-int"]!.id }).filter((m) => m.subject === "main moved").length).toBe(2);
+  });
+
+  it("negative BBP-271: while the checkout is still dirty the parked request stays parked and nothing moves", async () => {
+    const { service, alpha, beta, git, needs, store } = await twoCrews();
+    git.mergeResult = { ok: true, commit: "p1", parked: true };
+    const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
+    await service.integration.approve(merge.id);
+    git.releaseResult = { kind: "held" };
+    expect(await service.integration.approve(merge.id)).toMatchObject({ state: "parked" });
+    await service.flush();
+    expect(git.count("merge")).toBe(1);
+    expect(store.listMessages().filter((m) => m.subject === "main moved")).toEqual([]);
+    expect(store.listDependencies(beta.crew.id).every((dependency) => dependency.state === "open")).toBe(true);
+    expect(await needs(alpha, "core-lead")).toContain("merge-parked");
+  });
+
   it("reject closes the request and tells the lead; a closed request cannot be approved", async () => {
     const { service, alpha, store, needs } = await twoCrews();
     const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");

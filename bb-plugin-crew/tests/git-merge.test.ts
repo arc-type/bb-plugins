@@ -106,4 +106,43 @@ describe("GitBackend.merge without the working tree (BBP-269)", () => {
     expect(git(main, "show", `${ref}:c.txt`)).toBe("second");
     expect(git(main, "stash", "list")).toBe("");
   });
+
+  it("release after cleaning up: main fast-forwards to the parked commit, the checkout follows, the ref is gone (BBP-271)", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    writeFileSync(join(main, "b.txt"), "wip\n");
+    const parked = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    git(main, "checkout", "--", "b.txt");
+    const outcome = await createLocalGit().release(wt, "main");
+    expect(outcome).toEqual({ kind: "released", commit: parked.ok ? parked.commit : "" });
+    expect(git(main, "rev-parse", "main")).toBe(parked.ok ? parked.commit : "");
+    expect(git(main, "status", "--porcelain")).toBe("");
+    expect(readFileSync(join(main, "a.txt"), "utf8")).toBe("crew\n");
+    expect(() => git(main, "rev-parse", "--verify", "--quiet", "refs/crew/integration/main")).toThrow();
+  });
+
+  it("negative: release while the checkout is still dirty moves nothing and keeps the ref (BBP-271)", async () => {
+    const { main, wt } = repo();
+    commit(wt, "a.txt", "crew\n");
+    writeFileSync(join(main, "b.txt"), "wip\n");
+    const parked = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    const before = git(main, "rev-parse", "main");
+    expect(await createLocalGit().release(wt, "main")).toEqual({ kind: "held" });
+    expect(git(main, "rev-parse", "main")).toBe(before);
+    expect(git(main, "rev-parse", "refs/crew/integration/main")).toBe(parked.ok ? parked.commit : "");
+    expect(readFileSync(join(main, "b.txt"), "utf8")).toBe("wip\n");
+    expect(git(main, "stash", "list")).toBe("");
+  });
+
+  it("release without a checkout of main moves main by update-ref; without a parked ref there is nothing to release (BBP-271)", async () => {
+    const { main, wt } = repo();
+    expect(await createLocalGit().release(wt, "main")).toEqual({ kind: "none" });
+    commit(wt, "a.txt", "crew\n");
+    writeFileSync(join(main, "b.txt"), "wip\n");
+    const parked = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
+    git(main, "checkout", "--", "b.txt");
+    git(main, "switch", "-q", "--detach");
+    expect(await createLocalGit().release(wt, "main")).toEqual({ kind: "released", commit: parked.ok ? parked.commit : "" });
+    expect(git(main, "rev-parse", "main")).toBe(parked.ok ? parked.commit : "");
+  });
 });
