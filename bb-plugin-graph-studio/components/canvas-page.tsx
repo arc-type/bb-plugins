@@ -8,6 +8,7 @@ import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { ProjectFilter } from "../vendor/bb-canvas/components/ProjectFilter";
 import { FocusFilter } from "../vendor/bb-canvas/components/FocusFilter";
+import { FocusUnavailable } from "../vendor/bb-canvas/components/FocusUnavailable";
 import { mergeLayers, projectOfCrew } from "../vendor/bb-canvas/lib/layer";
 import {
   initialProjectFilter,
@@ -239,14 +240,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     return <div className="p-4 text-sm text-muted-foreground">Loading…</div>;
   }
   if (allFocusedMissing) {
-    return (
-      <div className="p-4 text-sm text-muted-foreground">
-        Focused items are no longer available.{" "}
-        <button type="button" onClick={() => chooseFocus([])}>
-          Show all
-        </button>
-      </div>
-    );
+    return <FocusUnavailable onShowAll={() => chooseFocus([])} />;
   }
   const shownNodes = layer.nodes.filter((node) => visibleFocused.has(node.id));
 

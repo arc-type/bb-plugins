@@ -372,7 +372,7 @@ describe("focus filter (BBP-240)", () => {
   it("shows only the focused crew's subtree, hiding the rest, and switches the label to Focus (1)", async () => {
     canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
     await screen.findByRole("button", { name: new RegExp("^a — ") });
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
     expect(await screen.findByRole("button", { name: "Focus (1)" })).toBeTruthy();
     expect(screen.getByRole("button", { name: new RegExp("^a — ") })).toBeTruthy();
@@ -382,18 +382,18 @@ describe("focus filter (BBP-240)", () => {
   it("restores everything through Clear selection", async () => {
     canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
     await screen.findByRole("button", { name: new RegExp("^a — ") });
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
     await screen.findByRole("button", { name: "Focus (1)" });
     fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
-    expect(await screen.findByRole("button", { name: "All" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Focus: All" })).toBeTruthy();
     expect(screen.getByRole("button", { name: new RegExp("^b — ") })).toBeTruthy();
   });
 
   it("survives a reload (persisted in localStorage)", async () => {
     canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
     await screen.findByRole("button", { name: new RegExp("^a — ") });
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
     await screen.findByRole("button", { name: "Focus (1)" });
     cleanup();
@@ -407,7 +407,7 @@ describe("focus filter (BBP-240)", () => {
     let nodes = crewLayer.nodes;
     canvasPanel({ rpc: { canvasLayer: () => ({ ...crewLayer, nodes }) } });
     await screen.findByRole("button", { name: new RegExp("^a — ") });
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Beta" }));
     expect(await screen.findByRole("button", { name: "Focus (2)" })).toBeTruthy();
@@ -426,7 +426,7 @@ describe("focus filter (BBP-240)", () => {
       let nodes = crewLayer.nodes;
       canvasPanel({ rpc: { canvasLayer: () => ({ ...crewLayer, nodes }) } });
       await screen.findByRole("button", { name: new RegExp("^a — ") });
-      fireEvent.click(screen.getByRole("button", { name: "All" }));
+      fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
       fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
       await screen.findByRole("button", { name: "Focus (1)" });
       nodes = crewLayer.nodes.filter((node) => !node.id.includes("alpha"));
@@ -445,7 +445,7 @@ describe("focus filter (BBP-240)", () => {
       expect(await screen.findByRole("button", { name: "Focus (1)" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: new RegExp("^b — ") })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: new RegExp("^Alpha — ") }), { ctrlKey: true });
-      expect(await screen.findByRole("button", { name: "All" })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Focus: All" })).toBeTruthy();
       expect(screen.getByRole("button", { name: new RegExp("^b — ") })).toBeTruthy();
     });
 
@@ -475,7 +475,7 @@ describe("Focus this in the sidebar (BBP-242)", () => {
   it("replaces a prior multi-select focus with just the selected crew", async () => {
     canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
     await screen.findByRole("button", { name: new RegExp("^a — ") });
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Beta" }));
     await screen.findByRole("button", { name: "Focus (2)" });

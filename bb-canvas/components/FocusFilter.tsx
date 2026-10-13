@@ -1,7 +1,7 @@
 // The toolbar's Focus dropdown (BBP-204/240): which crews, graph runs or
 // threads the canvas narrows down to, plus their whole subtree (the actual
 // filtering is lib/focus-filter.ts; this only builds the options and the
-// "All"/"Focus (n)" label). Thin wrapper around SearchableMultiSelect, same
+// "Focus: All"/"Focus (n)" label). Thin wrapper around SearchableMultiSelect, same
 // shape as ProjectFilter.
 import { SearchableMultiSelect, type SearchableMultiSelectOption } from "./SearchableMultiSelect";
 import type { CanvasNode } from "../lib/types";
@@ -45,7 +45,7 @@ function focusOptions(nodes: readonly CanvasNode[]): SearchableMultiSelectOption
 
 function summarizeFocus(options: readonly SearchableMultiSelectOption[], selected: readonly string[]): string {
   const count = options.filter((option) => selected.includes(option.id)).length;
-  return count === 0 ? "All" : `Focus (${count})`;
+  return count === 0 ? "Focus: All" : `Focus (${count})`;
 }
 
 export function FocusFilter({ nodes, selected, onChange }: FocusFilterProps) {

@@ -31,9 +31,9 @@ const nodes: CanvasNode[] = [
 ];
 
 describe("FocusFilter", () => {
-  it("says All when nothing is focused", () => {
+  it("says Focus: All when nothing is focused", () => {
     render(<FocusFilter nodes={nodes} selected={[]} onChange={() => {}} />);
-    expect(screen.getByRole("button", { name: "All" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Focus: All" })).toBeTruthy();
   });
 
   it("says Focus (n) once nodes are selected", () => {
@@ -43,7 +43,7 @@ describe("FocusFilter", () => {
 
   it("groups options as Crews, Graph runs and Threads, offering only those kinds", () => {
     render(<FocusFilter nodes={nodes} selected={[]} onChange={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     const group = screen.getByRole("group", { name: "Focus" });
     expect(Array.from(group.querySelectorAll('[role="presentation"]')).map((node) => node.textContent)).toEqual([
       "Crews",
@@ -59,7 +59,7 @@ describe("FocusFilter", () => {
 
   it("searches a thread by its thread id", () => {
     render(<FocusFilter nodes={nodes} selected={[]} onChange={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abc123" } });
     expect(screen.getByRole("checkbox", { name: "Fix login bug" })).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Alpha" })).toBeNull();
@@ -67,7 +67,7 @@ describe("FocusFilter", () => {
 
   it("searches a crew by its members' member@crew strings", () => {
     render(<FocusFilter nodes={nodes} selected={[]} onChange={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "b@alpha" } });
     expect(screen.getByRole("checkbox", { name: "Alpha" })).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Nightly run" })).toBeNull();
@@ -76,7 +76,7 @@ describe("FocusFilter", () => {
   it("toggles a selection on and off", () => {
     const onChange = vi.fn();
     render(<FocusFilter nodes={nodes} selected={[]} onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.click(screen.getByRole("button", { name: "Focus: All" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
     expect(onChange).toHaveBeenLastCalledWith(["crew:alpha"]);
   });
