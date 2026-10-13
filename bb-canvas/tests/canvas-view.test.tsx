@@ -398,3 +398,60 @@ describe("CanvasView sidebar action wiring (BBP-185)", () => {
     expect(onOpenAtRow).toHaveBeenCalledWith("th1", 12);
   });
 });
+
+describe("CanvasView focus (BBP-241)", () => {
+  const focusNodes: CanvasNode[] = [
+    { id: "crew", kind: "crew", label: "Alpha", parentId: null },
+    { id: "m1", kind: "member", label: "a", parentId: "crew" },
+    { id: "run", kind: "graph-run", label: "Nightly", parentId: null },
+    { id: "thread", kind: "thread", label: "Fix bug", parentId: null },
+  ];
+
+  it("Ctrl-click on a crew card toggles focus instead of selecting it", () => {
+    const onToggleFocus = vi.fn();
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["crew"])} onToggleFocus={onToggleFocus} />);
+    fireEvent.click(card(/^Alpha/), { ctrlKey: true });
+    expect(onToggleFocus).toHaveBeenCalledWith("crew");
+    expect(screen.queryByLabelText("Details for Alpha")).toBeNull();
+  });
+
+  it("Cmd-click (metaKey) on a graph-run card toggles focus", () => {
+    const onToggleFocus = vi.fn();
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set()} onToggleFocus={onToggleFocus} />);
+    fireEvent.click(card(/^Nightly/), { metaKey: true });
+    expect(onToggleFocus).toHaveBeenCalledWith("run");
+  });
+
+  it("negative: Ctrl-click on a member card (not crew/graph-run/thread) selects as normal, ignoring the modifier", () => {
+    const onToggleFocus = vi.fn();
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["crew"])} onToggleFocus={onToggleFocus} />);
+    fireEvent.click(card(/^a — /), { ctrlKey: true });
+    expect(onToggleFocus).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Details for a")).toBeTruthy();
+  });
+
+  it("negative: without onToggleFocus, a Ctrl-click on a crew card just selects it", () => {
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["crew"])} />);
+    fireEvent.click(card(/^Alpha/), { ctrlKey: true });
+    expect(screen.getByLabelText("Details for Alpha")).toBeTruthy();
+  });
+
+  it("a plain click (no modifier) still just selects, even with onToggleFocus given", () => {
+    const onToggleFocus = vi.fn();
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["crew"])} onToggleFocus={onToggleFocus} />);
+    fireEvent.click(card(/^Alpha/));
+    expect(onToggleFocus).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Details for Alpha")).toBeTruthy();
+  });
+
+  it("dims the nodes named in focusPathIds", () => {
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["crew"])} focusPathIds={new Set(["crew"])} />);
+    expect(card(/^Alpha/).getAttribute("aria-disabled")).toBe("true");
+    expect(card(/^a — /).getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("negative: no focusPathIds dims nothing", () => {
+    render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["crew"])} />);
+    expect(card(/^Alpha/).getAttribute("aria-disabled")).toBe("false");
+  });
+});

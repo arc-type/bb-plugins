@@ -6,7 +6,7 @@
 // Colour means state, nothing else (BBP-214): a neutral card outside an
 // error/running/waiting state never carries a colour of its own. `kind` is
 // kept only for the caller's icon and the card's ARIA label, not the border.
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import type { CanvasNodeKind, CanvasStatus } from "../lib/types";
 import { TIER_OF, TIER_TYPOGRAPHY, type Tier } from "../lib/tiers";
 
@@ -18,7 +18,9 @@ export type NodeCardProps = {
   /** A single-colour line icon, left of the label. */
   icon?: ReactNode;
   selected?: boolean;
-  onClick?: () => void;
+  /** Carries the click's modifier keys through (BBP-241: Ctrl/Cmd-click
+   *  toggles focus instead of selecting). */
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
   /** Outside the frame currently being edited (BBP-166): faded and locked,
    *  not merely unclickable — a reader must see at a glance which layer is
    *  live right now. */

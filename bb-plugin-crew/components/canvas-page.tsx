@@ -17,6 +17,7 @@ import {
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
 import {
+  focusPathIds,
   loadFocusFilter,
   missingFocusIds,
   saveFocusFilter,
@@ -166,6 +167,8 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     setFocusSelected(ids);
     saveFocusFilter(ids);
   };
+  const toggleFocus = (id: string) =>
+    chooseFocus(focusSelected.includes(id) ? focusSelected.filter((other) => other !== id) : [...focusSelected, id]);
   // BBP-197: a live-update poll must not reset the focus — it is plain React
   // state here, untouched by the layer-loading effect below.
   const missingFocused = useMemo(
@@ -175,6 +178,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   const allFocusedMissing = focusSelected.length > 0 && missingFocused.length === focusSelected.length;
   const visibleFocused = useMemo(
     () => (layer ? visibleFocusIds(layer.nodes, focusSelected) : new Set<string>()),
+    [layer, focusSelected],
+  );
+  const focusDimmed = useMemo(
+    () => (layer ? focusPathIds(layer.nodes, focusSelected) : new Set<string>()),
     [layer, focusSelected],
   );
 
@@ -303,6 +310,9 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       // state; the toolbar keeps its identity across a filter change.
       resetKey={shownKey}
       nodes={shownNodes}
+      onToggleFocus={toggleFocus}
+      focusPathIds={focusDimmed}
+      focusSelected={focusSelected}
       edges={layer.edges}
       frames={layer.frames}
       editableFrameIds={editableFrameIds}

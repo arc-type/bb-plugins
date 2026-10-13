@@ -436,6 +436,27 @@ describe("focus filter (BBP-240)", () => {
       expect(await screen.findByRole("button", { name: new RegExp("^b — ") })).toBeTruthy();
     });
   });
+
+  describe("Ctrl/Cmd-click toggles focus (BBP-241)", () => {
+    it("Ctrl-clicking a crew card focuses it, a second Ctrl-click clears it", async () => {
+      canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
+      await screen.findByRole("button", { name: new RegExp("^a — ") });
+      fireEvent.click(screen.getByRole("button", { name: new RegExp("^Alpha — ") }), { ctrlKey: true });
+      expect(await screen.findByRole("button", { name: "Focus (1)" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: new RegExp("^b — ") })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: new RegExp("^Alpha — ") }), { ctrlKey: true });
+      expect(await screen.findByRole("button", { name: "All" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: new RegExp("^b — ") })).toBeTruthy();
+    });
+
+    it("dims the path to the root while a crew is focused", async () => {
+      canvasPanel({ rpc: { canvasLayer: () => crewLayer } });
+      await screen.findByRole("button", { name: new RegExp("^a — ") });
+      fireEvent.click(screen.getByRole("button", { name: new RegExp("^Alpha — ") }), { ctrlKey: true });
+      await screen.findByRole("button", { name: "Focus (1)" });
+      expect(screen.getByRole("button", { name: new RegExp("^Shop — ") }).getAttribute("aria-disabled")).toBe("true");
+    });
+  });
 });
 
 describe("Focus this in the sidebar (BBP-242)", () => {

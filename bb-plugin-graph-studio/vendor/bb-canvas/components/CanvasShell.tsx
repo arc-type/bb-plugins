@@ -2,7 +2,18 @@
 // zoom at the pointer. No MiniMap and no keyboard here — those are the next
 // work item, built on fixture data before either plugin feeds this component
 // real data.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import {
   Background,
   Controls,
@@ -209,7 +220,9 @@ export type CanvasShellProps = {
   edges?: readonly CanvasEdge[];
   frames?: readonly CanvasFrame[];
   selectedId?: string | null;
-  onSelect?: (nodeId: string) => void;
+  /** The click's modifier keys ride along (BBP-241: Ctrl/Cmd-click toggles
+   *  focus instead of selecting). */
+  onSelect?: (nodeId: string, event?: ReactMouseEvent) => void;
   /** Node and frame ids outside the frame being edited (BBP-166) — faded,
    *  locked, no `onSelect`. */
   dimmedIds?: ReadonlySet<string>;
@@ -252,7 +265,7 @@ function toFlow(
   nodes: readonly CanvasNode[],
   frames: readonly CanvasFrame[],
   selectedId: string | null | undefined,
-  onSelect: ((id: string) => void) | undefined,
+  onSelect: ((id: string, event?: ReactMouseEvent) => void) | undefined,
   dimmedIds: ReadonlySet<string>,
   expanded: ReadonlySet<string>,
   expandable: ReadonlySet<string>,
@@ -274,7 +287,7 @@ function toFlow(
       status: node.status,
       kind: node.kind,
       selected: node.id === selectedId,
-      onClick: onSelect ? () => onSelect(node.id) : undefined,
+      onClick: onSelect ? (event: ReactMouseEvent<HTMLButtonElement>) => onSelect(node.id, event) : undefined,
       dimmed: dimmedIds.has(node.id),
       loadFailed: failedLoads.has(node.id),
       expander: expandable.has(node.id)
