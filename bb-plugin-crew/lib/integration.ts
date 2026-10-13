@@ -480,7 +480,7 @@ export function createIntegration(deps: IntegrationDeps) {
           from: { kind: "human" },
           to: crewLead.address,
           subject: `Merge request ${id} rejected`,
-          body: `The human rejected merging ${merge.branch}${note ? `: ${note}` : "."}`,
+          body: `The human rejected merging ${merge.branch}${note ? `: ${note}` : "."}\n\n${describe(crew, merge)}`,
           crew: crew.name,
         });
       }

@@ -450,3 +450,15 @@ describe("merge outcome reaches the submitting lead (BBP-250)", () => {
     expect(toLead(env).at(-1)!.body).toContain("CRD-1");
   });
 });
+
+describe("human reject names the delivery (BBP-250)", () => {
+  it("the lead's reject message carries MR, branch and ticket", async () => {
+    const { service, alpha, store } = await twoCrews();
+    const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
+    await service.integration.reject(merge.id, "needs tests");
+    const body = store.listMessages({ toMember: alpha.members["core-lead"]!.id }).at(-1)!.body;
+    expect(body).toContain(`MR ${merge.id}`);
+    expect(body).toContain("ticket CRD-1");
+    expect(body).toContain("needs tests");
+  });
+});
