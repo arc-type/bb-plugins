@@ -9,8 +9,9 @@ import { ThreadChat, useBbNavigate, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { FocusUnavailable } from "../vendor/bb-canvas/components/FocusUnavailable";
 import { missingFocusIds, visibleFocusIds } from "../vendor/bb-canvas/lib/focus-filter";
-import { threadTree, type ProjectLike, type ThreadListItem } from "../vendor/bb-canvas/lib/thread-tree";
-import { DEFAULT_THREAD_FILTER, filterThreads, limitTurns, type ThreadFilter } from "../vendor/bb-canvas/lib/thread-filter";
+import { overviewTree } from "../vendor/bb-canvas/lib/overview";
+import type { ProjectLike, ThreadListItem } from "../vendor/bb-canvas/lib/thread-tree";
+import { DEFAULT_THREAD_FILTER, limitTurns, type ThreadFilter } from "../vendor/bb-canvas/lib/thread-filter";
 import { loadProjectFilter, saveProjectFilter } from "../vendor/bb-canvas/lib/project-filter";
 import {
   enrichTurnNodes,
@@ -78,7 +79,23 @@ function focusFromSubPath(subPath: string | undefined): string | null {
   return match ? decodeURIComponent(match[1]!) : null;
 }
 
-export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focusThreadId?: string }) {
+/** The overview defaults (BBP-283): window, thread limit and turns per thread. */
+export type OverviewSettings = Pick<ThreadFilter, "windowMs" | "limit" | "turnsPerThread">;
+
+/**
+ * The page's props, fixed up front (BBP-285) so the BBP-283 work items can
+ * fill them in parallel. `overview` overrides the default filter; `activeOnly`
+ * and `layout` take effect in their own items.
+ */
+export type CanvasPageProps = {
+  subPath?: string;
+  focusThreadId?: string;
+  overview?: Partial<OverviewSettings>;
+  activeOnly?: boolean;
+  layout?: "tabs" | "split";
+};
+
+export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps) {
   const sdk = useSdk();
   const navigate = useBbNavigate();
   const [state, setState] = useState<State>(null);
@@ -87,7 +104,7 @@ export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focus
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   // The project pick is shared with the Activity Canvas pages via the same
   // stored key; the other filters reset with the page.
-  const [filter, setFilter] = useState<ThreadFilter>(() => ({ ...DEFAULT_THREAD_FILTER, projectIds: loadProjectFilter() }));
+  const [filter, setFilter] = useState<ThreadFilter>(() => ({ ...DEFAULT_THREAD_FILTER, ...overview, projectIds: loadProjectFilter() }));
   const changeFilter = (next: ThreadFilter) => {
     if (next.projectIds !== filter.projectIds) saveProjectFilter(next.projectIds);
     setFilter(next);
@@ -121,11 +138,7 @@ export function CanvasPage({ subPath, focusThreadId }: { subPath?: string; focus
 
   const layer = useMemo(() => {
     if (state === null || !("threads" in state)) return null;
-    const shown = filterThreads(state.threads, filter, Date.now());
-    // The thread someone opened the canvas for stays in view even when an
-    // archived flag, the window or the limit would drop it.
-    const focused = focus !== null && !shown.some((thread) => thread.id === focus) ? state.threads.find((thread) => thread.id === focus) : undefined;
-    return threadTree(state.projects, focused ? [...shown, focused] : shown);
+    return overviewTree({ projects: state.projects, threads: state.threads, filter, focusThreadId: focus, now: Date.now() });
   }, [state, filter, focus]);
   const focusIds = useMemo(() => (focus === null ? [] : [threadNodeId(focus)]), [focus]);
 
