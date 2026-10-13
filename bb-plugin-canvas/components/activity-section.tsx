@@ -16,28 +16,29 @@ export type ActivitySectionProps = {
 };
 
 export function ActivitySection({ sdk, threadId, turnsPerThread, version, onReveal }: ActivitySectionProps) {
-  const [list, setList] = useState<ActivityList | null>(null);
+  // Tagged with its thread, so a switch never shows the previous thread's list.
+  const [loaded, setLoaded] = useState<{ threadId: string; list: ActivityList } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    // A failing or missing timeline just leaves the section out.
+    // A failing or missing timeline leaves the section out until a load
+    // succeeds; a failing live reload keeps the last list (BBP-283 review).
     Promise.resolve()
       .then(() => sdk.threads.timeline({ threadId }))
       .then(
         (response) => {
           if (cancelled) return;
           const { nodes } = timelineToCanvas(threadId, { rows: response.rows as unknown as readonly TimelineRowLike[] });
-          setList(activityList(nodes, threadNodeId(threadId), turnsPerThread));
+          setLoaded({ threadId, list: activityList(nodes, threadNodeId(threadId), turnsPerThread) });
         },
-        () => {
-          if (!cancelled) setList(null);
-        },
+        () => {},
       );
     return () => {
       cancelled = true;
     };
   }, [sdk, threadId, turnsPerThread, version]);
 
-  if (list === null) return null;
+  if (loaded === null || loaded.threadId !== threadId) return null;
+  const { list } = loaded;
   return (
     <section aria-label="Activity" className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
