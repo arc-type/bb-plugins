@@ -36,3 +36,8 @@ ids must then be unique across all groups of the crew.
 **Rename (crew plan)** — a member whose key changes while it stays the same
 member (same group and id). It keeps its thread and history instead of being
 removed and spawned again.
+
+**Drift (crew)** — an instance whose stored crew file no longer matches the
+crew file it is compared against (its template): members added or removed,
+or a member's provider or model changed. The crew file version is a
+per-crew counter and is not compared across crews.
