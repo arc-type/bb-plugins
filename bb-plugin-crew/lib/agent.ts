@@ -458,7 +458,7 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
     execute: (params, ctx) =>
       withSelf(async (self) => {
         if (!isIntegrator(self.member.config)) return failure("Only the integrator lists merge requests.");
-        const rows = store.listMerges({ projectId: self.crew.projectId, states: ["open", "returned"] });
+        const rows = store.listMerges({ projectId: self.crew.projectId, states: ["open", "returned", "parked"] });
         return rows.length ? bounded(rows.map((row) => formatMerge(row, (id) => store.getCrew(id)?.name ?? id)).join("\n")) : "No merge requests wait.";
       })(params, ctx),
   });

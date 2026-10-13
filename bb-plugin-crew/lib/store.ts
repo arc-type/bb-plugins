@@ -376,7 +376,8 @@ export type DependencyRow = {
   detail: string | null;
 };
 /** `open` and `returned` wait for the human; `returned` came back from the integrator or a failed merge. */
-export const MERGE_STATES = ["open", "returned", "merged", "rejected"] as const;
+/** `parked`: merged on refs/crew/integration/<base> behind a dirty base checkout, not yet in the base (ADR 0004). */
+export const MERGE_STATES = ["open", "returned", "parked", "merged", "rejected"] as const;
 export type MergeState = (typeof MERGE_STATES)[number];
 export type MergeRequestRow = {
   id: string;
