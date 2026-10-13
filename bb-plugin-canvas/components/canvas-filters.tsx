@@ -11,6 +11,7 @@ const HOUR = 3_600_000;
 const WINDOWS: { value: string; label: string; ms: number | null }[] = [
   { value: "all", label: "Any time", ms: null },
   { value: "1h", label: "Last hour", ms: HOUR },
+  { value: "12h", label: "Last 12 hours", ms: 12 * HOUR },
   { value: "24h", label: "Last 24 hours", ms: 24 * HOUR },
   { value: "7d", label: "Last 7 days", ms: 7 * 24 * HOUR },
   { value: "30d", label: "Last 30 days", ms: 30 * 24 * HOUR },
@@ -49,7 +50,12 @@ export type CanvasFiltersProps = {
 
 export function CanvasFilters({ projects, filter, onChange }: CanvasFiltersProps) {
   const set = (patch: Partial<ThreadFilter>) => onChange({ ...filter, ...patch });
-  const windowValue = WINDOWS.find((entry) => entry.ms === filter.windowMs)?.value ?? "all";
+  // A window from the plugin settings that is none of the presets still shows as itself.
+  const windows =
+    filter.windowMs === null || WINDOWS.some((entry) => entry.ms === filter.windowMs)
+      ? WINDOWS
+      : [...WINDOWS, { value: "custom", label: `Last ${Math.round(filter.windowMs / HOUR)} hours`, ms: filter.windowMs }];
+  const windowValue = windows.find((entry) => entry.ms === filter.windowMs)?.value ?? "all";
   return (
     <>
       <ProjectFilter projects={projects} selected={filter.projectIds} onChange={(projectIds) => set({ projectIds })} />
@@ -63,10 +69,10 @@ export function CanvasFilters({ projects, filter, onChange }: CanvasFiltersProps
       <select
         aria-label="Time window"
         value={windowValue}
-        onChange={(event) => set({ windowMs: WINDOWS.find((entry) => entry.value === event.target.value)?.ms ?? null })}
+        onChange={(event) => set({ windowMs: windows.find((entry) => entry.value === event.target.value)?.ms ?? null })}
         style={CONTROL}
       >
-        {WINDOWS.map((entry) => (
+        {windows.map((entry) => (
           <option key={entry.value} value={entry.value}>
             {entry.label}
           </option>

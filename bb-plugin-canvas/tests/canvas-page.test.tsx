@@ -26,11 +26,11 @@ const row = (id: string, projectId: string, title: string | null, extra: { statu
   ...extra,
 });
 
-function canvasPanel(sdk: Record<string, unknown>) {
+function canvasPanel(sdk: Record<string, unknown>, settings?: Record<string, number>) {
   const panel = app.navPanels.find((entry) => entry.id === "canvas")!;
   // No live events unless a test brings its own `subscribe`.
   const withLive = { subscribe: () => () => {}, ...sdk };
-  return renderSlot(panel, { subPath: "" }, { context: { projectId: null, threadId: null }, sdk: withLive as never });
+  return renderSlot(panel, { subPath: "" }, { context: { projectId: null, threadId: null }, sdk: withLive as never, ...(settings ? { settings } : {}) });
 }
 
 describe("the Canvas nav page", () => {
@@ -119,6 +119,7 @@ describe("the Canvas filters", () => {
   it("narrows by time window", async () => {
     const twoDays = Date.now() - 48 * 3_600_000;
     canvasPanel(sdk([row("t1", "p1", "Today"), row("t2", "p1", "Stale", { updatedAt: twoDays })]));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Time window" }), { target: { value: "all" } });
     expect(await screen.findByRole("button", { name: /^Stale — / })).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: "Time window" }), { target: { value: "24h" } });
     expect(card("Stale")).toBeNull();
@@ -134,18 +135,18 @@ describe("the Canvas filters", () => {
   });
 
   it("resets the filters from the empty state", async () => {
-    const twoDays = Date.now() - 48 * 3_600_000;
-    canvasPanel(sdk([row("t1", "p1", "Stale", { updatedAt: twoDays })]));
-    expect(await screen.findByRole("button", { name: /^Stale — / })).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Time window" }), { target: { value: "24h" } });
+    canvasPanel(sdk([row("t1", "p1", "Calm")]));
+    expect(await screen.findByRole("button", { name: /^Calm — / })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Status/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Failed" }));
     fireEvent.click(await screen.findByRole("button", { name: "Reset filters" }));
-    expect(await screen.findByRole("button", { name: /^Stale — / })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Calm — / })).toBeTruthy();
   });
 
   it("offers a turns-per-thread limit", async () => {
     canvasPanel(sdk([row("t1", "p1", "Live")]));
     const input = (await screen.findByRole("spinbutton", { name: "Turns per thread" })) as HTMLInputElement;
-    expect(input.value).toBe("20");
+    expect(input.value).toBe("1");
   });
 
   it("says so when the filters leave no thread", async () => {
@@ -297,7 +298,7 @@ describe("the Canvas page live", () => {
   it("reloads the turns of an opened thread on thread:changed", async () => {
     let rows = [turnRow("turn-1")];
     const { sdk, timeline, emit } = liveSdk(() => rows);
-    canvasPanel(sdk);
+    canvasPanel(sdk, { overviewTurns: 10 });
     await open(/^Plain chat — /);
     await waitFor(() => expect(timeline).toHaveBeenCalledTimes(1));
     rows = [turnRow("turn-1"), { ...turnRow("turn-2"), summaryCount: 0 }];
@@ -324,5 +325,42 @@ describe("the Canvas page live", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /^Other chat — / }).querySelector('[data-bb-status-glyph="running"]')).not.toBeNull(),
     );
+  });
+});
+
+// BBP-287 (BBP-225): the overview window — last 12 h, 20 threads, 1 turn,
+// live threads always in; the bar names it and offers "Show all".
+describe("the Canvas overview window", () => {
+  const sdk = (threads: unknown[]) => ({
+    projects: { list: async () => [{ id: "p1", name: "Shop" }, { id: "p2", name: "Blog" }] },
+    threads: { list: async () => threads },
+  });
+  const DAY = 24 * 3_600_000;
+  const card = (name: string) => screen.queryByRole("button", { name: new RegExp(`^${name} — `) });
+
+  it("shows the last 12 h by default and says so; Show all brings back the rest", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Today"), row("t2", "p2", "Stale", { updatedAt: Date.now() - 2 * DAY })]));
+    expect(await screen.findByRole("button", { name: /^Today — / })).toBeTruthy();
+    expect(card("Stale")).toBeNull();
+    // The project with nothing left in view is gone too.
+    expect(screen.queryByRole("button", { name: /^Blog — / })).toBeNull();
+    expect(screen.getByText("Last 12 h · 1 of 2")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(await screen.findByRole("button", { name: /^Blog — / })).toBeTruthy();
+    expect(screen.getByText("2 of 2")).toBeTruthy();
+  });
+
+  it("keeps a running thread three days old in view", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Busy", { status: "active", updatedAt: Date.now() - 3 * DAY }), row("t2", "p1", "Done", { updatedAt: Date.now() - 3 * DAY })]));
+    expect(await screen.findByRole("button", { name: /^Busy — / })).toBeTruthy();
+    expect(card("Done")).toBeNull();
+  });
+
+  it("takes window, thread limit and turns from the plugin settings", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Yesterday", { updatedAt: Date.now() - 20 * 3_600_000 })]), { windowHours: 24, maxThreads: 5, overviewTurns: 3 });
+    expect(await screen.findByRole("button", { name: /^Yesterday — / })).toBeTruthy();
+    expect(screen.getByText("Last 24 h · 1 of 1")).toBeTruthy();
+    expect((screen.getByRole("spinbutton", { name: "Thread limit" }) as HTMLInputElement).value).toBe("5");
+    expect((screen.getByRole("spinbutton", { name: "Turns per thread" }) as HTMLInputElement).value).toBe("3");
   });
 });

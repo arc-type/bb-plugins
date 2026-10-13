@@ -5,11 +5,11 @@
 // `thread:changed` keeps status and loaded turns current. The same page is
 // the thread panel's "Canvas" tab, focused on that thread (BBP-277).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ThreadChat, useBbNavigate, useSdk } from "@get-bb/plugin-sdk/app";
+import { ThreadChat, useBbNavigate, useSdk, useSettings } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { FocusUnavailable } from "../vendor/bb-canvas/components/FocusUnavailable";
 import { missingFocusIds, visibleFocusIds } from "../vendor/bb-canvas/lib/focus-filter";
-import { overviewTree } from "../vendor/bb-canvas/lib/overview";
+import { overviewSettings, overviewSummary, overviewTree, type OverviewSettings } from "../vendor/bb-canvas/lib/overview";
 import type { ProjectLike, ThreadListItem } from "../vendor/bb-canvas/lib/thread-tree";
 import { DEFAULT_THREAD_FILTER, limitTurns, type ThreadFilter } from "../vendor/bb-canvas/lib/thread-filter";
 import { loadProjectFilter, saveProjectFilter } from "../vendor/bb-canvas/lib/project-filter";
@@ -79,9 +79,6 @@ function focusFromSubPath(subPath: string | undefined): string | null {
   return match ? decodeURIComponent(match[1]!) : null;
 }
 
-/** The overview defaults (BBP-283): window, thread limit and turns per thread. */
-export type OverviewSettings = Pick<ThreadFilter, "windowMs" | "limit" | "turnsPerThread">;
-
 /**
  * The page's props, fixed up front (BBP-285) so the BBP-283 work items can
  * fill them in parallel. `overview` overrides the default filter; `activeOnly`
@@ -104,7 +101,18 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   // The project pick is shared with the Activity Canvas pages via the same
   // stored key; the other filters reset with the page.
-  const [filter, setFilter] = useState<ThreadFilter>(() => ({ ...DEFAULT_THREAD_FILTER, ...overview, projectIds: loadProjectFilter() }));
+  // The overview window comes from the plugin settings (BBP-287), which may
+  // arrive after the first render; the toolbar can still override it.
+  const settings = useSettings().values;
+  const defaults = useMemo<ThreadFilter>(
+    () => ({ ...DEFAULT_THREAD_FILTER, ...overviewSettings(settings), ...overview }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(settings), JSON.stringify(overview)],
+  );
+  const [filter, setFilter] = useState<ThreadFilter>(() => ({ ...defaults, projectIds: loadProjectFilter() }));
+  useEffect(() => {
+    setFilter((prev) => ({ ...prev, windowMs: defaults.windowMs, limit: defaults.limit, turnsPerThread: defaults.turnsPerThread }));
+  }, [defaults]);
   const changeFilter = (next: ThreadFilter) => {
     if (next.projectIds !== filter.projectIds) saveProjectFilter(next.projectIds);
     setFilter(next);
@@ -170,7 +178,26 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
   if (layer !== null && focusIds.length > 0 && missingFocusIds(layer.nodes, focusIds).length === focusIds.length)
     return <FocusUnavailable onShowAll={() => setFocus(null)} />;
   if (state.threads.length === 0) return <div className="p-4 text-sm text-muted-foreground">No threads yet.</div>;
-  const toolbar = <CanvasFilters projects={state.projects} filter={filter} onChange={changeFilter} />;
+  const showingAll = filter.windowMs === null && filter.limit === null;
+  const toolbar = (
+    <>
+      <CanvasFilters projects={state.projects} filter={filter} onChange={changeFilter} />
+      {layer !== null ? (
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>{overviewSummary(filter, layer.shown, layer.total)}</span>
+          {!showingAll ? (
+            <button
+              type="button"
+              onClick={() => changeFilter({ ...filter, windowMs: null, limit: null })}
+              className="rounded px-1 text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary"
+            >
+              Show all
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+    </>
+  );
   if (layer === null || layer.nodes.length === 0)
     return (
       <div className="flex flex-col">
@@ -179,7 +206,7 @@ export function CanvasPage({ subPath, focusThreadId, overview }: CanvasPageProps
           No threads match the filters.
           <button
             type="button"
-            onClick={() => changeFilter({ ...DEFAULT_THREAD_FILTER, projectIds: [] })}
+            onClick={() => changeFilter({ ...defaults, projectIds: [] })}
             className="rounded px-1 text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary"
           >
             Reset filters
