@@ -568,3 +568,33 @@ describe("the Canvas Activity list", () => {
     expect(await screen.findByText("1 of 3 in canvas")).toBeTruthy();
   });
 });
+
+// BBP-283 review fix 4: the Activity list's error path.
+describe("the Canvas Activity list when the timeline fails", () => {
+  it("leaves the section out, and the canvas keeps working, when the timeline cannot be read", async () => {
+    const { sdk } = liveSdk(() => []);
+    sdk.threads.timeline.mockImplementation(async () => {
+      throw new Error("gone");
+    });
+    canvasPanel(sdk);
+    fireEvent.click(await screen.findByRole("button", { name: /^Plain chat — / }));
+    await waitFor(() => expect(sdk.threads.timeline).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "Activity" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Other chat — / })).toBeTruthy();
+  });
+
+  it("keeps the last list when a live reload fails", async () => {
+    const { sdk, emit } = liveSdk(() => [{ ...turnRow("turn-1"), summaryCount: 0 }]);
+    canvasPanel(sdk);
+    fireEvent.click(await screen.findByRole("button", { name: /^Plain chat — / }));
+    await screen.findByText("1 of 1 in canvas");
+    sdk.threads.timeline.mockImplementation(async () => {
+      throw new Error("offline");
+    });
+    const calls = sdk.threads.timeline.mock.calls.length;
+    emit({ entity: "thread", id: "t1", changes: ["events-appended"] });
+    await waitFor(() => expect(sdk.threads.timeline.mock.calls.length).toBeGreaterThan(calls));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByText("1 of 1 in canvas")).toBeTruthy();
+  });
+});
