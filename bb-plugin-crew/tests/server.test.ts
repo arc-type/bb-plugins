@@ -116,3 +116,21 @@ describe("server wiring (E2)", () => {
     await harness.lifecycle.dispose();
   });
 });
+
+describe("server wiring — teardown (BBP-260)", () => {
+  it("negative: an activity publish pending at dispose never fires against the stale context", async () => {
+    const { bb, harness } = createFakePluginHost({ pluginId: "crew" });
+    await plugin(bb);
+    const errors: unknown[] = [];
+    const onError = (error: unknown) => errors.push(error);
+    process.on("uncaughtException", onError);
+    try {
+      await harness.behavior.callRpc("stopChain", { chainId: "none" });
+      await harness.lifecycle.dispose();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    } finally {
+      process.off("uncaughtException", onError);
+    }
+    expect(errors.map((error) => (error as Error).name)).toEqual([]);
+  });
+});
