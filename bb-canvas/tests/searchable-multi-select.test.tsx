@@ -329,4 +329,78 @@ describe("SearchableMultiSelect", () => {
     fireEvent.keyDown(screen.getByRole("checkbox", { name: "Alpha" }), { key: "Enter" });
     expect(canvasShortcut).not.toHaveBeenCalled();
   });
+
+  it("stays a flat list with no group headers when options have no group (Projects regression, BBP-239)", () => {
+    render(
+      <SearchableMultiSelect label="Projects" options={options} selected={["p1"]} onChange={() => {}} emptyText="No projects yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Projects:/ }));
+    expect(screen.queryAllByRole("presentation")).toHaveLength(0);
+    expect(screen.getAllByRole("checkbox").map((checkbox) => checkbox.getAttribute("aria-label"))).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+  });
+
+  const groupedOptions = [
+    { id: "c1", name: "Alpha crew", group: "Crews" },
+    { id: "t1", name: "Beta thread", group: "Threads" },
+    { id: "c2", name: "Gamma crew", group: "Crews" },
+  ];
+
+  it("clusters grouped options under a non-interactive header per group, in first-occurrence order (BBP-239)", () => {
+    render(
+      <SearchableMultiSelect label="Focus" options={groupedOptions} selected={[]} onChange={() => {}} emptyText="Nothing yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Focus:/ }));
+    const group = screen.getByRole("group", { name: "Focus" });
+    const headings = group.querySelectorAll('[role="presentation"]');
+    expect(Array.from(headings).map((node) => node.textContent)).toEqual(["Crews", "Threads"]);
+    // First occurrence of "Crews" comes before "Threads" even though Threads is alphabetically first.
+    const labels = screen.getAllByRole("checkbox").map((checkbox) => checkbox.getAttribute("aria-label"));
+    expect(labels).toEqual(["Alpha crew", "Gamma crew", "Beta thread"]);
+  });
+
+  it("matches on keywords in addition to name, case-insensitively (BBP-239)", () => {
+    const keywordOptions = [
+      { id: "t1", name: "Release planning", keywords: ["thr_abc123"] },
+      { id: "t2", name: "Bug triage", keywords: ["thr_xyz999"] },
+    ];
+    render(
+      <SearchableMultiSelect label="Focus" options={keywordOptions} selected={[]} onChange={() => {}} emptyText="Nothing yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Focus:/ }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ABC123" } });
+    expect(screen.getByRole("checkbox", { name: "Release planning" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: "Bug triage" })).toBeNull();
+  });
+
+  it("keeps group headers across the checked/unchecked split and keeps group order stable while checking a row", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SearchableMultiSelect label="Focus" options={groupedOptions} selected={["c1"]} onChange={onChange} emptyText="Nothing yet." />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Focus:/ }));
+    // Alpha crew (checked) is pinned above the divider under its own "Crews" header;
+    // Beta thread and Gamma crew remain below, grouped in their frozen-order appearance.
+    let group = screen.getByRole("group", { name: "Focus" });
+    expect(Array.from(group.querySelectorAll('[role="presentation"]')).map((node) => node.textContent)).toEqual([
+      "Crews",
+      "Threads",
+      "Crews",
+    ]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Gamma crew" }));
+    expect(onChange).toHaveBeenLastCalledWith(["c1", "c2"]);
+    rerender(
+      <SearchableMultiSelect label="Focus" options={groupedOptions} selected={["c1", "c2"]} onChange={onChange} emptyText="Nothing yet." />,
+    );
+    // The frozen split keeps Gamma crew below the divider despite now being checked.
+    group = screen.getByRole("group", { name: "Focus" });
+    expect(Array.from(group.querySelectorAll('[role="presentation"]')).map((node) => node.textContent)).toEqual([
+      "Crews",
+      "Threads",
+      "Crews",
+    ]);
+  });
 });
