@@ -1,23 +1,30 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createLocalGit } from "../lib/integration";
 
 // BBP-269: GitBackend.merge against a real temporary repository with a crew worktree.
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
+// Real git is slow under load (parallel check runs): the initial commit is built once and copied per test.
+let template = "";
+beforeAll(() => {
+  template = join(realpathSync(mkdtempSync(join(tmpdir(), "crew-merge-template-"))), "main");
+  execFileSync("git", ["init", "-q", "-b", "main", template]);
+  for (const [k, v] of [["user.name", "t"], ["user.email", "t@t"], ["commit.gpgsign", "false"]]) git(template, "config", k!, v!);
+  writeFileSync(join(template, "a.txt"), "a\n");
+  writeFileSync(join(template, "b.txt"), "b\n");
+  git(template, "add", ".");
+  git(template, "commit", "-qm", "init");
+});
+
 function repo() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "crew-merge-")));
   const main = join(root, "main");
   const wt = join(root, "wt");
-  execFileSync("git", ["init", "-q", "-b", "main", main]);
-  for (const [k, v] of [["user.name", "t"], ["user.email", "t@t"], ["commit.gpgsign", "false"]]) git(main, "config", k!, v!);
-  writeFileSync(join(main, "a.txt"), "a\n");
-  writeFileSync(join(main, "b.txt"), "b\n");
-  git(main, "add", ".");
-  git(main, "commit", "-qm", "init");
+  cpSync(template, main, { recursive: true });
   git(main, "worktree", "add", "-q", "-b", "bb/x", wt);
   return { main, wt };
 }
@@ -27,7 +34,7 @@ function commit(cwd: string, file: string, text: string) {
   git(cwd, "commit", "-qam", `edit ${file}`);
 }
 
-describe("GitBackend.merge without the working tree (BBP-269)", () => {
+describe("GitBackend.merge without the working tree (BBP-269)", { timeout: 30_000 }, () => {
   it("clean main checkout: main is the new merge commit and the working tree equals HEAD", async () => {
     const { main, wt } = repo();
     commit(wt, "a.txt", "crew\n");
