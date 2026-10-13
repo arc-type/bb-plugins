@@ -14,7 +14,7 @@ const renderWindow = (windowMs: number) => {
   render(<CanvasFilters projects={[]} filter={{ ...DEFAULT_THREAD_FILTER, windowMs }} onChange={() => {}} />);
   return screen.getByRole("combobox", { name: "Time window" }) as HTMLSelectElement;
 };
-const labels = (select: HTMLSelectElement) => [...select.options].map((option) => option.text);
+const labels = (select: HTMLSelectElement) => Array.from(select.options).map((option) => option.text);
 
 describe("the Canvas time window menu", () => {
   it("shows a settings window outside the presets as its own, selected option", () => {
