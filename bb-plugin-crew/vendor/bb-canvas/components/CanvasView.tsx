@@ -2,7 +2,7 @@
 // (CanvasShell already has that), keyboard navigation, breadcrumb, search and
 // the detail sidebar. Works against whatever `nodes`/`edges` it is given —
 // fixtures here, RPC data once the owning plugin wires it up (WI3/WI4).
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { CanvasShell, type CanvasShellHandle } from "./CanvasShell";
 import { Breadcrumb } from "./Breadcrumb";
 import { Sidebar } from "./Sidebar";
@@ -94,6 +94,20 @@ export type CanvasViewProps = {
   onOpenRun?: (runId: string) => void;
   onOpenCrew?: (crew: string) => void;
   onOpenAtRow?: (threadId: string, seq: number) => void;
+  /** Passed straight through to the Sidebar's "Focus this" action (BBP-242). */
+  onFocusThis?: (id: string) => void;
+  /** A Ctrl/Cmd-click on a crew/graph-run/thread card toggles it into or out
+   *  of the focus instead of selecting it (BBP-241). Absent, or the card's
+   *  kind is none of those three: the modifier is ignored, a plain select. */
+  onToggleFocus?: (id: string) => void;
+  /** The focused selection's path to the root (BBP-240's `focusPathIds`),
+   *  dimmed the same way an edit mode's out-of-frame nodes are. */
+  focusPathIds?: ReadonlySet<string>;
+  /** Watched only to decide whether to re-fit the view (BBP-241): every
+   *  focus change — the dropdown, a Ctrl/Cmd-click, "Focus this", "Show
+   *  all" — goes through this prop, so a plain live-update refresh that
+   *  leaves the selection untouched never re-triggers `fitView`. */
+  focusSelected?: readonly string[];
   className?: string;
 };
 
@@ -118,6 +132,10 @@ export function CanvasView({
   onOpenRun,
   onOpenCrew,
   onOpenAtRow,
+  onFocusThis,
+  onToggleFocus,
+  focusPathIds,
+  focusSelected,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -163,6 +181,18 @@ export function CanvasView({
     setFitRequest((count) => count + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
+
+  const focusKey = focusSelected?.join("\n") ?? null;
+  const lastFocusKey = useRef(focusKey);
+  // A focus change re-fits the view the same way expandAll/collapseAll does
+  // (BBP-241); a plain live-update poll leaves `focusKey` unchanged, so it
+  // never fires this. Skipped on the first render for the same reason the
+  // `resetKey` effect above is.
+  useEffect(() => {
+    if (lastFocusKey.current === focusKey) return;
+    lastFocusKey.current = focusKey;
+    setFitRequest((count) => count + 1);
+  }, [focusKey]);
 
   const allNodes = useMemo(
     () => [...nodes, ...[...loaded.values()].flatMap((result) => result.nodes)],
@@ -254,12 +284,12 @@ export function CanvasView({
   }, [selected, loadDetails]);
 
   const dimmedIds = useMemo(() => {
-    if (editingFrameId === null) return EMPTY_DIMMED;
-    const ids = new Set<string>();
+    if (editingFrameId === null) return focusPathIds ?? EMPTY_DIMMED;
+    const ids = new Set<string>(focusPathIds ?? []);
     for (const node of visible) if (node.frameId !== editingFrameId) ids.add(node.id);
     for (const frame of frames) if (frame.id !== editingFrameId) ids.add(frame.id);
     return ids;
-  }, [editingFrameId, visible, frames]);
+  }, [editingFrameId, visible, frames, focusPathIds]);
 
   function enterEditMode() {
     if (editingFrameId !== null) return; // nested edit attempt: ignored, not switched.
@@ -277,6 +307,22 @@ export function CanvasView({
 
   function select(id: string | null) {
     setSelectedId(id);
+  }
+
+  const FOCUSABLE_KINDS = new Set(["crew", "graph-run", "thread"]);
+
+  /** A plain click selects, same as always; Ctrl/Cmd on a crew, graph-run or
+   *  thread card toggles the focus instead (BBP-241) — any other kind, or no
+   *  `onToggleFocus` given, falls through to the plain select so the
+   *  modifier never leaves the click silently doing nothing. */
+  function handleSelect(id: string, event?: ReactMouseEvent) {
+    const modifier = event !== undefined && (event.metaKey || event.ctrlKey);
+    const node = byId.get(id);
+    if (modifier && onToggleFocus && node && FOCUSABLE_KINDS.has(node.kind)) {
+      onToggleFocus(id);
+      return;
+    }
+    select(id);
   }
 
   /** Opens a node, and — the first time, if a loader was given — fetches its
@@ -544,7 +590,7 @@ export function CanvasView({
             edges={shownEdges}
             frames={frames}
             selectedId={selectedId}
-            onSelect={select}
+            onSelect={handleSelect}
             dimmedIds={dimmedIds}
             failedLoads={failedLoads}
           />
@@ -560,6 +606,7 @@ export function CanvasView({
                   onOpenRun={onOpenRun}
                   onOpenCrew={onOpenCrew}
                   onOpenAtRow={onOpenAtRow}
+                  onFocusThis={onFocusThis}
                   relations={hasRelations ? outgoingRelations(allEdges, selected.id, byId) : undefined}
                   onSelect={select}
                 />

@@ -7,6 +7,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBbContext, useBbNavigate, useRpc, useSdk } from "@get-bb/plugin-sdk/app";
 import { CanvasView } from "../vendor/bb-canvas/components/CanvasView";
 import { ProjectFilter } from "../vendor/bb-canvas/components/ProjectFilter";
+import { FocusFilter } from "../vendor/bb-canvas/components/FocusFilter";
+import { FocusUnavailable } from "../vendor/bb-canvas/components/FocusUnavailable";
 import { mergeLayers, projectOfCrew, withRoots } from "../vendor/bb-canvas/lib/layer";
 import {
   initialProjectFilter,
@@ -15,6 +17,13 @@ import {
   visibleProjectIds,
   type ProjectOption,
 } from "../vendor/bb-canvas/lib/project-filter";
+import {
+  focusPathIds,
+  loadFocusFilter,
+  missingFocusIds,
+  saveFocusFilter,
+  visibleFocusIds,
+} from "../vendor/bb-canvas/lib/focus-filter";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../vendor/bb-canvas/lib/types";
 import {
   enrichThreadNodes,
@@ -154,6 +163,29 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
     saveProjectFilter(ids);
   };
 
+  const [focusSelected, setFocusSelected] = useState<string[]>(() => loadFocusFilter());
+  const chooseFocus = (ids: string[]) => {
+    setFocusSelected(ids);
+    saveFocusFilter(ids);
+  };
+  const toggleFocus = (id: string) =>
+    chooseFocus(focusSelected.includes(id) ? focusSelected.filter((other) => other !== id) : [...focusSelected, id]);
+  // BBP-197: a live-update poll must not reset the focus — it is plain React
+  // state here, untouched by the layer-loading effect below.
+  const missingFocused = useMemo(
+    () => (layer ? missingFocusIds(layer.nodes, focusSelected) : []),
+    [layer, focusSelected],
+  );
+  const allFocusedMissing = focusSelected.length > 0 && missingFocused.length === focusSelected.length;
+  const visibleFocused = useMemo(
+    () => (layer ? visibleFocusIds(layer.nodes, focusSelected) : new Set<string>()),
+    [layer, focusSelected],
+  );
+  const focusDimmed = useMemo(
+    () => (layer ? focusPathIds(layer.nodes, focusSelected) : new Set<string>()),
+    [layer, focusSelected],
+  );
+
   useEffect(() => {
     let cancelled = false;
     rpc.call("canvasPage", {}).then(
@@ -259,6 +291,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
   if (layer === null) {
     return <div className="p-4 text-sm text-muted-foreground">Loading…</div>;
   }
+  if (allFocusedMissing) {
+    return <FocusUnavailable onShowAll={() => chooseFocus([])} />;
+  }
+  const shownNodes = layer.nodes.filter((node) => visibleFocused.has(node.id));
 
   return (
     <CanvasView
@@ -267,7 +303,10 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
       // dropdown. `resetKey` resets only the canvas's own per-project-set
       // state; the toolbar keeps its identity across a filter change.
       resetKey={shownKey}
-      nodes={layer.nodes}
+      nodes={shownNodes}
+      onToggleFocus={toggleFocus}
+      focusPathIds={focusDimmed}
+      focusSelected={focusSelected}
       edges={layer.edges}
       frames={layer.frames}
       editableFrameIds={editableFrameIds}
@@ -327,7 +366,12 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
           node,
         )
       }
-      toolbar={<ProjectFilter projects={projects} selected={selected} onChange={choose} />}
+      toolbar={
+        <>
+          <ProjectFilter projects={projects} selected={selected} onChange={choose} />
+          <FocusFilter nodes={layer.nodes} selected={focusSelected} onChange={chooseFocus} />
+        </>
+      }
       onOpenThread={(threadId) => navigate.toThread(threadId)}
       // BB's navigate API has no way yet to open a thread scrolled to a
       // specific row (BBP-206); this opens the thread itself, the closest
@@ -339,6 +383,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
         const opened = navigate.openThreadPanel({ actionId: "crew", title: `Crew ${crew}`, params: { crew, projectId: projectOfCrew(layer.nodes, crew) ?? urlProjectId ?? shown?.[0] ?? null } });
         if (!opened) navigate.toPluginPanel("crews");
       }}
+      onFocusThis={(id) => chooseFocus([id])}
       className="h-full"
     />
   );

@@ -2,13 +2,36 @@
 // ProjectFilter so BBP-204's "Focus" dropdown can reuse it. Owns popover
 // placement, outside click, search and stopping key events from reaching
 // the canvas's own shortcuts.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { placePopover } from "../lib/popover";
 
 export type SearchableMultiSelectOption = {
   id: string;
   name: string;
+  // BBP-239: optional clustering (e.g. "Crews"/"Threads") and extra search
+  // terms (e.g. a thread id) for dropdowns beyond the plain Projects list.
+  group?: string;
+  keywords?: readonly string[];
 };
+
+// Clusters a list in first-occurrence order of `group` (no alphabetical
+// resort of the groups themselves); options without a group form their own
+// headerless bucket wherever they first appear.
+function clusterByGroup(
+  list: readonly SearchableMultiSelectOption[],
+): { group?: string; items: SearchableMultiSelectOption[] }[] {
+  const order: string[] = [];
+  const buckets = new Map<string, SearchableMultiSelectOption[]>();
+  for (const option of list) {
+    const key = option.group ?? "";
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      order.push(key);
+    }
+    buckets.get(key)!.push(option);
+  }
+  return order.map((key) => ({ group: key === "" ? undefined : key, items: buckets.get(key)! }));
+}
 
 export type SearchableMultiSelectProps = {
   label: string;
@@ -16,6 +39,10 @@ export type SearchableMultiSelectProps = {
   selected: readonly string[];
   onChange: (ids: string[]) => void;
   emptyText: string;
+  /** Overrides the default `${label}: ${summarizeSelection(...)}` button
+   *  text (BBP-240) — the Focus dropdown's "All"/"Focus (n)" scheme doesn't
+   *  fit that formula the way Projects' "All"/"<Name>"/"n selected" does. */
+  summarize?: (options: readonly SearchableMultiSelectOption[], selected: readonly string[]) => string;
 };
 
 const POPOVER_WIDTH = 240;
@@ -43,7 +70,14 @@ function highlight(name: string, query: string) {
   );
 }
 
-export function SearchableMultiSelect({ label, options, selected, onChange, emptyText }: SearchableMultiSelectProps) {
+export function SearchableMultiSelect({
+  label,
+  options,
+  selected,
+  onChange,
+  emptyText,
+  summarize,
+}: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [frozenOrder, setFrozenOrder] = useState<readonly SearchableMultiSelectOption[]>(options);
@@ -89,7 +123,9 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
     onChange(selected.includes(id) ? selected.filter((other) => other !== id) : [...selected, id]);
 
   const normalizedQuery = query.trim().toLowerCase();
-  const matches = (option: SearchableMultiSelectOption) => option.name.toLowerCase().includes(normalizedQuery);
+  const matches = (option: SearchableMultiSelectOption) =>
+    option.name.toLowerCase().includes(normalizedQuery) ||
+    (option.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(normalizedQuery));
 
   const checkedBlock = frozenOrder
     .filter((option) => frozenCheckedIds.has(option.id))
@@ -117,6 +153,33 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
   const noMatches = normalizedQuery !== "" && checkedMatching.length === 0 && remaining.length === 0;
   const visibleOptions = [...checkedMatching, ...remaining, ...checkedNotMatching];
   itemRefs.current = [];
+
+  const renderOption = (option: SearchableMultiSelectOption) => (
+    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
+      <input
+        ref={(el) => {
+          itemRefs.current[visibleOptions.indexOf(option)] = el;
+        }}
+        type="checkbox"
+        aria-label={option.name}
+        checked={selected.includes(option.id)}
+        onChange={() => toggle(option.id)}
+      />
+      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
+    </label>
+  );
+
+  const renderGroupedOptions = (list: readonly SearchableMultiSelectOption[]) =>
+    clusterByGroup(list).map((cluster, index) => (
+      <Fragment key={cluster.group ?? `_ungrouped_${index}`}>
+        {cluster.group ? (
+          <div role="presentation" style={{ padding: "4px 8px", fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)" }}>
+            {cluster.group}
+          </div>
+        ) : null}
+        {cluster.items.map(renderOption)}
+      </Fragment>
+    ));
 
   const moveActive = (delta: number) => {
     const current = itemRefs.current.findIndex((el) => el === document.activeElement);
@@ -185,7 +248,7 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
         >
           <path d="M2 4h12l-4.5 5v4l-3-1.5V9z" />
         </svg>
-        {label}: {summarizeSelection(options, selected)}
+        {summarize ? summarize(options, selected) : `${label}: ${summarizeSelection(options, selected)}`}
       </button>
       {open ? (
         <div
@@ -274,57 +337,18 @@ export function SearchableMultiSelect({ label, options, selected, onChange, empt
                 <div style={{ padding: "4px 8px", color: "var(--muted-foreground)" }}>No matches</div>
               ) : (
                 <>
-                  {checkedMatching.map((option) => (
-                    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
-                      <input
-                        ref={(el) => {
-                          itemRefs.current[visibleOptions.indexOf(option)] = el;
-                        }}
-                        type="checkbox"
-                        aria-label={option.name}
-                        checked={selected.includes(option.id)}
-                        onChange={() => toggle(option.id)}
-                      />
-                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
-                    </label>
-                  ))}
+                  {renderGroupedOptions(checkedMatching)}
                   {checkedMatching.length > 0 && remaining.length > 0 ? (
                     <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
                   ) : null}
-                  {remaining.map((option) => (
-                    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
-                      <input
-                        ref={(el) => {
-                          itemRefs.current[visibleOptions.indexOf(option)] = el;
-                        }}
-                        type="checkbox"
-                        aria-label={option.name}
-                        checked={selected.includes(option.id)}
-                        onChange={() => toggle(option.id)}
-                      />
-                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{highlight(option.name, query)}</span>
-                    </label>
-                  ))}
+                  {renderGroupedOptions(remaining)}
                 </>
               )}
               {checkedNotMatching.length > 0 ? (
                 <>
                   <div role="separator" style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
                   <div style={{ padding: "4px 8px", color: "var(--muted-foreground)", fontWeight: 600 }}>Selected</div>
-                  {checkedNotMatching.map((option) => (
-                    <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer" }}>
-                      <input
-                        ref={(el) => {
-                          itemRefs.current[visibleOptions.indexOf(option)] = el;
-                        }}
-                        type="checkbox"
-                        aria-label={option.name}
-                        checked={selected.includes(option.id)}
-                        onChange={() => toggle(option.id)}
-                      />
-                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{option.name}</span>
-                    </label>
-                  ))}
+                  {renderGroupedOptions(checkedNotMatching)}
                 </>
               ) : null}
             </>

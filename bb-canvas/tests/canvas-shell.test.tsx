@@ -77,7 +77,7 @@ describe("CanvasShell", () => {
       <CanvasShell nodes={nodes} expanded={new Set(["crew"])} edges={edges} onSelect={onSelect} />,
     );
     fireEvent.click(screen.getByRole("button", { name: new RegExp("^orch-lead — ") }));
-    expect(onSelect).toHaveBeenCalledWith("m1");
+    expect(onSelect).toHaveBeenCalledWith("m1", expect.anything());
   });
 
   it("marks the selected node pressed", () => {
@@ -506,5 +506,40 @@ describe("CanvasShell start fit waits for a real host size (BBP-214 feedback 3 r
     const lastCall = fitViewCalls[fitViewCalls.length - 1] as { nodes?: { id: string }[] };
     const framedIds = (lastCall.nodes ?? []).map((n) => n.id);
     expect(framedIds).toEqual(expect.arrayContaining(["root", "project"]));
+  });
+});
+
+// BBP-241: a focus change (the dropdown, a Ctrl/Cmd-click, "Focus this",
+// "Show all") re-fits the view the same way Expand all/Collapse all do; a
+// plain live-update refresh that leaves the focus untouched must not.
+describe("CanvasView focus re-fit (BBP-241)", () => {
+  const focusNodes: CanvasNode[] = [
+    { id: "root", kind: "agents", label: "bb", parentId: null },
+    { id: "crew", kind: "crew", label: "Alpha", parentId: "root" },
+  ];
+
+  it("re-fits once focusSelected changes", async () => {
+    const { rerender } = render(<CanvasView nodes={focusNodes} initialExpanded={new Set(["root"])} focusSelected={[]} />);
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+    const before = fitViewCalls.length;
+    rerender(<CanvasView nodes={focusNodes} initialExpanded={new Set(["root"])} focusSelected={["crew"]} />);
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(before));
+  });
+
+  it("negative: a plain live-update refresh (new node array, same focusSelected) does not re-fit", async () => {
+    const { container, rerender } = render(
+      <CanvasView nodes={focusNodes} initialExpanded={new Set(["root"])} focusSelected={["crew"]} />,
+    );
+    const root = container.querySelector("[data-canvas-view]") as HTMLElement;
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+    // Marks the view as user-interacted, same as the growth-refit tests above
+    // — otherwise CanvasShell's own start-view chase (BBP-196), still active
+    // this soon after mount, would refit on the node-array change below for
+    // its own unrelated reason and this test would not isolate `focusKey`.
+    fireEvent.keyDown(root, { key: "+" });
+    const before = fitViewCalls.length;
+    rerender(<CanvasView nodes={[...focusNodes]} initialExpanded={new Set(["root"])} focusSelected={["crew"]} />);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(fitViewCalls.length).toBe(before);
   });
 });
