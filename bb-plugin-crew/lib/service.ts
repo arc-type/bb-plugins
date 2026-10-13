@@ -123,6 +123,8 @@ export function createCrewService(deps: ServiceDeps) {
     now: deps.now,
     newId: deps.newMessageId,
     capacity: async () => ({ limit: (await limit()).limit, running: await deps.port.runningCount() }),
+    // The lifecycle is built last; a message reaches this only after construction.
+    spawnPending: (member, text) => lifecycle.spawnPending(member, text),
   });
   const shortId = deps.newShortId;
   const channel = createChannel({ store, delivery, newId: shortId ? () => shortId("cm") : undefined });

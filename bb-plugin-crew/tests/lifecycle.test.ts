@@ -3,6 +3,7 @@ import YAML from "yaml";
 import { addMemberToFile, CrewFileEditError, removeMemberFromFile } from "../lib/crewfile";
 import { AddressError } from "../lib/delivery";
 import { openLayout } from "../lib/layout";
+import { createStore } from "../lib/store";
 import { PROJECT, running, setup, trioYaml } from "./helpers";
 
 async function trio() {
@@ -62,7 +63,9 @@ describe("snapshot and restore", () => {
     await service.delivery.drain();
     expect(t.inboxHas(threads["dev-impl"]!, `msg ${held!.id}`)).toBe(1);
 
-    const reset = await service.lifecycle.reset(crew, "dev-impl", "new");
+    await service.lifecycle.reset(crew, "dev-impl", "new");
+    await service.send({ projectId: PROJECT, from: t.human, to: "dev-impl@trio", body: "new shift" });
+    const reset = store.currentBinding(members["dev-impl"]!.id)!;
     expect(reset.threadId).not.toBe(threads["dev-impl"]);
     const report = await service.lifecycle.restore(id);
     expect(report.messages.alreadyDelivered).toEqual([held!.id]);
@@ -104,24 +107,91 @@ describe("reset", () => {
     expect(t.thread(t.threads["orch-lead"]!).parentThreadId).toBeNull();
   });
 
-  it("new: a new thread for shift 2, the old one archived with retired: true, the new one without a parent", async () => {
+  it("new: the old thread is archived with retired: true, no spawn and no turn until a message arrives (BBP-268)", async () => {
     const t = await trio();
     const { service, store, crew, threads, members } = t;
+    const sends = t.port.countCalls("send");
     const result = await service.lifecycle.reset(crew, "dev-impl", "new");
-    expect(result.result).toBe("spawned");
-    expect(result.shift).toBe(2);
-    expect(result.threadId).not.toBe(threads["dev-impl"]);
+    expect(result).toMatchObject({ result: "updated", threadId: null, shift: 2 });
     expect(t.thread(threads["dev-impl"]!)).toMatchObject({ archived: true });
     expect(t.thread(threads["dev-impl"]!).metadata).toMatchObject({ retired: true, member: "dev-impl" });
-    expect(t.thread(result.threadId!).parentThreadId).toBeNull();
-    expect(store.currentBinding(members["dev-impl"]!.id)!.threadId).toBe(result.threadId);
+    expect(t.port.countCalls("spawn")).toBe(3);
+    expect(t.port.countCalls("send")).toBe(sends);
     expect(t.port.countCalls("clearContext")).toBe(0);
+    expect(store.currentBinding(members["dev-impl"]!.id)).toBeNull();
+    expect(store.pendingSpawn(members["dev-impl"]!.id)).toMatchObject({ shift: 2 });
+  });
+
+  it("new: the first message spawns the thread once with brief + message; the next goes to that thread (BBP-268)", async () => {
+    const t = await trio();
+    const { service, store, crew, members, self } = t;
+    await service.lifecycle.reset(crew, "dev-impl", "new");
+    const [first] = await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "first job" });
+    expect(first).toMatchObject({ status: "delivered" });
+    expect(t.port.countCalls("spawn")).toBe(4);
+    const binding = store.currentBinding(members["dev-impl"]!.id)!;
+    expect(binding.shift).toBe(2);
+    const spawned = t.thread(binding.threadId);
+    expect(spawned.parentThreadId).toBeNull();
+    expect(spawned.metadata).toMatchObject({ member: "dev-impl", shift: 2 });
+    const prompt = spawned.request!.prompt;
+    expect(prompt).toContain("Kickoff brief for dev-impl@trio");
+    expect(prompt).toContain("first job");
+    expect(prompt.indexOf("Kickoff brief for dev-impl@trio")).toBeLessThan(prompt.indexOf("first job"));
+    expect(store.pendingSpawn(members["dev-impl"]!.id)).toBeNull();
+    t.thread(binding.threadId).status = "idle";
+    await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "second job" });
+    expect(t.port.countCalls("spawn")).toBe(4);
+    expect(spawned.inbox.at(-1)!.text).toContain("second job");
+    expect(spawned.inbox.at(-1)!.text).not.toContain("Kickoff brief for dev-impl@trio");
+  });
+
+  it("negative: new — a failed spawn keeps the pending spawn, the message retries (BBP-268)", async () => {
+    const t = await trio();
+    const { service, store, crew, members, self } = t;
+    await service.lifecycle.reset(crew, "dev-impl", "new");
+    t.port.spawnFailures.push(new Error("boom"));
+    const [row] = await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "retry me" });
+    expect(row).toMatchObject({ status: "pending" });
+    expect(store.currentBinding(members["dev-impl"]!.id)).toBeNull();
+    expect(store.pendingSpawn(members["dev-impl"]!.id)).not.toBeNull();
+    await service.delivery.drain();
+    expect(store.getMessage(row!.id)).toMatchObject({ status: "delivered" });
+    expect(t.thread(store.currentBinding(members["dev-impl"]!.id)!.threadId).request!.prompt).toContain("retry me");
+  });
+
+  it("new: a system notice neither spawns nor uses up the pending spawn (BBP-268)", async () => {
+    const t = await trio();
+    const { service, store, crew, members } = t;
+    await service.lifecycle.reset(crew, "dev-impl", "new");
+    const [notice] = await service.send({ projectId: PROJECT, from: { kind: "system" }, to: "dev-impl@trio", body: "fyi", kind: "system" });
+    expect(notice).toMatchObject({ deliveryMode: "ui" });
+    expect(t.port.countCalls("spawn")).toBe(3);
+    expect(store.pendingSpawn(members["dev-impl"]!.id)).not.toBeNull();
+  });
+
+  it("new: ps and activity show a pending member as idle, not unknown (BBP-268)", async () => {
+    const t = await trio();
+    const { service, crew } = t;
+    await service.lifecycle.reset(crew, "dev-impl", "new");
+    const view = (await service.members(crew)).find((member) => member.key === "dev-impl")!;
+    expect(view).toMatchObject({ status: "idle", thread: "pending", threadId: null, shift: 2 });
+    const activity = (await service.activity.views(crew)).find((entry) => entry.key === "dev-impl")!;
+    expect(activity).toMatchObject({ activity: "idle", thread: "pending" });
+  });
+
+  it("new: the pending spawn survives a restart (BBP-268)", async () => {
+    const t = await trio();
+    await t.service.lifecycle.reset(t.crew, "dev-impl", "new");
+    expect(createStore(t.db, () => 0).pendingSpawn(t.members["dev-impl"]!.id)).toMatchObject({ shift: 2 });
   });
 
   it("a lead reset with a new thread leaves the members and the new lead without a parent", async () => {
     const t = await trio();
-    const result = await t.service.lifecycle.reset(t.crew, "orch-lead", "new");
-    expect(t.thread(result.threadId!).parentThreadId).toBeNull();
+    await t.service.lifecycle.reset(t.crew, "orch-lead", "new");
+    await t.service.send({ projectId: PROJECT, from: t.human, to: "orch-lead@trio", body: "go" });
+    const lead = t.store.currentBinding(t.members["orch-lead"]!.id)!.threadId;
+    expect(t.thread(lead).parentThreadId).toBeNull();
     for (const key of ["dev-impl", "dev-review"]) expect(t.port.calls.some((call) => call.method === "update" && (call.args as { threadId: string }).threadId === t.threads[key])).toBe(false);
   });
 

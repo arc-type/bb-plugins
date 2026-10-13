@@ -87,12 +87,33 @@ export function createLifecycle(deps: LifecycleDeps) {
     return { crew: crew.name, crewId: crew.id, member: member.key, address: member.address, shift, opId, lead: member.lead, retired: false };
   }
 
-  async function spawnShift(crew: CrewRow, member: MemberRow, oldThread: string, note?: string): Promise<MemberResult> {
+  async function spawnShift(crew: CrewRow, member: MemberRow, oldThread: string | null, note?: string): Promise<MemberResult> {
     const { spec, resolved, members } = resolvedMember(crew, member);
     const leadRow = lead(crew);
     const leadThreadId = member.lead ? null : leadRow ? (store.currentBinding(leadRow.id)?.threadId ?? null) : null;
     const result = await spawnMember(ctx, { crew, spec, member: resolved, row: member, members, leadThreadId, fresh: oldThread, note });
     return result;
+  }
+
+  /**
+   * BBP-268: reset --mode new ends the shift now but spawns nothing: the new
+   * thread starts with the next delivered message (spawnPending), so a reset
+   * costs no turn of its own.
+   */
+  async function retireForPendingSpawn(member: MemberRow, oldThread: string): Promise<MemberResult> {
+    await port.setMetadata(oldThread, { retired: true }).catch(() => undefined);
+    await port.archive(oldThread).catch(() => undefined);
+    const shift = store.lastShift(member.id) + 1;
+    store.retireBinding(member.id);
+    store.setPendingSpawn(member.id, shift);
+    return { key: member.key, address: member.address, result: "updated", threadId: null, shift, detail: "old thread archived; the new thread starts with the next message" };
+  }
+
+  /** BBP-268: spawn the pending shift with brief + the first message as its prompt. */
+  async function spawnPending(member: MemberRow, text: string): Promise<MemberResult> {
+    const crew = store.getCrew(member.crewId);
+    if (!crew) throw new AddressError(`The crew of ${member.address} no longer exists.`);
+    return spawnShift(crew, member, null, text);
   }
 
   // --- snapshot / restore -------------------------------------------------
@@ -190,7 +211,7 @@ export function createLifecycle(deps: LifecycleDeps) {
     const member = requireMember(crew, key);
     if (store.activeHandover(member.id)) throw new AddressError(`${member.key} is in a handover; finish or cancel it first.`);
     const thread = await liveThread(member);
-    if (mode === "new") return spawnShift(crew, member, thread.id);
+    if (mode === "new") return retireForPendingSpawn(member, thread.id);
 
     const { spec, resolved, members } = resolvedMember(crew, member);
     const shift = store.lastShift(member.id) + 1;
@@ -435,6 +456,7 @@ export function createLifecycle(deps: LifecycleDeps) {
     snapshot,
     restore,
     reset,
+    spawnPending,
     handover,
     noteBrief,
     complete,

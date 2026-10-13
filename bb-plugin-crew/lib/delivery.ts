@@ -19,6 +19,7 @@ import type {
   Priority,
   Store,
 } from "./store";
+import type { MemberResult } from "./sync";
 import type { SendMode, ThreadPort } from "./thread-port";
 
 export const HUMAN = "human";
@@ -94,6 +95,8 @@ export type DeliveryDeps = {
   capacity?: () => Promise<Capacity>;
   now?: () => number;
   newId?: (prefix: "msg" | "ch") => string;
+  /** BBP-268: spawn a member's pending shift with brief + this text as its prompt. */
+  spawnPending?: (member: MemberRow, text: string) => Promise<MemberResult>;
 };
 
 export type Delivery = ReturnType<typeof createDelivery>;
@@ -381,6 +384,7 @@ export function createDelivery(deps: DeliveryDeps) {
       });
     }
     const binding = store.currentBinding(member.id);
+    if (!binding && store.pendingSpawn(member.id) && deps.spawnPending) return spawnOnDelivery(message, member, set, budget);
     if (!binding) return set({ status: "failed", reason: "the recipient has no thread (run bb crew apply)", hold: null });
     const thread = await port.get(binding.threadId);
     if (!thread) return set({ status: "failed", reason: `the recipient's thread ${binding.threadId} is gone`, hold: null });
@@ -445,14 +449,45 @@ export function createDelivery(deps: DeliveryDeps) {
         lastError: null,
       });
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      const attempts = message.attempts + 1;
-      return store.updateMessage(message.id, {
-        status: attempts >= MAX_ATTEMPTS ? "failed" : "pending",
-        lastError: text.slice(0, 500),
-        reason: attempts >= MAX_ATTEMPTS ? `gave up after ${attempts} attempts` : message.reason,
-      });
+      return failedAttempt(message, error instanceof Error ? error.message : String(error));
     }
+  }
+
+  function failedAttempt(message: MessageRow, error: string): MessageRow {
+    const attempts = message.attempts + 1;
+    return store.updateMessage(message.id, {
+      status: attempts >= MAX_ATTEMPTS ? "failed" : "pending",
+      lastError: error.slice(0, 500),
+      reason: attempts >= MAX_ATTEMPTS ? `gave up after ${attempts} attempts` : message.reason,
+    });
+  }
+
+  /**
+   * BBP-268: the member's new shift has no thread yet. The first message that
+   * would start a turn spawns it, as the prompt behind the kickoff brief; a
+   * failed spawn keeps the pending spawn and the message retries.
+   */
+  async function spawnOnDelivery(
+    message: MessageRow,
+    member: MemberRow,
+    set: (patch: Parameters<Store["updateMessage"]>[1]) => MessageRow,
+    budget: Capacity | null,
+  ): Promise<MessageRow> {
+    // System notices never start a turn (§3.4), so they spawn nothing either.
+    if (message.kind === "system") return set({ status: "delivered", delivered: true, deliveryMode: "ui", hold: null });
+    if (!message.forced && budget && budget.limit !== null && budget.running >= budget.limit) {
+      return set({ status: "throttled", hold: null, reason: `thread limit ${budget.limit} reached (${budget.running} running); delivered when a slot frees` });
+    }
+    store.updateMessage(message.id, { attempt: true, deliveryMode: "start" });
+    let result: MemberResult;
+    try {
+      result = await deps.spawnPending!(member, renderMessage(message, maxStepsFor(message)));
+    } catch (error) {
+      return failedAttempt(message, error instanceof Error ? error.message : String(error));
+    }
+    if (result.threadId === null) return failedAttempt(message, result.detail ?? "spawn failed");
+    if (budget) budget.running += 1;
+    return store.updateMessage(message.id, { status: "delivered", delivered: true, hold: null, reason: message.forced ? message.reason : null, lastError: null });
   }
 
   let running: Promise<number> | null = null;

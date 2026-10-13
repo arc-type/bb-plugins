@@ -509,7 +509,8 @@ export type MemberView = {
   permissions: string | null;
   shift: number | null;
   threadId: string | null;
-  thread: "present" | "archived" | "missing";
+  /** pending: reset --mode new, the thread starts with the next message (BBP-268). */
+  thread: "present" | "archived" | "missing" | "pending";
   status: string | null;
   /** What BB reports for the live thread — the check behind "provider/model as in the file". */
   actualProvider: string | null;
@@ -522,6 +523,7 @@ export async function describeMembers(ctx: SyncContext, crew: CrewRow): Promise<
   for (const row of ctx.store.listMembers(crew.id)) {
     const binding = ctx.store.currentBinding(row.id);
     const thread = binding ? await ctx.port.get(binding.threadId).catch(() => null) : null;
+    const pending = binding ? null : ctx.store.pendingSpawn(row.id);
     views.push({
       key: row.key,
       groupId: row.groupId,
@@ -530,10 +532,10 @@ export async function describeMembers(ctx: SyncContext, crew: CrewRow): Promise<
       provider: (row.config.provider as string | null) ?? null,
       model: (row.config.model as string | null) ?? null,
       permissions: (row.config.permissions as string | null) ?? null,
-      shift: binding?.shift ?? null,
+      shift: binding?.shift ?? pending?.shift ?? null,
       threadId: binding?.threadId ?? null,
-      thread: !thread ? "missing" : thread.archived ? "archived" : "present",
-      status: thread?.status ?? null,
+      thread: pending ? "pending" : !thread ? "missing" : thread.archived ? "archived" : "present",
+      status: thread?.status ?? (pending ? "idle" : null),
       actualProvider: thread?.providerId ?? null,
       actualModel: thread ? await ctx.port.model(thread.id).catch(() => null) : null,
     });
