@@ -71,4 +71,18 @@ describe("KindIcon", () => {
     expect(describeNode("turn", 0, { from: "User" })).toBe("Request");
     expect(describeNode("turn", 0, { from: "Agent" })).toBe("Reply");
   });
+
+  it("describes a crew by how many of its members are actually active (BBP-214 feedback 1)", () => {
+    expect(describeNode("crew", 10, { members: 10, active: 3 })).toBe("Crew · 3 of 10 active");
+  });
+
+  it("negative: a crew with every member idle reads '0 of n active', not 'n members'", () => {
+    expect(describeNode("crew", 10, { members: 10, active: 0 })).toBe("Crew · 0 of 10 active");
+  });
+
+  it("falls back to the plain member count when the layer did not supply active/members meta", () => {
+    expect(describeNode("crew", 10, {})).toBe("Crew · 10 members");
+    expect(describeNode("crew", 1, {})).toBe("Crew · 1 member");
+    expect(describeNode("crew", 0, {})).toBe("Crew");
+  });
 });
