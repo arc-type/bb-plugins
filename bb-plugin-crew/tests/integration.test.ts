@@ -74,12 +74,12 @@ describe("merge requests (human merges by default)", () => {
 
   it("BBP-270: a merge behind a dirty main checkout is parked, never merged: no main moved, no onMerged, lead on Needs you (merge-parked)", async () => {
     const { service, alpha, beta, git, needs, store } = await twoCrews();
-    git.mergeResult = { ok: true, commit: "p1", parked: true };
+    git.mergeResult = { ok: true, commit: "p1", parked: true, checkout: "/repo/main" };
     const { merge } = await service.integration.request(alpha.crew, "core-lead@alpha");
     const after = await service.integration.approve(merge.id);
     await service.flush();
     expect(after).toMatchObject({ state: "parked", commitSha: "p1" });
-    expect(after.reason).toContain("refs/crew/integration/main");
+    expect(after.reason).toContain("main checkout /repo/main has uncommitted changes; merge parked on refs/crew/integration/main");
     expect(store.listMessages().filter((m) => m.subject === "main moved")).toEqual([]);
     expect(store.listDependencies(beta.crew.id).every((dependency) => dependency.state === "open")).toBe(true);
     expect(await needs(alpha, "core-lead")).toContain("merge-parked");
@@ -410,7 +410,7 @@ describe("local git backend", () => {
       if (args[0] === "commit-tree") return { code: 0, stdout: "c1\n", stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
     });
-    expect(await git.merge("/wt", "bb/x", "main", "m")).toEqual({ ok: true, commit: "c1", parked: true });
+    expect(await git.merge("/wt", "bb/x", "main", "m")).toEqual({ ok: true, commit: "c1", parked: true, checkout: "/repo" });
     expect(calls).toContain("/wt: update-ref refs/crew/integration/main c1");
     expect(calls.some((call) => (call.startsWith("/repo:") && !call.startsWith("/repo: status")) || call.includes("refs/heads/main") || call.includes("stash"))).toBe(false);
   });

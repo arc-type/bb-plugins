@@ -79,7 +79,7 @@ describe("GitBackend.merge without the working tree (BBP-269)", () => {
     writeFileSync(join(main, "b.txt"), "wip\n");
     const before = git(main, "rev-parse", "main");
     const outcome = await createLocalGit().merge(wt, "bb/x", "main", "Merge bb/x");
-    expect(outcome).toMatchObject({ ok: true, parked: true });
+    expect(outcome).toMatchObject({ ok: true, parked: true, checkout: main });
     expect(git(main, "rev-parse", "refs/crew/integration/main")).toBe(outcome.ok ? outcome.commit : "");
     expect(git(main, "rev-parse", "refs/crew/integration/main^1")).toBe(before);
     expect(git(main, "rev-parse", "main")).toBe(before);

@@ -28,7 +28,7 @@ import { isIntegrator, type ResolvedMember } from "./spec";
 import { memberRowId, type CrewRow, type MemberEnvRow, type MemberRow, type MergeRequestRow, type Store } from "./store";
 import type { ThreadPort } from "./thread-port";
 
-export type MergeOutcome = { ok: true; commit: string; parked?: boolean } | { ok: false; conflict: boolean; detail: string };
+export type MergeOutcome = { ok: true; commit: string; parked?: boolean; checkout?: string } | { ok: false; conflict: boolean; detail: string };
 /** none = no parked merge; held = the checkout is still dirty; released = `base` now points at the parked commit. */
 export type ReleaseOutcome = { kind: "none" | "held" } | { kind: "released"; commit: string } | { kind: "failed"; detail: string };
 export type RebaseOutcome = { ok: true; head: string } | { ok: false; conflict: boolean; files: string[]; detail: string };
@@ -131,7 +131,7 @@ export function createLocalGit(run: Run = runProcess): GitBackend {
         // Never stash and never move a checked-out branch under the human's files: park the commit instead (ADR 0004).
         const park = await run(["update-ref", parkedRef, sha, ...(parked.code === 0 ? [parent] : [])], cwd);
         if (park.code !== 0) return { ok: false, conflict: false, detail: park.stderr.trim() };
-        return { ok: true, commit: sha, parked: true };
+        return { ok: true, commit: sha, parked: true, checkout: target! };
       }
       const old = (await run(["rev-parse", base], cwd)).stdout.trim();
       const update = target ? await run(["merge", "--ff-only", sha], target) : await run(["update-ref", `refs/heads/${base}`, sha, old], cwd);
@@ -353,7 +353,7 @@ export function createIntegration(deps: IntegrationDeps) {
     if (!outcome.ok) return returnToHuman(merge, outcome.conflict ? `merge conflict: ${outcome.detail}` : `merge failed: ${outcome.detail}`);
     if (outcome.parked) {
       // Not merged: no "main moved", no dependency release; the lead waits on the human (merge-parked).
-      const reason = `${merge.base} checkout has uncommitted changes; merge parked on refs/crew/integration/${merge.base}; commit or clean up, the next merge/approve releases it`;
+      const reason = `${merge.base} checkout${outcome.checkout ? ` ${outcome.checkout}` : ""} has uncommitted changes; merge parked on refs/crew/integration/${merge.base}; commit or clean up, the next merge/approve releases it`;
       const parked = store.updateMerge(merge.id, { state: "parked", commitSha: outcome.commit, mergedBy: by, reason });
       tellLead(crew, `Merge request ${parked.id} parked`, `${describe(crew, parked)}: ${reason}.`, by);
       return parked;
