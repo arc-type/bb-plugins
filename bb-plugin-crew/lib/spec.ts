@@ -514,6 +514,23 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
     );
   }
 
+  // A reviewer that reads the member assigning it work carries the author's context into the review.
+  for (const member of members) {
+    if (!/review|check/i.test(member.role)) continue;
+    const assigners = spec.links.filter((l) => l.kind === "assigns_to" && l.to === member.key).map((l) => l.from);
+    for (const assigner of new Set(assigners)) {
+      const reads = spec.links.some(
+        (l) =>
+          (l.kind === "can_read" && l.from === member.key && l.to === assigner) ||
+          (l.kind === "works_with" &&
+            ((l.from === member.key && l.to === assigner) || (l.from === assigner && l.to === member.key))),
+      );
+      if (reads) {
+        warn("review-reads-author", `${member.key}: reviews work from ${assigner} but also reads it (can_read or works_with), so the review is not independent`);
+      }
+    }
+  }
+
   return { spec, members: topoOrder(members, spec.links), problems };
 }
 

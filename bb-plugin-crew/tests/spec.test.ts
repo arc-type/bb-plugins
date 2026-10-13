@@ -388,6 +388,35 @@ describe("crew file validation", () => {
     it("positive: under auto writers do not share, no warning", () => expect(codes(base())).not.toContain("shared-writers"));
   });
 
+  describe("review-reads-author", () => {
+    const reviewer = (kind: "can_read" | "works_with") => {
+      const spec = base();
+      spec.groups[1]!.members[1]!.role = "Reviews the commit";
+      spec.links!.push({ from: "dev-owner", to: "dev-check", kind: "assigns_to" }, { from: "dev-check", to: "dev-owner", kind });
+      return spec;
+    };
+    it.each(["can_read", "works_with"] as const)("negative: a reviewer with %s on its assigner warns, no error", (kind) => {
+      const { problems } = validateCrew(reviewer(kind));
+      expect(problems.map((p) => [p.level, p.code])).toContainEqual(["warning", "review-reads-author"]);
+      expect(hasErrors(problems)).toBe(false);
+    });
+    it("negative: works_with declared from the author's side also warns", () => {
+      const spec = reviewer("works_with");
+      spec.links![3] = { from: "dev-owner", to: "dev-check", kind: "works_with" };
+      expect(codes(spec)).toContain("review-reads-author");
+    });
+    it("positive: a reviewer only assigned to, without reading its author, does not warn", () => {
+      const spec = reviewer("can_read");
+      spec.links!.pop();
+      expect(codes(spec)).not.toContain("review-reads-author");
+    });
+    it("positive: without review or check in the role there is no warning", () => {
+      const spec = reviewer("can_read");
+      spec.groups[1]!.members[1]!.role = "Implements";
+      expect(codes(spec)).not.toContain("review-reads-author");
+    });
+  });
+
   describe("topological order", () => {
     it("puts the lead first even when it is declared last", () => {
       const spec = base();
