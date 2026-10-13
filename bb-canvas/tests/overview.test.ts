@@ -43,3 +43,28 @@ describe("overviewTree", () => {
     expect(threadIds(layer)).toEqual(["a", "gone"]);
   });
 });
+
+describe("overviewTree active only (BBP-288)", () => {
+  const input = (threads: ThreadListItem[], focusThreadId: string | null = null) => ({
+    projects: [],
+    threads,
+    filter: DEFAULT_THREAD_FILTER,
+    focusThreadId,
+    now: NOW,
+    activeOnly: true,
+  });
+
+  it("keeps only active threads with their project path, after the other filters", () => {
+    const layer = overviewTree(input([thread({ id: "run", status: "active" }), thread({ id: "idle" }), thread({ id: "gone", projectId: "p2" })]));
+    expect(threadIds(layer)).toEqual(["run"]);
+    expect(layer.nodes.some((node) => node.kind === "project" && node.id.includes("p2"))).toBe(false);
+  });
+
+  it("is empty when nothing runs", () => {
+    expect(overviewTree(input([thread({ id: "idle" })])).nodes).toEqual([]);
+  });
+
+  it("still keeps the focused thread", () => {
+    expect(threadIds(overviewTree(input([thread({ id: "run", status: "active" }), thread({ id: "idle" })], "idle")))).toEqual(["run", "idle"]);
+  });
+});
