@@ -8,7 +8,8 @@ import type { GraphsRpc } from "./graphs";
 import { OPEN_GRAPH_RUN_STATUSES, type CrewRow, type MemberRow, type MessageRow, type Store } from "./store";
 import type { ContextUsage, OpenInteraction, ThreadInfo, ThreadPort } from "./thread-port";
 
-export type ThreadAxis = "present" | "archived" | "missing";
+/** pending: reset --mode new, the thread starts with the next message (BBP-268). */
+export type ThreadAxis = "present" | "archived" | "missing" | "pending";
 export type ActivityState = "working" | "idle" | "needs-you" | "error" | "unknown";
 export type NeedsReason =
   | "approval"
@@ -31,6 +32,8 @@ export type StoppedLoop = { reason: string; action: string };
 
 export type ActivityInput = {
   thread: ThreadInfo | null;
+  /** BBP-268: no thread yet because a reset --mode new waits for the next message. */
+  pendingSpawn?: boolean;
   interactions: readonly OpenInteraction[];
   humanQuestion: Pick<MessageRow, "subject" | "body"> | null;
   /** Stopped-loop messages this member sent that the human has not dealt with yet. */
@@ -77,7 +80,7 @@ const WORKING = new Set(["active", "pending", "starting", "stopping"]);
 
 export function deriveActivity(input: ActivityInput): Derived {
   const { thread } = input;
-  const axis: ThreadAxis = !thread ? "missing" : thread.archived ? "archived" : "present";
+  const axis: ThreadAxis = input.pendingSpawn && !thread ? "pending" : !thread ? "missing" : thread.archived ? "archived" : "present";
   const live = axis === "present" && thread !== null;
   const interactions = live ? input.interactions : [];
   const needsYou: NeedsReason[] = [];
@@ -96,7 +99,8 @@ export function deriveActivity(input: ActivityInput): Derived {
   if (input.graphQuestion) needsYou.push("graph-approval");
 
   let activity: ActivityState;
-  if (!live) activity = "unknown";
+  if (axis === "pending") activity = "idle";
+  else if (!live) activity = "unknown";
   else if (interactions.length > 0 || input.humanQuestion) activity = "needs-you";
   else if (thread.status === "error") activity = "error";
   else if (WORKING.has(thread.status)) activity = "working";
@@ -230,6 +234,7 @@ export function createActivityTracker(deps: {
       stoppedLoops,
       stoppedLoop,
       held,
+      pendingSpawn: !binding && store.pendingSpawn(member.id) !== null,
       lead: member.lead,
       openWork: store.listWork({ owner: member.id, states: ["open", "claimed"] }).length,
       needs: store.listNeeds(member.id),

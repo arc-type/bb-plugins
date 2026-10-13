@@ -242,6 +242,16 @@ export const MIGRATIONS: readonly string[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS graph_runs_by_member ON graph_runs (member_id, status)`,
   `CREATE INDEX IF NOT EXISTS graph_runs_by_crew ON graph_runs (crew_id, status)`,
+  // BBP-266: the kickoff brief of a shift that has not had a turn yet; delivery
+  // prepends it to the next message it sends, then clears it.
+  `ALTER TABLE member_bindings ADD COLUMN pending_kickoff TEXT`,
+  // BBP-268: a reset --mode new retired the old thread; the next delivered
+  // message spawns the new one. Binding a thread ends it.
+  `CREATE TABLE IF NOT EXISTS member_pending_spawns (
+     member_id TEXT PRIMARY KEY,
+     shift INTEGER NOT NULL,
+     created_at INTEGER NOT NULL
+   )`,
 ];
 
 export const CREW_STATUSES = ["stopped", "starting", "running", "degraded"] as const;
@@ -688,7 +698,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
       db.transaction(() => {
         db.prepare("UPDATE members SET id = ?, address = ? WHERE id = ?").run(to, address, from);
         db.prepare("UPDATE crews SET lead_member_id = ? WHERE lead_member_id = ?").run(to, from);
-        for (const table of ["member_bindings", "member_ops", "member_needs", "member_env", "member_state", "handovers", "graph_runs"]) {
+        for (const table of ["member_bindings", "member_pending_spawns", "member_ops", "member_needs", "member_env", "member_state", "handovers", "graph_runs"]) {
           db.prepare(`UPDATE ${table} SET member_id = ? WHERE member_id = ?`).run(to, from);
         }
         db.prepare("UPDATE work_items SET owner_member = ? WHERE owner_member = ?").run(to, from);
@@ -730,8 +740,34 @@ export function createStore(db: Database, now: () => number = Date.now) {
         db.prepare(
           "INSERT INTO member_bindings (member_id, shift, thread_id, bound_at, retired_at) VALUES (?, ?, ?, ?, NULL)",
         ).run(memberRow, shift, threadId, at);
+        db.prepare("DELETE FROM member_pending_spawns WHERE member_id = ?").run(memberRow);
       })();
       return this.currentBinding(memberRow)!;
+    },
+    /** BBP-268: the shift waiting for its thread, spawned by the next delivered message. */
+    pendingSpawn(memberRow: string): { shift: number; createdAt: number } | null {
+      const row = db.prepare("SELECT shift, created_at FROM member_pending_spawns WHERE member_id = ?").get(memberRow) as
+        | { shift: number; created_at: number }
+        | undefined;
+      return row ? { shift: row.shift, createdAt: row.created_at } : null;
+    },
+    setPendingSpawn(memberRow: string, shift: number): void {
+      db.prepare(
+        "INSERT INTO member_pending_spawns (member_id, shift, created_at) VALUES (?, ?, ?) ON CONFLICT(member_id) DO UPDATE SET shift = excluded.shift, created_at = excluded.created_at",
+      ).run(memberRow, shift, now());
+    },
+    /** BBP-266: the pending kickoff brief of the current binding, if any. */
+    pendingKickoff(memberRow: string): string | null {
+      const row = db
+        .prepare("SELECT pending_kickoff FROM member_bindings WHERE member_id = ? AND retired_at IS NULL ORDER BY shift DESC LIMIT 1")
+        .get(memberRow) as { pending_kickoff: string | null } | undefined;
+      return row?.pending_kickoff ?? null;
+    },
+    setPendingKickoff(memberRow: string, brief: string): void {
+      db.prepare("UPDATE member_bindings SET pending_kickoff = ? WHERE member_id = ? AND retired_at IS NULL").run(brief, memberRow);
+    },
+    clearPendingKickoff(memberRow: string): void {
+      db.prepare("UPDATE member_bindings SET pending_kickoff = NULL WHERE member_id = ? AND retired_at IS NULL").run(memberRow);
     },
     retireBinding(memberRow: string): void {
       db.prepare("UPDATE member_bindings SET retired_at = ? WHERE member_id = ? AND retired_at IS NULL").run(now(), memberRow);
@@ -1293,6 +1329,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
           `INSERT INTO member_bindings (member_id, shift, thread_id, bound_at, retired_at) VALUES (?, ?, ?, ?, NULL)
            ON CONFLICT(member_id, shift) DO UPDATE SET thread_id = excluded.thread_id, retired_at = NULL`,
         ).run(memberRow, shift, threadId, at);
+        db.prepare("DELETE FROM member_pending_spawns WHERE member_id = ?").run(memberRow);
       })();
       return this.currentBinding(memberRow)!;
     },
@@ -1478,7 +1515,7 @@ export function createStore(db: Database, now: () => number = Date.now) {
         );
         run("messages-marked", "UPDATE messages SET to_crew = ?, to_member = NULL, updated_at = ? WHERE to_crew = ?", tombstone, at, crewId);
         run("messages-marked", "UPDATE messages SET from_crew = ?, from_member = NULL, updated_at = ? WHERE from_crew = ?", tombstone, at, crewId);
-        for (const table of ["member_bindings", "member_ops", "member_needs", "member_env", "member_state", "handovers"]) {
+        for (const table of ["member_bindings", "member_pending_spawns", "member_ops", "member_needs", "member_env", "member_state", "handovers"]) {
           run(table, `DELETE FROM ${table} WHERE member_id IN (${memberIds})`, crewId);
         }
         run("work_transitions", "DELETE FROM work_transitions WHERE item_id IN (SELECT id FROM work_items WHERE crew_id = ?)", crewId);

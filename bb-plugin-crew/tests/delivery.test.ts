@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AddressError, MAX_ATTEMPTS, parseAddress, renderMessage, replyAddress, skillsText } from "../lib/delivery";
 import { effectiveCrossCrew, loopVerdict } from "../lib/policy";
+import { createStore } from "../lib/store";
 import { duoYaml, PROJECT, running, setup, trioYaml } from "./helpers";
 
 const human = { kind: "human" as const };
@@ -555,5 +556,78 @@ describe("skillsText", () => {
   it("joins several skills in order, each as its own section", () => {
     const catalog = { names: new Set(["a", "b"]), bodies: new Map([["a", "A body"], ["b", "B body"]]) };
     expect(skillsText(["a", "b"], catalog)).toBe("## Skill: a\n\nA body\n\n## Skill: b\n\nB body");
+  });
+});
+
+describe("pending kickoff (BBP-266)", () => {
+  const memberOf = (store: ReturnType<typeof setup>["store"], threadId: string) => store.bindingOfThread(threadId)!.memberId;
+
+  it("the next sent message carries the brief once, brief first; the following one has none", async () => {
+    const { service, port, store } = setup();
+    const { self, threads } = await running(service, port);
+    store.setPendingKickoff(memberOf(store, threads["dev-impl"]!), "BRIEF: you are dev-impl");
+    await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "first" });
+    await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "second" });
+    const inbox = port.threads.get(threads["dev-impl"]!)!.inbox;
+    expect(inbox).toHaveLength(2);
+    expect(inbox[0]!.text.startsWith("BRIEF: you are dev-impl")).toBe(true);
+    expect(inbox[0]!.text).toContain("first");
+    expect(inbox[1]!.text).not.toContain("BRIEF");
+    expect(store.pendingKickoff(memberOf(store, threads["dev-impl"]!))).toBeNull();
+  });
+
+  it("queue-if-active and steer-if-active carry it too", async () => {
+    const { service, port, store } = setup();
+    const { self, threads } = await running(service, port, trioYaml(), "active");
+    store.setPendingKickoff(memberOf(store, threads["dev-impl"]!), "BRIEF-Q");
+    store.setPendingKickoff(memberOf(store, threads["dev-review"]!), "BRIEF-S");
+    await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "q" });
+    await service.send({ projectId: PROJECT, from: human, to: "dev-review@trio", body: "s", priority: "urgent" });
+    const [queued] = port.threads.get(threads["dev-impl"]!)!.inbox;
+    const [steered] = port.threads.get(threads["dev-review"]!)!.inbox;
+    expect(queued).toMatchObject({ mode: "queue-if-active" });
+    expect(queued!.text.startsWith("BRIEF-Q")).toBe(true);
+    expect(steered).toMatchObject({ mode: "steer-if-active" });
+    expect(steered!.text.startsWith("BRIEF-S")).toBe(true);
+  });
+
+  it("negative: a failed send keeps the pending kickoff; the retry carries it", async () => {
+    const { service, port, store } = setup();
+    const { self, threads } = await running(service, port);
+    const member = memberOf(store, threads["dev-impl"]!);
+    store.setPendingKickoff(member, "BRIEF");
+    port.sendFailures.push(new Error("boom"));
+    const [row] = await service.send({ projectId: PROJECT, from: self("orch-lead"), to: "dev-impl", body: "x" });
+    expect(row).toMatchObject({ status: "pending" });
+    expect(store.pendingKickoff(member)).toBe("BRIEF");
+    await service.delivery.drain();
+    const inbox = port.threads.get(threads["dev-impl"]!)!.inbox;
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]!.text.startsWith("BRIEF")).toBe(true);
+    expect(store.pendingKickoff(member)).toBeNull();
+  });
+
+  it("a system notice in UI mode neither carries nor clears it", async () => {
+    const { service, port, store } = setup();
+    const { threads } = await running(service, port);
+    const member = memberOf(store, threads["dev-impl"]!);
+    store.setPendingKickoff(member, "BRIEF");
+    const [notice] = await service.send({ projectId: PROJECT, from: { kind: "system" }, to: "dev-impl@trio", body: "fyi", kind: "system" });
+    expect(notice).toMatchObject({ deliveryMode: "ui" });
+    expect(sends(port)).toHaveLength(0);
+    expect(store.pendingKickoff(member)).toBe("BRIEF");
+  });
+
+  it("survives a restart; clear removes it; a new binding starts without one", async () => {
+    const { service, port, store, db } = setup();
+    const { threads } = await running(service, port);
+    const member = memberOf(store, threads["dev-impl"]!);
+    store.setPendingKickoff(member, "BRIEF");
+    expect(createStore(db, () => 0).pendingKickoff(member)).toBe("BRIEF");
+    store.clearPendingKickoff(member);
+    expect(store.pendingKickoff(member)).toBeNull();
+    store.setPendingKickoff(member, "OLD");
+    store.bind(member, "thr_next", store.currentBinding(member)!.shift + 1);
+    expect(store.pendingKickoff(member)).toBeNull();
   });
 });

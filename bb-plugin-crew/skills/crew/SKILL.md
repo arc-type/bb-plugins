@@ -210,8 +210,8 @@ bb crew import crew.yaml                    # stores the file, prints the plan, 
   A thread that stops being the member's keeps its transcript: it is
   archived (or, after `detach`, left alone) with `retired: true` in its crew
   metadata. Nothing is ever deleted — except by `bb crew delete`.
-- `reset --mode clear`: same thread, context cleared, the kickoff brief is
-  the first message of the new shift. `--mode new`: a fresh thread, the old
+- `reset --mode clear`: same thread, context cleared, no turn started; the
+  kickoff brief rides on the first message the new shift receives. `--mode new`: a fresh thread, the old
   one archived. A lead's new thread takes the members under it.
 - `handover`: the member is asked to write a brief and pass it with
   `crew_handover_note(brief)`. Messages to the member are held (`on_hold`,

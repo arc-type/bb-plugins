@@ -140,6 +140,8 @@ describe("bb crew delete — threads", () => {
     const env = await twoCrews();
     // A retired shift: reset --mode new gives dev-impl a second thread.
     await env.service.lifecycle.reset(env.store.getCrew(env.trio.crew.id)!, "dev-impl", "new");
+    // BBP-268: the new thread starts with the next message.
+    await env.service.send({ projectId: env.trio.crew.projectId, from: { kind: "human" }, to: "dev-impl@trio", body: "go" });
     await env.service.stop(env.store.getCrew(env.trio.crew.id)!);
     const bound = env.store.crewThreads(env.trio.crew.id);
     return { ...env, bound };

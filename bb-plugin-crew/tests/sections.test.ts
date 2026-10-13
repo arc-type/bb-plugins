@@ -38,9 +38,12 @@ describe("crew section", () => {
 
   it("a new shift (reset --mode new) files the new thread into the section", async () => {
     const t = await trio();
-    const result = await t.service.lifecycle.reset(t.crew, "dev-impl", "new");
-    expect(result.threadId).not.toBe(t.threads["dev-impl"]);
-    expect(t.sectionOf(result.threadId!)).toBe(t.sectionNamed("trio")[0]);
+    await t.service.lifecycle.reset(t.crew, "dev-impl", "new");
+    // BBP-268: the new thread starts with the next message.
+    await t.service.send({ projectId: t.crew.projectId, from: { kind: "human" }, to: "dev-impl@trio", body: "go" });
+    const threadId = t.store.currentBinding(t.store.listMembers(t.crew.id).find((m) => m.key === "dev-impl")!.id)!.threadId;
+    expect(threadId).not.toBe(t.threads["dev-impl"]);
+    expect(t.sectionOf(threadId)).toBe(t.sectionNamed("trio")[0]);
   });
 
   it("add member files the new thread into the section", async () => {
