@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -13,7 +13,8 @@ let template = "";
 beforeAll(() => {
   template = join(realpathSync(mkdtempSync(join(tmpdir(), "crew-merge-template-"))), "main");
   execFileSync("git", ["init", "-q", "-b", "main", template]);
-  for (const [k, v] of [["user.name", "t"], ["user.email", "t@t"], ["commit.gpgsign", "false"]]) git(template, "config", k!, v!);
+  // Identity written straight into the config: no extra git calls, and the merges under test find it too.
+  appendFileSync(join(template, ".git", "config"), "[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = false\n");
   writeFileSync(join(template, "a.txt"), "a\n");
   writeFileSync(join(template, "b.txt"), "b\n");
   git(template, "add", ".");
