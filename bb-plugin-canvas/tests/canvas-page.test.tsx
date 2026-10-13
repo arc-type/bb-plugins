@@ -370,3 +370,34 @@ describe("the Canvas page's +N earlier steps (BBP-286)", () => {
     expect(timelineTurnSummaryDetails).not.toHaveBeenCalled();
   });
 });
+
+describe("the Canvas Active only toggle (BBP-288)", () => {
+  const sdk = (threads: unknown[]) => ({ projects: { list: async () => [{ id: "p1", name: "Shop" }] }, threads: { list: async () => threads } });
+
+  it("is off by default; on, it shows only the running threads", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Busy chat", { status: "active" }), row("t2", "p1", "Quiet chat")]));
+    const toggle = await screen.findByRole("button", { name: "Active only" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(await screen.findByRole("button", { name: /^Quiet chat — / })).toBeTruthy();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Quiet chat — / })).toBeNull());
+    expect(screen.getByRole("button", { name: /^Busy chat — / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Active only" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("remembers the toggle across reloads", async () => {
+    canvasPanel(sdk([row("t1", "p1", "Busy chat", { status: "active" }), row("t2", "p1", "Quiet chat")]));
+    fireEvent.click(await screen.findByRole("button", { name: "Active only" }));
+    cleanup();
+    canvasPanel(sdk([row("t1", "p1", "Busy chat", { status: "active" }), row("t2", "p1", "Quiet chat")]));
+    expect((await screen.findByRole("button", { name: "Active only" })).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("says nothing is running, and Show everything turns it off", async () => {
+    canvasPanel(sdk([row("t2", "p1", "Quiet chat")]));
+    fireEvent.click(await screen.findByRole("button", { name: "Active only" }));
+    expect(await screen.findByText("Nothing is running right now.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show everything" }));
+    expect(await screen.findByRole("button", { name: /^Quiet chat — / })).toBeTruthy();
+  });
+});
