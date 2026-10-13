@@ -290,7 +290,7 @@ describe("the Canvas page's turns", () => {
     fireEvent.change(await screen.findByRole("spinbutton", { name: "Turns per thread" }), { target: { value: "2" } });
     await open(/^Plain chat — /);
     await waitFor(() => expect(timeline).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Turn/ })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Turn.* — / })).toHaveLength(2));
   });
 });
 
@@ -300,11 +300,12 @@ describe("the Canvas page live", () => {
     const { sdk, timeline, emit } = liveSdk(() => rows);
     canvasPanel(sdk, { overviewTurns: 10 });
     await open(/^Plain chat — /);
-    await waitFor(() => expect(timeline).toHaveBeenCalledTimes(1));
+    // Once for the canvas, once for the selected thread's Activity list (BBP-291).
+    await waitFor(() => expect(timeline).toHaveBeenCalledTimes(2));
     rows = [turnRow("turn-1"), { ...turnRow("turn-2"), summaryCount: 0 }];
     emit({ entity: "thread", id: "t1", changes: ["events-appended"] });
-    await waitFor(() => expect(timeline).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Turn/ }).map((b) => b.getAttribute("aria-label"))).toHaveLength(2));
+    await waitFor(() => expect(timeline).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Turn.* — / })).toHaveLength(2));
   });
 
   it("loads nothing for a thread:changed on a thread whose turns are not loaded", async () => {
@@ -480,5 +481,41 @@ describe("the Canvas chat split", () => {
     canvasPanel(sdk([row("t1", "p1", "First")]));
     expect(await screen.findByRole("tab", { name: "Chat" })).toBeTruthy();
     expect(screen.queryByText("Select a thread to see its chat.")).toBeNull();
+  });
+});
+
+// BBP-291: the selected thread's full Activity list in the canvas sidebar.
+describe("the Canvas Activity list", () => {
+  const turns = (...ids: string[]) => ids.map((id) => ({ ...turnRow(id), summaryCount: 0 }));
+  const activity = () => screen.getByRole("region", { name: "Activity" });
+
+  it("lists every turn of the selected thread and how many the canvas shows", async () => {
+    const { sdk } = liveSdk(() => turns("turn-1", "turn-2", "turn-3"));
+    canvasPanel(sdk);
+    fireEvent.click(await screen.findByRole("button", { name: /^Plain chat — / }));
+    expect(await screen.findByText("1 of 3 in canvas")).toBeTruthy();
+    expect(activity().querySelectorAll("li")).toHaveLength(3);
+  });
+
+  it("brings a turn the canvas hides into view and selects it on a click", async () => {
+    const { sdk } = liveSdk(() => turns("turn-1", "turn-2", "turn-3"));
+    canvasPanel(sdk);
+    fireEvent.click(await screen.findByRole("button", { name: /^Plain chat — / }));
+    await screen.findByText("1 of 3 in canvas");
+    fireEvent.click(activity().querySelectorAll("li button")[0]!);
+    await waitFor(() => expect(document.querySelectorAll('[data-canvas-view] button[aria-pressed="true"]').length).toBe(1));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Turn/ }).length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("updates live on thread:changed, and a turn that is gone does not crash", async () => {
+    let rows = turns("turn-1", "turn-2");
+    const { sdk, emit } = liveSdk(() => rows);
+    canvasPanel(sdk);
+    fireEvent.click(await screen.findByRole("button", { name: /^Plain chat — / }));
+    await screen.findByText("1 of 2 in canvas");
+    fireEvent.click(activity().querySelectorAll("li button")[0]!);
+    rows = turns("turn-2", "turn-3", "turn-4");
+    emit({ entity: "thread", id: "t1", changes: ["events-appended"] });
+    expect(await screen.findByText("1 of 3 in canvas")).toBeTruthy();
   });
 });
