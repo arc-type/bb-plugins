@@ -5,7 +5,7 @@
 // archived flag, the window or the limit would drop it.
 import { filterActive } from "./active-filter";
 import { threadNodeId } from "./canvas-threads";
-import { filterThreads, type ThreadFilter } from "./thread-filter";
+import { DEFAULT_THREAD_FILTER, filterThreads, narrowThreads, type ThreadFilter } from "./thread-filter";
 import { threadTree, type ProjectLike, type ThreadListItem } from "./thread-tree";
 
 export type OverviewInput = {
@@ -19,15 +19,57 @@ export type OverviewInput = {
   activeOnly?: boolean;
 };
 
-export function overviewTree({ projects, threads, filter, focusThreadId, now, activeOnly = false }: OverviewInput): ReturnType<typeof threadTree> {
+export type Overview = ReturnType<typeof threadTree> & {
+  /** Threads the window and limit let through (the focused extra not counted). */
+  shown: number;
+  /** Threads the project, status and archived filters let through. */
+  total: number;
+};
+
+export function overviewTree({ projects, threads, filter, focusThreadId, now, activeOnly = false }: OverviewInput): Overview {
   const shown = filterThreads(threads, filter, now);
   const focused =
     focusThreadId !== null && !shown.some((thread) => thread.id === focusThreadId)
       ? threads.find((thread) => thread.id === focusThreadId)
       : undefined;
+  const counts = { shown: shown.length, total: narrowThreads(threads, filter).length };
   const tree = threadTree(projects, focused ? [...shown, focused] : shown);
-  if (!activeOnly) return tree;
+  if (!activeOnly) return { ...tree, ...counts };
   const nodes = filterActive(tree.nodes, new Set(focusThreadId !== null ? [threadNodeId(focusThreadId)] : []));
   const ids = new Set(nodes.map((node) => node.id));
-  return { nodes, edges: tree.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)), expanded: tree.expanded.filter((id) => ids.has(id)) };
+  return {
+    nodes,
+    edges: tree.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)),
+    expanded: tree.expanded.filter((id) => ids.has(id)),
+    ...counts,
+  };
+}
+
+const HOUR = 3_600_000;
+
+/** The toolbar's hint, e.g. "Last 12 h · 20 of 73". */
+export function overviewSummary(filter: Pick<ThreadFilter, "windowMs">, shown: number, total: number): string {
+  const count = `${shown} of ${total}`;
+  return filter.windowMs === null ? count : `Last ${Math.round(filter.windowMs / HOUR)} h · ${count}`;
+}
+
+export type OverviewSettings = Pick<ThreadFilter, "windowMs" | "limit" | "turnsPerThread">;
+
+/** An integer inside [min, max], or the fallback. */
+function inRange(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+/**
+ * The plugin settings (windowHours 1–720, maxThreads 1–100, overviewTurns
+ * 0–10, as agent-graph) as overview filter values; anything missing or out
+ * of range falls back to the default.
+ */
+export function overviewSettings(values: Readonly<Record<string, unknown>> | undefined): OverviewSettings {
+  const fallback = DEFAULT_THREAD_FILTER;
+  return {
+    windowMs: inRange(values?.windowHours, 1, 720, fallback.windowMs! / HOUR) * HOUR,
+    limit: inRange(values?.maxThreads, 1, 100, fallback.limit!),
+    turnsPerThread: inRange(values?.overviewTurns, 0, 10, fallback.turnsPerThread!),
+  };
 }
