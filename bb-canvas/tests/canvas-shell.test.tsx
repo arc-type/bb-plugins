@@ -439,9 +439,72 @@ describe("CanvasShell start fit waits for a real host size (BBP-214 feedback 3 r
 
   it("fits immediately when the host panel already has a real size on mount, same as before", async () => {
     render(<CanvasShell nodes={nodes} expanded={new Set(["root"])} />);
-    // The jsdom-wide default stub (tests/setup.ts) gives every element a
-    // non-zero size unless a test overrides it, so the gate should not add
-    // any delay to the common case.
+    // This file's own default stub (above) gives every element a non-zero
+    // size unless a test overrides it, so the gate should not add any delay
+    // to the common case.
     await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+  });
+
+  // Review follow-up (round 2, 01M4SPYFVTBJ3GB42MD80N83CJ): the two tests
+  // above exercise "large container starts at 0" in isolation, and the
+  // BBP-196 describe block above exercises "restored state + async growth"
+  // in isolation — but, because this file's own default stub gives every
+  // element a non-zero size from the start, neither test ever combines a
+  // host panel that starts at 0x0 with a restored `initialExpanded` plus an
+  // async `loadChildren` resolving after mount. That combination is exactly
+  // the customer's real scenario (a reload with previously expanded threads
+  // reopening, in a large window) and is the one case the size-gate and the
+  // nodes-growth-refit effects could in principle race each other on.
+  it("fits once, readably and on the grown tree, when restored state finishes loading before the host panel is sized", async () => {
+    let resolveLoad!: (value: { nodes: CanvasNode[] }) => void;
+    const loadChildren = () => new Promise<{ nodes: CanvasNode[] }>((resolve) => (resolveLoad = resolve));
+    const baseNodes: CanvasNode[] = [
+      { id: "root", kind: "agents", label: "bb", parentId: null },
+      { id: "project", kind: "project", label: "bb-plugins", parentId: "root" },
+      { id: "member", kind: "member", label: "a", parentId: "project" },
+      { id: "thread", kind: "thread", label: "Thread", parentId: "member", meta: { threadId: "t1" } },
+    ];
+
+    const { container } = render(
+      <CanvasView
+        nodes={baseNodes}
+        // A thread already expanded from a restored (persisted) state, like
+        // `localStorage` replaying a prior session's open nodes.
+        initialExpanded={new Set(["root", "project", "member", "thread"])}
+        loadChildren={loadChildren}
+        canLoadChildren={(node) => node.kind === "thread"}
+      />,
+    );
+    const host = hostOf(container);
+    setHostSize(host, 0, 0);
+
+    // The host panel is still 0x0 — same as a reload where BB's own layout
+    // hasn't settled yet — while the restored thread's children arrive.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(fitViewCalls.length).toBe(0);
+
+    resolveLoad({
+      nodes: [{ id: "turn-1", kind: "turn", label: "Turn · 1 step", parentId: "thread" }],
+    });
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    // The grown tree landed, but the host panel is still unsized — the gate
+    // must still hold the fit off rather than fit against the stale 500x500
+    // guess the moment it finally does get a size.
+    expect(fitViewCalls.length).toBe(0);
+
+    // The host panel settles into its real, large size — matching the
+    // customer's reported window — only now, after the restored children
+    // have already landed. The size-gate and the growth-refit must combine
+    // rather than deadlock each other: the view still ends up fitted and
+    // readable, framing root and its first level.
+    setHostSize(host, 2539, 1200);
+    await waitFor(() => expect(fitViewCalls.length).toBeGreaterThan(0));
+    const lastCall = fitViewCalls[fitViewCalls.length - 1] as { nodes?: { id: string }[] };
+    const framedIds = (lastCall.nodes ?? []).map((n) => n.id);
+    expect(framedIds).toEqual(expect.arrayContaining(["root", "project"]));
   });
 });
