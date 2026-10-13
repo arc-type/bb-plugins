@@ -41,6 +41,12 @@ describe("StatusEdge state (BBP-146)", () => {
     expect(path.style.strokeDasharray).toBe("4 4");
   });
 
+  it("negative: a highlighted 'flow' relation draws blue but never dashed (BBP-214 feedback 2)", () => {
+    const path = edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", relation: true, emphasis: "highlight" });
+    expect(path.style.stroke).toBe("var(--primary)");
+    expect(path.style.strokeDasharray).toBe("");
+  });
+
   it("injects its keyframes once, no matter how many edges render", () => {
     edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", state: "now" });
     edge({ variant: "flow", path: "M 0 0 L 1 1", label: "", state: "now" });

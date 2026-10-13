@@ -262,6 +262,33 @@ describe("layoutTree", () => {
     });
   });
 
+  describe("declared edge keeps its own variant (BBP-214 feedback 2)", () => {
+    // A relation (BBP-202) running forward through the columns is declared
+    // "flow", not "back" — `messageEdge` used to stamp every non-back
+    // declared edge "message" regardless, so a `"flow"`-shaped relation
+    // picked up the message dash pattern it never asked for, then rendered
+    // blue once `relationsView` highlighted it: a dashed blue line with
+    // nothing running.
+    it("a declared 'flow' edge stays 'flow', not 'message' — no stray dash", () => {
+      const nodes = [
+        node("crew", null, { kind: "crew" }),
+        node("a", "crew", { kind: "member" }),
+        node("b", "crew", { kind: "member" }),
+      ];
+      const edges: CanvasEdge[] = [{ from: "a", to: "b", variant: "flow", relation: true }];
+      const { edges: placed } = layoutTree(nodes, new Set(["crew"]), edges);
+      const relation = placed.find((edge) => edge.relation);
+      expect(relation!.variant).toBe("flow");
+    });
+
+    it("negative: a genuinely declared 'message' edge still renders as one", () => {
+      const nodes = [node("a", null, { kind: "turn" }), node("b", null, { kind: "turn" })];
+      const edges: CanvasEdge[] = [{ from: "a", to: "b", variant: "message" }];
+      const { edges: placed } = layoutTree(nodes, new Set(), edges);
+      expect(placed.find((edge) => edge.from === "a" && edge.to === "b")!.variant).toBe("message");
+    });
+  });
+
   describe("frames (BBP-165)", () => {
     function frameNodes(): CanvasNode[] {
       return [

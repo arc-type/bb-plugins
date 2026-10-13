@@ -299,13 +299,31 @@ function backEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdg
   };
 }
 
+/** The straight-line shape for every declared edge that isn't a back
+ *  reference — a literal chat `message`, but also a relation (BBP-202,
+ *  `relation: true`) declared with variant `"flow"` when it runs forward
+ *  through the columns rather than looping back (`canvas-layer.ts`,
+ *  `pathBetween`). The placed edge keeps the *declared* variant rather than
+ *  always stamping `"message"`: `StatusEdge`'s dash pattern is keyed by
+ *  variant, and a `"flow"`-shaped relation stamped `"message"` picked up a
+ *  dash it never asked for (BBP-214 feedback 2) — only an edge actually
+ *  declared `"message"` should look like one. */
 function messageEdge(from: PlacedNode, to: PlacedNode, edge: CanvasEdge): PlacedEdge {
   const fromX = from.x + from.width / 2;
   const fromY = from.y + from.height / 2;
   const toX = to.x + to.width / 2;
   const toY = to.y + to.height / 2;
   const path = `M ${fromX} ${fromY} L ${toX} ${toY}`;
-  return { from: from.id, to: to.id, variant: "message", path, label: edge.label ?? "", isBack: false, ...relationOf(edge) };
+  return {
+    from: from.id,
+    to: to.id,
+    variant: edge.variant,
+    path,
+    label: edge.label ?? "",
+    isBack: false,
+    ...(edge.state ? { state: edge.state } : {}),
+    ...relationOf(edge),
+  };
 }
 
 function relationOf(edge: CanvasEdge): Pick<PlacedEdge, "relation" | "emphasis"> {
