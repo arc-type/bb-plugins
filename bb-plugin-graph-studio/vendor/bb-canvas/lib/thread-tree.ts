@@ -27,12 +27,15 @@ const STATUS: Record<string, CanvasStatus> = {
   idle: "idle",
 };
 
+/** The status a thread card shows, from the raw `threads.list` status. */
+export const threadStatus = (status: string): CanvasStatus => STATUS[status] ?? "idle";
+
 function threadNode(thread: ThreadListItem): CanvasNode {
   return {
     id: threadNodeId(thread.id),
     kind: "thread",
     label: thread.title?.trim() || thread.titleFallback?.trim() || "Thread",
-    status: STATUS[thread.status] ?? "idle",
+    status: threadStatus(thread.status),
     parentId: projectNodeId(thread.projectId),
     meta: { threadId: thread.id, state: thread.status, provider: thread.providerId },
   };
