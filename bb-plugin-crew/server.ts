@@ -561,16 +561,21 @@ function createBbLimit(log: (text: string) => void): () => Promise<number | null
   };
 }
 
-/** Coalesce bursts (a drain touches many rows) into one signal per tick. */
-function debounced(fn: () => void, ms = 250): () => void {
+/** Coalesce bursts (a drain touches many rows) into one signal per tick; `cancel` drops a pending one. */
+function debounced(fn: () => void, ms = 250): { (): void; cancel(): void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  return () => {
+  const call = () => {
     if (timer) return;
     timer = setTimeout(() => {
       timer = null;
       fn();
     }, ms);
   };
+  call.cancel = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+  return call;
 }
 
 export default async function plugin(bb: BbPluginApi) {
@@ -635,6 +640,8 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   const publishActivity = debounced(() => bb.realtime.publish(ACTIVITY_CHANGED, { at: Date.now() }));
+  // A publish still pending at teardown would hit the stale context (BBP-260).
+  bb.onDispose(() => publishActivity.cancel());
   const service = createCrewService({
     store,
     port,

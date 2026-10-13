@@ -10,11 +10,11 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["tests/setup-plugin-runtime.ts"],
-    // Three suites load the whole plugin bundle in `beforeAll`
-    // (`loadPluginApp(() => import("../app"))`). With a cold Vite cache that
-    // first transform exceeds the 10 s default, and the hook does not fail
-    // loudly — it skips 16 tests. A green run that quietly tested nothing is
-    // worse than a slow one.
+    // The suites that capture the plugin app import `../app` statically, not
+    // with `loadPluginApp(() => import("../app"))` in `beforeAll`: under load
+    // the cold transform of the whole bundle exceeded the hook timeout and the
+    // hook skipped its tests (BBP-260). A skipped hook does not fail loudly — a
+    // green run that quietly tested nothing is worse than a slow one.
     hookTimeout: 30_000,
   },
 });

@@ -12,13 +12,16 @@ import {
   renderSlot,
   type CapturedPluginApp,
 } from "@get-bb/plugin-sdk/testing/app";
+// Static, not `() => import("../app")` in beforeAll: the cold transform of the
+// whole bundle belongs to the import phase, not to a timed hook (BBP-260).
+import pluginApp from "../app";
 import { TEMPLATES } from "../lib/templates";
 import type { RunDto } from "../server";
 
 let app: CapturedPluginApp;
 
 beforeAll(async () => {
-  app = await loadPluginApp(() => import("../app"));
+  app = await loadPluginApp(pluginApp);
 });
 afterEach(cleanup);
 
