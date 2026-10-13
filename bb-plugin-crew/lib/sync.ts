@@ -337,6 +337,8 @@ export async function spawnMember(
     row: MemberRow;
     members: readonly ResolvedMember[];
     leadThreadId: string | null;
+    /** The new thread's parent; members have none (ADR 0003). Defaults to `leadThreadId`. */
+    parentThreadId?: string | null;
     /** Set when `--fresh` replaces this thread. */
     fresh: string | null;
     /** Appended to the kickoff brief (a handover names its brief here). */
@@ -399,7 +401,7 @@ export async function spawnMember(
       reasoningLevel: member.reasoningLevel,
       serviceTier: member.serviceTier,
       permissions: member.permissions,
-      parentThreadId: member.lead ? null : args.leadThreadId,
+      parentThreadId: member.lead ? null : args.parentThreadId !== undefined ? args.parentThreadId : args.leadThreadId,
       environment: await environmentFor(ctx, member, args.leadThreadId),
       metadata: {
         crew: crew.name,

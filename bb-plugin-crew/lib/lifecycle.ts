@@ -87,21 +87,11 @@ export function createLifecycle(deps: LifecycleDeps) {
     return { crew: crew.name, crewId: crew.id, member: member.key, address: member.address, shift, opId, lead: member.lead, retired: false };
   }
 
-  /** A new lead thread: every other member's thread moves under it, so the sidebar keeps nesting. */
-  async function reparentChildren(crew: CrewRow, leadThreadId: string): Promise<void> {
-    for (const member of store.listMembers(crew.id)) {
-      if (member.lead) continue;
-      const binding = store.currentBinding(member.id);
-      if (binding) await port.update(binding.threadId, { parentThreadId: leadThreadId }).catch(() => undefined);
-    }
-  }
-
   async function spawnShift(crew: CrewRow, member: MemberRow, oldThread: string, note?: string): Promise<MemberResult> {
     const { spec, resolved, members } = resolvedMember(crew, member);
     const leadRow = lead(crew);
     const leadThreadId = member.lead ? null : leadRow ? (store.currentBinding(leadRow.id)?.threadId ?? null) : null;
-    const result = await spawnMember(ctx, { crew, spec, member: resolved, row: member, members, leadThreadId, fresh: oldThread, note });
-    if (member.lead && result.threadId) await reparentChildren(crew, result.threadId);
+    const result = await spawnMember(ctx, { crew, spec, member: resolved, row: member, members, leadThreadId, parentThreadId: null, fresh: oldThread, note });
     return result;
   }
 
@@ -210,6 +200,8 @@ export function createLifecycle(deps: LifecycleDeps) {
       // clearContext needs an idle thread.
       if (BUSY.has(thread.status)) await port.stop(thread.id);
       await port.clearContext(thread.id);
+      // The new shift has no parent (ADR 0003), even if the old one still had one.
+      if (thread.parentThreadId !== null) await port.update(thread.id, { parentThreadId: null });
       store.bind(member.id, thread.id, shift);
       await port.setMetadata(thread.id, metadataFor(crew, member, shift, opId));
       journal.done(opId, thread.id);
@@ -367,12 +359,10 @@ export function createLifecycle(deps: LifecycleDeps) {
     const opId = journal.begin(member.id, "attach");
     try {
       await port.setMetadata(threadId, metadataFor(crew, member, shift, opId));
-      const leadRow = lead(crew);
-      const leadThread = !member.lead && leadRow ? (store.currentBinding(leadRow.id)?.threadId ?? null) : null;
-      await port.update(threadId, { title: member.address, ...(leadThread ? { parentThreadId: leadThread } : {}) });
+      // No parent (ADR 0003): BB would post a child-completed notice to the lead after every turn.
+      await port.update(threadId, { title: member.address });
       store.bind(member.id, threadId, shift);
       journal.done(opId, threadId);
-      if (member.lead) await reparentChildren(crew, threadId);
     } catch (error) {
       journal.failed(opId, error instanceof Error ? error.message : String(error), threadId);
       throw error;

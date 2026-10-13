@@ -104,7 +104,7 @@ export type SpawnRequest = {
 export type EnvironmentInfo = { path: string | null; branch: string | null; defaultBranch: string | null; hostId?: string | null };
 export type ContextUsage = { usedTokens: number; contextWindow: number };
 
-export type ThreadPatch = { title?: string; parentThreadId?: string; model?: string };
+export type ThreadPatch = { title?: string; parentThreadId?: string | null; model?: string };
 export type OpenSplit = "down" | "left" | "replace" | "right" | "top";
 
 export interface ThreadPort {

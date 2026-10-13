@@ -441,7 +441,7 @@ export function createCrewService(deps: ServiceDeps) {
       }
       for (const line of blockers) warnings.push(`forced past: ${line}`);
 
-      // Lead last: the other members' threads are its children.
+      // The member bindings, not the lead's children: members have no parent (ADR 0003). Lead last.
       const bound = [...store.crewThreads(crew.id)].sort((a, b) => Number(a.lead) - Number(b.lead));
       const done = new Set<string>();
       const results: DeleteThreadResult[] = [];
