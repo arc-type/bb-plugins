@@ -148,3 +148,17 @@ describe("setMemberExecution", () => {
     expect(member.serviceTier).toBeUndefined();
   });
 });
+
+describe("crew editor with memberKeys: short", () => {
+  const SHORT = BASE.replace("baseBranch: main\n", "baseBranch: main\nmemberKeys: short\n")
+    .replace("from: orch-lead", "from: lead")
+    .replace("to: dev-impl", "to: impl");
+
+  it("keys members by id and renames with links following", () => {
+    expect(editorModel(SHORT)!.members.map((m) => m.key)).toEqual(["lead", "impl"]);
+    const next = renameMemberInFile(SHORT, "impl", "builder");
+    expect(editorModel(next)!.links).toEqual([{ from: "lead", to: "builder", kind: "assigns_to" }]);
+    expect(setMemberValue(SHORT, "impl", "role", "Builds.")).toContain("role: Builds.");
+    expect(valid(next)).toEqual([]);
+  });
+});

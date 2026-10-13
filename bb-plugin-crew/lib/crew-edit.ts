@@ -3,7 +3,7 @@
 // comments and the human's order survive. Validation stays with validateCrew.
 import YAML, { isMap, isSeq, type Document, type YAMLMap } from "yaml";
 import { addMemberToFile, CrewFileEditError } from "./crewfile";
-import { memberKey, type LinkKind } from "./spec";
+import { memberKey, memberKeysOf, type LinkKind } from "./spec";
 
 export type EditorMember = {
   key: string;
@@ -44,6 +44,7 @@ export function editorModel(yaml: string): EditorModel | null {
   const root = doc.contents as YAMLMap;
   const groups: string[] = [];
   const members: EditorMember[] = [];
+  const mode = memberKeysOf(root.get("memberKeys"));
   const list = root.get("groups", true);
   if (isSeq(list)) {
     for (const node of list.items) {
@@ -58,7 +59,7 @@ export function editorModel(yaml: string): EditorModel | null {
         const skills = m.get("skills", true);
         const environment = m.get("environment");
         members.push({
-          key: memberKey(group, str(m.get("id"))),
+          key: memberKey(mode, group, str(m.get("id"))),
           group,
           id: str(m.get("id")),
           lead: m.get("lead") === true,
@@ -91,8 +92,9 @@ export function editorModel(yaml: string): EditorModel | null {
   };
 }
 
-/** The YAML node of one member, found by its key (`group-id`). */
-function memberNode(doc: Document, key: string): YAMLMap {
+/** The YAML node of one member and its group id, found by its key (`group-id`, or `id` with memberKeys: short). */
+function memberEntry(doc: Document, key: string): { member: YAMLMap; group: string } {
+  const mode = memberKeysOf(doc.get("memberKeys"));
   const groups = doc.get("groups", true);
   if (isSeq(groups)) {
     for (const group of groups.items) {
@@ -100,12 +102,15 @@ function memberNode(doc: Document, key: string): YAMLMap {
       const members = (group as YAMLMap).get("members", true);
       if (!isSeq(members)) continue;
       for (const member of members.items) {
-        if (isMap(member) && memberKey(str((group as YAMLMap).get("id")), str((member as YAMLMap).get("id"))) === key) return member as YAMLMap;
+        const id = str((group as YAMLMap).get("id"));
+        if (isMap(member) && memberKey(mode, id, str((member as YAMLMap).get("id"))) === key) return { member: member as YAMLMap, group: id };
       }
     }
   }
   throw new CrewFileEditError(`There is no member ${key} in the crew file.`);
 }
+
+const memberNode = (doc: Document, key: string): YAMLMap => memberEntry(doc, key).member;
 
 /** Set one scalar on a member; "" removes the key so the crew-level default applies. */
 export function setMemberValue(yaml: string, key: string, field: string, value: string): string {
@@ -146,9 +151,8 @@ export function setMemberSkills(yaml: string, key: string, skills: readonly stri
 export function renameMemberInFile(yaml: string, key: string, id: string): string {
   if (!ID.test(id)) throw new CrewFileEditError("Member ids are letters, digits, '-' and '_' only.");
   const doc = parse(yaml);
-  const member = memberNode(doc, key);
-  const group = key.slice(0, key.length - str(member.get("id")).length - 1);
-  const next = memberKey(group, id);
+  const { member, group } = memberEntry(doc, key);
+  const next = memberKey(memberKeysOf(doc.get("memberKeys")), group, id);
   if (next === key) return yaml;
   if (editorModel(yaml)!.members.some((entry) => entry.key === next)) throw new CrewFileEditError(`${next} is already in the crew file.`);
   member.set("id", id);

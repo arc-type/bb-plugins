@@ -98,6 +98,9 @@ const linkSchema = z
   })
   .strict();
 
+export const MEMBER_KEYS = ["grouped", "short"] as const;
+export type MemberKeys = (typeof MEMBER_KEYS)[number];
+
 export const crewSpecSchema = z
   .object({
     version: z.coerce.string().pipe(z.literal("1")),
@@ -107,6 +110,8 @@ export const crewSpecSchema = z
     skills: z.array(z.string().min(1)).default([]),
     graphs: z.array(z.string().min(1)).default([]),
     messaging: z.enum(["open", "links"]).default("open"),
+    /** How member keys are formed: `grouped` = `<group>-<member>`, `short` = `<member>`. */
+    memberKeys: z.enum(MEMBER_KEYS).default("grouped"),
     permissions: permissionSchema.default("accept-edits"),
     environment: environmentSchema.default({ type: "auto" }),
     crossCrew: z.enum(["leads", "open", "none"]).default("leads"),
@@ -280,8 +285,12 @@ export function serializeCrew(spec: CrewSpecInput | CrewSpec): string {
   return YAML.stringify(spec, { lineWidth: 0 });
 }
 
-export function memberKey(groupId: string, memberId: string): string {
-  return `${groupId}-${memberId}`;
+/** The `memberKeys` option of a raw crew file value; anything but `short` is grouped. */
+export const memberKeysOf = (value: unknown): MemberKeys => (value === "short" ? "short" : "grouped");
+
+/** The one place a member key is derived from the crew file; `mode` is its `memberKeys` option. */
+export function memberKey(mode: MemberKeys | undefined, groupId: string, memberId: string): string {
+  return mode === "short" ? memberId : `${groupId}-${memberId}`;
 }
 
 /** Validate a crew file given as YAML text or as an already parsed value. */
@@ -319,6 +328,7 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
   checkId("Crew", spec.name);
   const groupIds = new Set<string>();
   const keys = new Set<string>();
+  const groupOfKey = new Map<string, string>();
   for (const group of spec.groups) {
     checkId("Group", group.id);
     if (groupIds.has(group.id)) error("id-duplicate", `Group id "${group.id}" is used twice`);
@@ -329,9 +339,15 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
       if (memberIds.has(member.id)) {
         error("id-duplicate", `Member id "${member.id}" is used twice in group "${group.id}"`);
       } else {
-        const key = memberKey(group.id, member.id);
-        if (keys.has(key)) error("id-duplicate", `Member address "${key}" is used twice`);
+        const key = memberKey(spec.memberKeys, group.id, member.id);
+        if (keys.has(key) && spec.memberKeys === "short") {
+          error(
+            "id-duplicate",
+            `Member id "${member.id}" is used in groups "${groupOfKey.get(key)}" and "${group.id}" — required unique with memberKeys: short`,
+          );
+        } else if (keys.has(key)) error("id-duplicate", `Member address "${key}" is used twice`);
         keys.add(key);
+        if (!groupOfKey.has(key)) groupOfKey.set(key, group.id);
       }
       memberIds.add(member.id);
     }
@@ -347,13 +363,13 @@ export function validateCrew(input: string | unknown, options: ValidateOptions =
     error(
       "lead-multiple",
       `Only one lead is allowed, found ${explicitLeads.length}: ${explicitLeads
-        .map((entry) => memberKey(entry.group.id, entry.member.id))
+        .map((entry) => memberKey(spec.memberKeys, entry.group.id, entry.member.id))
         .join(", ")}`,
     );
   }
 
   const members: ResolvedMember[] = allMembers.map(({ group, member }) => {
-    const key = memberKey(group.id, member.id);
+    const key = memberKey(spec.memberKeys, group.id, member.id);
     const lead = member.lead === true || implicitLead;
     const permissions = member.permissions ?? group.permissions ?? spec.permissions;
     const environment = member.environment ?? group.environment ?? spec.environment;

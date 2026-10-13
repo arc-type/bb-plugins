@@ -64,6 +64,24 @@ links:
 Provider and model always sit on the member itself. Writing members get their
 own worktree; readers share the crew's.
 
+A member's key is `<group>-<member>` (`dev-owner`, address
+`dev-owner@pair`). With `memberKeys: short` at crew level the key is the
+member id alone, so links and messages name `owner` and the address is
+`owner@pair`; member ids must then be unique across all groups:
+
+```yaml
+version: "1"
+name: pair
+memberKeys: short # default: grouped
+groups:
+  - id: dev
+    members:
+      - { id: owner, lead: true, provider: claude-code, model: claude-sonnet-5 }
+      - { id: check, provider: claude-code, model: claude-sonnet-5 }
+links:
+  - { from: owner, to: check, kind: works_with }
+```
+
 `skills:` and `graphs:` are optional on crew, group and member, and inherit
 the same way `instructions` does (crew → group → member, each name kept
 once). `skills:` names skills to prefer, resolved against `~/.bb/skills`,

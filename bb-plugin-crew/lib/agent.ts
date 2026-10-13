@@ -15,7 +15,7 @@ import { formatMerge } from "./integration";
 import type { CrewPolicy } from "./policy";
 import { formatWorkItem, workRules } from "./queue";
 import type { CrewService } from "./service";
-import { buildInstructions, INSTRUCTION_LIMIT, isIntegrator, TIERS } from "./spec";
+import { buildInstructions, INSTRUCTION_LIMIT, isIntegrator, memberKey, memberKeysOf, parseCrewYaml, TIERS } from "./spec";
 import { memberRowId, type CrewRow, type MemberRow, type MessageRow, type Store } from "./store";
 
 export const TOOL_NAMES = ["crew_whoami", "crew_peers", "crew_send", "crew_broadcast", "crew_inbox"] as const;
@@ -558,13 +558,16 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
     presentation: { label: { pending: "Adding crew member", completed: "Added crew member" }, icon: { glyph: "UserPlus" } },
     execute: (params, ctx) =>
       leadOnly(async (self) => {
+        const file = store.crewFile(self.crew.id);
+        const parsed = file ? (parseCrewYaml(file.yaml).value as { memberKeys?: unknown } | null) : null;
+        const key = memberKey(memberKeysOf(parsed?.memberKeys), params.group, params.id);
         let confirmFull = false;
         if (params.permissions === "full") {
           if (!options.confirm) return failure("permissions: full needs the human's confirmation, which is not available here. Ask the human to run bb crew add-member … --confirm-full.");
           confirmFull = await options.confirm(ctx.threadId, {
             kind: "full-permissions",
-            title: `Add ${params.group}-${params.id} with full permissions?`,
-            detail: `${self.member.address} wants to add ${params.group}-${params.id}@${self.crew.name} with permissions: full (no approvals).`,
+            title: `Add ${key} with full permissions?`,
+            detail: `${self.member.address} wants to add ${key}@${self.crew.name} with permissions: full (no approvals).`,
           });
           if (!confirmFull) return failure("The human declined permissions: full.");
         }
@@ -577,8 +580,8 @@ export function registerAgentTools(bb: BbPluginApi, service: CrewService, option
           if (!options.confirm) return failure("The new crew file runs gates.done commands, which needs the human's confirmation, not available here. Ask the human to run bb crew add-member … --confirm-gates.");
           confirmGates = await options.confirm(ctx.threadId, {
             kind: "gates-unconfirmed",
-            title: `Add ${params.group}-${params.id} with gates.done commands?`,
-            detail: `${self.member.address} wants to add ${params.group}-${params.id}@${self.crew.name}; the crew file runs gates.done commands before closing work items.`,
+            title: `Add ${key} with gates.done commands?`,
+            detail: `${self.member.address} wants to add ${key}@${self.crew.name}; the crew file runs gates.done commands before closing work items.`,
           });
           if (!confirmGates) return failure("The human declined the gates.done commands.");
         }

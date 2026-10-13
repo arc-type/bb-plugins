@@ -311,6 +311,13 @@ describe("crew file edits", () => {
     expect(() => removeMemberFromFile(base, "g-z")).toThrow(/no member g-z/);
     expect(() => addMemberToFile(base, { group: "g", id: "a.b" })).toThrow(/letters, digits/);
   });
+  it("memberKeys: short — remove by member id; the same id in another group is refused", () => {
+    const short = base.replace("name: c\n", "name: c\nmemberKeys: short\n").replace("{ from: g-a, to: g-b,", "{ from: a, to: b,");
+    const noB = removeMemberFromFile(short, "b");
+    expect(noB).not.toContain("id: b");
+    expect(noB).not.toContain("to: b");
+    expect(() => addMemberToFile(short, { group: "h", id: "a" })).toThrow(/a is already in the crew file/);
+  });
 });
 
 describe("export and import", () => {

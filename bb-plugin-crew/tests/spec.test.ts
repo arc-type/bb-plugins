@@ -472,3 +472,43 @@ describe("E3 fields", () => {
     expect(codes({ ...base(), leadBusyTimeout: 0 })).toContain("schema");
   });
 });
+
+describe("memberKeys", () => {
+  const short = (): CrewSpecInput => ({
+    ...base(),
+    memberKeys: "short",
+    links: [
+      { from: "lead", to: "owner", kind: "assigns_to" },
+      { from: "lead", to: "check", kind: "assigns_to" },
+    ],
+  });
+
+  it("positive: short keys are the member id, addressed at the crew", () => {
+    const result = validateCrew(short());
+    expect(result.problems).toEqual([]);
+    expect(result.members.map((m) => [m.key, m.address])).toEqual([
+      ["lead", "lead@first"],
+      ["owner", "owner@first"],
+      ["check", "check@first"],
+    ]);
+  });
+
+  it("regression: without the option keys stay grouped", () => {
+    expect(validateCrew(base()).members[0]).toMatchObject({ key: "orch-lead", address: "orch-lead@first" });
+  });
+
+  it("negative: with short, a member id in two groups is id-duplicate naming both groups", () => {
+    const spec = short();
+    spec.groups[1]!.members[0]!.id = "lead";
+    spec.links = [];
+    expect(validateCrew(spec).problems).toContainEqual({
+      level: "error",
+      code: "id-duplicate",
+      message: 'Member id "lead" is used in groups "orch" and "dev" — required unique with memberKeys: short',
+    });
+  });
+
+  it("negative: an unknown value is a schema error", () => {
+    expect(codes({ ...base(), memberKeys: "tiny" })).toEqual(["schema"]);
+  });
+});
