@@ -265,12 +265,12 @@ describe("attach and detach", () => {
 });
 
 describe("add and remove member", () => {
-  it("add member changes the crew file and applies: a new thread under the lead", async () => {
+  it("add member changes the crew file and applies: a new thread without a parent", async () => {
     const t = await trio();
     const outcome = await t.service.lifecycle.addMember(t.crew, { group: "dev", id: "docs", role: "Writes docs." });
     const added = outcome.results.find((r) => r.key === "dev-docs")!;
     expect(added.result).toBe("spawned");
-    expect(t.thread(added.threadId!).parentThreadId).toBe(t.threads["orch-lead"]);
+    expect(t.thread(added.threadId!).parentThreadId).toBeNull();
     expect(outcome.results.filter((r) => r.key !== "dev-docs").every((r) => r.result === "reused")).toBe(true);
     expect(outcome.crew.fileVersion).toBe(2);
     expect(t.store.crewFile(t.crew.id)!.yaml).toContain("id: docs");

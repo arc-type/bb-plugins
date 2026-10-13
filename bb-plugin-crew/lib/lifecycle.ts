@@ -91,7 +91,7 @@ export function createLifecycle(deps: LifecycleDeps) {
     const { spec, resolved, members } = resolvedMember(crew, member);
     const leadRow = lead(crew);
     const leadThreadId = member.lead ? null : leadRow ? (store.currentBinding(leadRow.id)?.threadId ?? null) : null;
-    const result = await spawnMember(ctx, { crew, spec, member: resolved, row: member, members, leadThreadId, parentThreadId: null, fresh: oldThread, note });
+    const result = await spawnMember(ctx, { crew, spec, member: resolved, row: member, members, leadThreadId, fresh: oldThread, note });
     return result;
   }
 

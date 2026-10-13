@@ -8,7 +8,7 @@ import { PROJECT, setup, trioYaml } from "./helpers";
 const byKey = <T extends { key: string }>(items: T[]) => new Map(items.map((item) => [item.key, item]));
 
 describe("apply", () => {
-  it("spawns the trio: lead first, members nested under the lead, explicit execution", async () => {
+  it("spawns the trio: lead first, members without a parent thread, explicit execution", async () => {
     const { service, port } = setup();
     const { crew, results } = await service.apply(PROJECT, trioYaml());
     expect(results.map((r) => [r.key, r.result])).toEqual([
@@ -20,7 +20,8 @@ describe("apply", () => {
     const spawns = port.calls.filter((c) => c.method === "spawn").map((c) => c.args as SpawnRequest);
     const lead = results[0]!.threadId!;
     expect(spawns[0]!.parentThreadId).toBeNull();
-    expect(spawns.slice(1).map((s) => s.parentThreadId)).toEqual([lead, lead]);
+    expect(lead).toBeTruthy();
+    expect(spawns.slice(1).map((s) => s.parentThreadId)).toEqual([null, null]);
     expect(spawns.map((s) => s.title)).toEqual(["orch-lead@trio", "dev-impl@trio", "dev-review@trio"]);
     expect(spawns.every((s) => s.providerId === "claude-code" && s.model === "claude-haiku-4-5-20251001")).toBe(true);
     expect(spawns[1]!.metadata).toMatchObject({ crew: "trio", member: "dev-impl", address: "dev-impl@trio", shift: 1, lead: false });
@@ -142,16 +143,25 @@ describe("plan", () => {
     const { results } = await service.apply(PROJECT, trioYaml());
     const impl = port.threads.get(results[1]!.threadId!)!;
     impl.title = "renamed";
-    impl.parentThreadId = null;
+    impl.parentThreadId = results[0]!.threadId;
     impl.model = "other-model";
     const item = byKey((await service.plan(PROJECT, trioYaml())).items).get("dev-impl")!;
     expect(item.action).toBe("update");
     expect(item.reasons).toHaveLength(3);
+    expect(item.reasons).toContain(`parent ${results[0]!.threadId} → none`);
     const second = await service.apply(PROJECT, trioYaml());
     expect(byKey(second.results).get("dev-impl")!.result).toBe("updated");
     expect(impl.title).toBe("dev-impl@trio");
-    expect(impl.parentThreadId).toBe(results[0]!.threadId);
+    expect(impl.parentThreadId).toBeNull();
     expect(impl.model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("a member without a parent thread is no drift", async () => {
+    const { service, port } = setup();
+    const { results } = await service.apply(PROJECT, trioYaml());
+    for (const result of results) expect(port.threads.get(result.threadId!)!.parentThreadId).toBeNull();
+    const items = (await service.plan(PROJECT, trioYaml())).items;
+    expect(items.map((item) => item.action)).toEqual(["reuse", "reuse", "reuse"]);
   });
 
   it("a model change in the crew file is an update, not a respawn", async () => {

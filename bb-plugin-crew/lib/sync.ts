@@ -42,7 +42,8 @@ export type MemberResult = {
   detail: string | null;
 };
 
-type Expected = { title: string; provider: string | null; model: string | null; parentThreadId: string | null };
+/** Members have no parent thread (ADR 0003), so a parent is always drift. */
+type Expected = { title: string; provider: string | null; model: string | null };
 
 /** What differs between the thread and the member; provider is not patchable. */
 async function drift(
@@ -56,9 +57,9 @@ async function drift(
     patch.title = expected.title;
     reasons.push(`title "${thread.title ?? ""}" → "${expected.title}"`);
   }
-  if (expected.parentThreadId !== null && thread.parentThreadId !== expected.parentThreadId) {
-    patch.parentThreadId = expected.parentThreadId;
-    reasons.push(`parent ${thread.parentThreadId ?? "none"} → ${expected.parentThreadId}`);
+  if (thread.parentThreadId !== null) {
+    patch.parentThreadId = null;
+    reasons.push(`parent ${thread.parentThreadId} → none`);
   }
   if (expected.model !== null) {
     const model = await port.model(thread.id).catch(() => null);
@@ -72,13 +73,8 @@ async function drift(
   return { patch, reasons, providerMismatch };
 }
 
-function expectedFor(member: ResolvedMember, leadThreadId: string | null): Expected {
-  return {
-    title: member.address,
-    provider: member.provider,
-    model: member.model,
-    parentThreadId: member.lead ? null : leadThreadId,
-  };
+function expectedFor(member: ResolvedMember): Expected {
+  return { title: member.address, provider: member.provider, model: member.model };
 }
 
 /** Read-only diff between crew file and threads, one action per member. */
@@ -93,7 +89,6 @@ export async function plan(
   const crew = ctx.store.findCrew(projectId, spec.name);
   const fresh = new Set(options.fresh ?? []);
   const items: PlanItem[] = [];
-  const lead = validation.members.find((member) => member.lead);
   // A stored member with the same group and member id under another key is
   // renamed in place, not removed and spawned again.
   const stored = crew ? ctx.store.listMembers(crew.id) : [];
@@ -105,8 +100,6 @@ export async function plan(
     if (old) renamedFrom.set(member.key, old.key);
   }
   const rowKey = (key: string) => renamedFrom.get(key) ?? key;
-  const leadBinding = crew && lead ? ctx.store.currentBinding(memberRowId(crew.id, rowKey(lead.key))) : null;
-  let leadThreadId = leadBinding?.threadId ?? null;
 
   for (const member of validation.members) {
     const from = renamedFrom.get(member.key);
@@ -114,7 +107,6 @@ export async function plan(
     const base = { key: member.key, address: member.address, threadId: binding?.threadId ?? null, ...(from ? { from } : {}) };
     if (fresh.has(member.key)) {
       items.push({ ...base, action: "spawn", reasons: ["--fresh: new shift"] });
-      if (member.lead) leadThreadId = null;
       continue;
     }
     const thread = binding ? await ctx.port.get(binding.threadId) : null;
@@ -124,12 +116,9 @@ export async function plan(
         reasons.push("unfinished spawn in the journal — apply looks for its thread first");
       }
       items.push({ ...base, threadId: null, action: "spawn", reasons });
-      if (member.lead) leadThreadId = null;
       continue;
     }
-    // A lead that is about to be spawned has no id yet; its children get
-    // re-parented during apply, so plan does not call that drift.
-    const { reasons } = await drift(ctx.port, thread, expectedFor(member, leadThreadId));
+    const { reasons } = await drift(ctx.port, thread, expectedFor(member));
     if (from) items.push({ ...base, action: "rename", reasons: [`rename ${from} → ${member.key}`, ...reasons] });
     else if (thread.archived) items.push({ ...base, action: "unarchive", reasons: ["thread is archived", ...reasons] });
     else if (reasons.length > 0) items.push({ ...base, action: "update", reasons });
@@ -259,7 +248,7 @@ export async function apply(ctx: SyncContext, input: ApplyInput): Promise<ApplyO
     } else if (item.action === "spawn") {
       result = await spawnMember(ctx, { crew, spec, member, row, members: validation.members, leadThreadId, fresh: item.threadId });
     } else {
-      result = await reconcile(ctx, member, row, item.threadId!, leadThreadId);
+      result = await reconcile(ctx, member, row, item.threadId!);
       if (item.action === "rename" && result.result !== "failed") result = { ...result, result: "renamed" };
     }
     // A lead that failed verification still has a thread; its children can
@@ -284,7 +273,6 @@ async function reconcile(
   member: ResolvedMember,
   row: MemberRow,
   threadId: string,
-  leadThreadId: string | null,
 ): Promise<MemberResult> {
   const shift = ctx.store.currentBinding(row.id)?.shift ?? null;
   try {
@@ -295,7 +283,7 @@ async function reconcile(
       await ctx.port.unarchive(threadId);
       unarchived = true;
     }
-    const { patch, reasons, providerMismatch } = await drift(ctx.port, thread, expectedFor(member, leadThreadId));
+    const { patch, reasons, providerMismatch } = await drift(ctx.port, thread, expectedFor(member));
     if (Object.keys(patch).length > 0) await ctx.port.update(threadId, patch);
     if (providerMismatch) {
       return failed(member, threadId, `provider cannot change on an existing thread; run apply --fresh ${member.key}`);
@@ -337,8 +325,6 @@ export async function spawnMember(
     row: MemberRow;
     members: readonly ResolvedMember[];
     leadThreadId: string | null;
-    /** The new thread's parent; members have none (ADR 0003). Defaults to `leadThreadId`. */
-    parentThreadId?: string | null;
     /** Set when `--fresh` replaces this thread. */
     fresh: string | null;
     /** Appended to the kickoff brief (a handover names its brief here). */
@@ -401,7 +387,8 @@ export async function spawnMember(
       reasoningLevel: member.reasoningLevel,
       serviceTier: member.serviceTier,
       permissions: member.permissions,
-      parentThreadId: member.lead ? null : args.parentThreadId !== undefined ? args.parentThreadId : args.leadThreadId,
+      // Members have no parent thread (ADR 0003).
+      parentThreadId: null,
       environment: await environmentFor(ctx, member, args.leadThreadId),
       metadata: {
         crew: crew.name,
