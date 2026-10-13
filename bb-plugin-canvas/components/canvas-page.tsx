@@ -53,6 +53,9 @@ function limitTurnNodes<R extends { nodes: CanvasNode[]; edges?: CanvasEdge[] }>
   return { ...result, nodes, ...(edges ? { edges } : {}) };
 }
 
+/** A turn shows its newest this many steps; older ones sit behind "+N earlier". */
+const STEPS_PER_TURN = 10;
+
 export async function loadChildren(sdk: Sdk, node: CanvasNode, turnsPerThread: number | null = DEFAULT_THREAD_FILTER.turnsPerThread) {
   const { threadId, turnId, sourceSeqStart, sourceSeqEnd } = node.meta ?? {};
   if (typeof threadId !== "string") return { nodes: [] };
@@ -62,7 +65,7 @@ export async function loadChildren(sdk: Sdk, node: CanvasNode, turnsPerThread: n
     return { ...result, nodes: await enrichTurnNodes(result.nodes, turnFirstLinePort(sdk)) };
   }
   if (node.kind === "turn" && typeof turnId === "string" && typeof sourceSeqStart === "number" && typeof sourceSeqEnd === "number") {
-    return turnDetailsToCanvas(node.id, await turnDetails(sdk, threadId, turnId, sourceSeqStart, sourceSeqEnd), threadId);
+    return turnDetailsToCanvas(node.id, await turnDetails(sdk, threadId, turnId, sourceSeqStart, sourceSeqEnd), threadId, STEPS_PER_TURN);
   }
   return { nodes: [] };
 }

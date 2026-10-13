@@ -326,3 +326,47 @@ describe("the Canvas page live", () => {
     );
   });
 });
+
+// S16b (BBP-286): a real turn's steps — command, MCP tool, file read and a
+// subagent from `timelineTurnSummaryDetails` — are reachable under the turn.
+describe("the Canvas page's tool calls under a turn", () => {
+  it("shows a real turn's tool calls and its subagent once the turn is opened", async () => {
+    const real = (await import("../../bb-canvas/fixtures/real-timeline-rows.json")).default;
+    const steps = [real.workToolMcpCall, real.workCommandBash, real.workFileRead, real.workDelegationSubagent];
+    const { sdk } = liveSdk(() => [real.turnWithManySteps]);
+    sdk.threads.timelineTurnSummaryDetails.mockImplementation(async () => ({ rows: steps }) as never);
+    canvasPanel(sdk);
+    await open(/^Plain chat — /);
+    await open(/^Turn/);
+    expect(await screen.findByRole("button", { name: /^Agent: / })).toBeTruthy();
+    for (const label of [String(real.workToolMcpCall.toolName), String(real.workFileRead.path).split("/").pop()!]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} — `) })).toBeTruthy();
+    }
+  });
+});
+
+describe("the Canvas page's +N earlier steps (BBP-286)", () => {
+  const steps = Array.from({ length: 12 }, (_, i) => ({ id: `w${i + 1}`, kind: "work", workKind: "tool", toolName: `tool${i + 1}`, status: "completed" }));
+
+  it("shows the newest ten steps of a turn and the older ones behind +N earlier", async () => {
+    const { sdk } = liveSdk(() => [{ ...turnRow("turn-1"), summaryCount: 12 }]);
+    sdk.threads.timelineTurnSummaryDetails.mockImplementation(async () => ({ rows: steps }) as never);
+    canvasPanel(sdk);
+    await open(/^Plain chat — /);
+    await open(/^Turn/);
+    expect(await screen.findByRole("button", { name: /^tool12 — / })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^tool2 — / })).toBeNull();
+    await open(/^\+2 earlier/);
+    expect(await screen.findByRole("button", { name: /^tool1 — / })).toBeTruthy();
+  });
+
+  it("gives a turn without steps no expander", async () => {
+    const { sdk, timelineTurnSummaryDetails } = liveSdk(() => [{ ...turnRow("turn-1"), summaryCount: 0 }]);
+    canvasPanel(sdk);
+    await open(/^Plain chat — /);
+    await screen.findByRole("button", { name: /^Turn/ });
+    expect(screen.getByRole("button", { name: /^Collapse Plain chat/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Expand Turn/ })).toBeNull();
+    expect(timelineTurnSummaryDetails).not.toHaveBeenCalled();
+  });
+});
