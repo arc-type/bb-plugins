@@ -318,6 +318,7 @@ export function CanvasPage({ subPath, focusThreadId, overview, activeOnly: activ
           edges={layer.edges}
           initialExpanded={new Set(layer.expanded)}
           toolbar={toolbar}
+          halo
           surface="canvas"
           focusSelected={focusIds}
           onSelectionChange={(node) => {

@@ -18,6 +18,8 @@ export type NodeCardProps = {
   /** A single-colour line icon, left of the label. */
   icon?: ReactNode;
   selected?: boolean;
+  /** The keyboard focus ring (BBP-290): a soft glow around the card J landed on. */
+  halo?: boolean;
   /** Carries the click's modifier keys through (BBP-241: Ctrl/Cmd-click
    *  toggles focus instead of selecting). */
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
@@ -108,6 +110,7 @@ export function NodeCard({
   kind,
   icon,
   selected = false,
+  halo = false,
   onClick,
   dimmed = false,
   expander,
@@ -129,6 +132,7 @@ export function NodeCard({
       type="button"
       aria-label={effectiveSubtitle ? `${label} — ${effectiveSubtitle}` : label}
       aria-pressed={selected}
+      data-halo={halo ? "true" : undefined}
       aria-disabled={dimmed}
       onClick={dimmed ? undefined : onClick}
       className={pulse ? PULSE_CLASS : undefined}
@@ -145,6 +149,7 @@ export function NodeCard({
         // as one selection rather than as another "running" accent.
         outline: selected ? "2px solid var(--ring)" : "none",
         outlineOffset: 2,
+        ...(halo ? { boxShadow: "0 0 0 6px color-mix(in srgb, var(--ring) 35%, transparent)" } : {}),
         background,
         color: "var(--foreground)",
         textAlign: "left",
