@@ -251,7 +251,12 @@ export type SidebarProps = {
    *  through `onSelect`. Empty or absent: no section. */
   relations?: readonly RelationGroup[];
   onSelect?: (nodeId: string) => void;
+  /** Shown as "Focus this" only for a crew/graph-run/thread node (BBP-242);
+   *  replaces the whole focus selection with just this node's id. */
+  onFocusThis?: (id: string) => void;
 };
+
+const FOCUSABLE_KINDS = new Set<CanvasNode["kind"]>(["crew", "graph-run", "thread"]);
 
 function stringMeta(node: CanvasNode, key: string): string | undefined {
   const value = node.meta?.[key];
@@ -263,7 +268,7 @@ function numberMeta(node: CanvasNode, key: string): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect }: SidebarProps) {
+export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect, onFocusThis }: SidebarProps) {
   const { curated, details: allDetails, debug } = curateMeta(node.kind, node.meta);
   // A bundle's `titles` render as their own list below, not again in Details.
   const entries = stringList(node.meta?.titles);
@@ -275,7 +280,8 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, on
   const atRowSeq = onOpenAtRow ? numberMeta(node, "sourceSeq") : undefined;
   const atRow = atRowThreadId !== undefined && atRowSeq !== undefined ? { threadId: atRowThreadId, seq: atRowSeq } : undefined;
   const threadId = onOpenThread && atRow === undefined ? stringMeta(node, "threadId") : undefined;
-  const hasActions = threadId !== undefined || runId !== undefined || crew !== undefined || atRow !== undefined;
+  const canFocusThis = onFocusThis !== undefined && FOCUSABLE_KINDS.has(node.kind);
+  const hasActions = threadId !== undefined || runId !== undefined || crew !== undefined || atRow !== undefined || canFocusThis;
   const [width, setWidth] = useState(loadWidth);
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
   const asideRef = useRef<HTMLElement>(null);
@@ -457,6 +463,11 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, on
           {atRow !== undefined ? (
             <button type="button" onClick={() => onOpenAtRow?.(atRow.threadId, atRow.seq)} className="bb-canvas-action" style={ACTION_STYLE}>
               Open in thread
+            </button>
+          ) : null}
+          {canFocusThis ? (
+            <button type="button" onClick={() => onFocusThis?.(node.id)} className="bb-canvas-action" style={ACTION_STYLE}>
+              Focus this
             </button>
           ) : null}
         </div>

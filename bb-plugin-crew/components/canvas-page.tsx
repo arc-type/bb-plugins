@@ -379,6 +379,7 @@ export function CanvasPage({ subPath = "" }: { subPath?: string }) {
         const opened = navigate.openThreadPanel({ actionId: "crew", title: `Crew ${crew}`, params: { crew, projectId: projectOfCrew(layer.nodes, crew) ?? urlProjectId ?? shown?.[0] ?? null } });
         if (!opened) navigate.toPluginPanel("crews");
       }}
+      onFocusThis={(id) => chooseFocus([id])}
       className="h-full"
     />
   );

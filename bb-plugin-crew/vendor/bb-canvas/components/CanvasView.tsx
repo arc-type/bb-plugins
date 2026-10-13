@@ -94,6 +94,8 @@ export type CanvasViewProps = {
   onOpenRun?: (runId: string) => void;
   onOpenCrew?: (crew: string) => void;
   onOpenAtRow?: (threadId: string, seq: number) => void;
+  /** Passed straight through to the Sidebar's "Focus this" action (BBP-242). */
+  onFocusThis?: (id: string) => void;
   className?: string;
 };
 
@@ -118,6 +120,7 @@ export function CanvasView({
   onOpenRun,
   onOpenCrew,
   onOpenAtRow,
+  onFocusThis,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -560,6 +563,7 @@ export function CanvasView({
                   onOpenRun={onOpenRun}
                   onOpenCrew={onOpenCrew}
                   onOpenAtRow={onOpenAtRow}
+                  onFocusThis={onFocusThis}
                   relations={hasRelations ? outgoingRelations(allEdges, selected.id, byId) : undefined}
                   onSelect={select}
                 />

@@ -185,6 +185,38 @@ describe("Sidebar actions", () => {
     expect(screen.queryByRole("button", { name: "Open thread" })).toBeNull();
   });
 
+  it("shows Focus this for a crew/graph-run/thread node and replaces the focus with just that id (BBP-242)", () => {
+    const onFocusThis = vi.fn();
+    const node: CanvasNode = { id: "c1", kind: "crew", label: "factory-1", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} onFocusThis={onFocusThis} />);
+    fireEvent.click(screen.getByRole("button", { name: "Focus this" }));
+    expect(onFocusThis).toHaveBeenCalledWith("c1");
+  });
+
+  it("shows Focus this for a graph-run node", () => {
+    const node: CanvasNode = { id: "r1", kind: "graph-run", label: "Run", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} onFocusThis={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Focus this" })).toBeTruthy();
+  });
+
+  it("shows Focus this for a thread node", () => {
+    const node: CanvasNode = { id: "t1", kind: "thread", label: "Thread", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} onFocusThis={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Focus this" })).toBeTruthy();
+  });
+
+  it("hides Focus this for a node kind that is not crew/graph-run/thread", () => {
+    const node: CanvasNode = { id: "m1", kind: "member", label: "orch-lead", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} onFocusThis={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Focus this" })).toBeNull();
+  });
+
+  it("hides Focus this when onFocusThis is not given", () => {
+    const node: CanvasNode = { id: "c1", kind: "crew", label: "factory-1", parentId: null };
+    render(<Sidebar node={node} onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Focus this" })).toBeNull();
+  });
+
   it("renders a non-zero exit code in the destructive colour and a command as code", () => {
     const node: CanvasNode = { id: "w1", kind: "tool-call", label: "Bash", parentId: null, meta: { command: "npm test", exitCode: 1 } };
     render(<Sidebar node={node} onClose={vi.fn()} />);
