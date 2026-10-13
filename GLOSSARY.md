@@ -57,3 +57,12 @@ per-crew counter and is not compared across crews.
 its lead and member threads. It replaces grouping by parent thread, since
 members have no parent. Removing the crew removes the section; the threads
 stay.
+
+**Canvas** — the standalone plugin that shows every thread of every project as
+a graph: projects, threads, turns, tool calls and subagents. It works without
+Crew or Graph Studio installed. Crews and graph runs appear on it only as
+layers those plugins contribute; editing them on the canvas is deferred.
+
+**Activity Canvas** — the older canvas page that Graph Studio (and Crew)
+register inside their own UI. It stays until the Canvas plugin takes over the
+crew and graph layers; it is not the Canvas.
