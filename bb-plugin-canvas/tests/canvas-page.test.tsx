@@ -150,3 +150,65 @@ describe("the Canvas filters", () => {
     expect(screen.getByRole("textbox", { name: "Search nodes" })).toBe(document.activeElement);
   });
 });
+
+// BBP-189 AK 5: the chat beside the graph, and the thread panel's "Canvas".
+describe("the Canvas chat tab and thread panel action", () => {
+  const sdk = (threads: unknown[]) => ({
+    projects: { list: async () => [{ id: "p1", name: "Shop" }] },
+    threads: { list: async () => threads },
+  });
+  const chat = () => screen.queryByTestId("bb-thread-chat");
+
+  it("shows the selected thread's chat in a Chat tab beside the graph", async () => {
+    canvasPanel(sdk([row("t1", "p1", "First"), row("t2", "p1", "Second")]));
+    fireEvent.click(await screen.findByRole("button", { name: /^Second — / }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    expect(chat()?.getAttribute("data-thread-id")).toBe("t2");
+    fireEvent.click(screen.getByRole("tab", { name: "Graph" }));
+    expect(chat()).toBeNull();
+    expect(screen.getByRole("button", { name: /^First — / })).toBeTruthy();
+  });
+
+  it("asks for a thread when none is selected", async () => {
+    canvasPanel(sdk([row("t1", "p1", "First")]));
+    fireEvent.click(await screen.findByRole("tab", { name: "Chat" }));
+    expect(chat()).toBeNull();
+    expect(screen.getByText("Select a thread to see its chat.")).toBeTruthy();
+  });
+
+  it("registers a thread panel action titled Canvas", () => {
+    expect(app.threadPanelActions.map((entry) => [entry.id, entry.title])).toContainEqual(["canvas", "Canvas"]);
+  });
+
+  const threadPanel = (threadId: string, threads: unknown[]) => {
+    const action = app.threadPanelActions.find((entry) => entry.id === "canvas")!;
+    return renderSlot(action, { threadId, params: null }, { context: { projectId: "p1", threadId }, sdk: sdk(threads) as never });
+  };
+
+  it("opens the canvas focused on its thread, with that thread's chat", async () => {
+    threadPanel("t2", [row("t1", "p1", "Other"), row("t2", "p1", "Mine")]);
+    expect(await screen.findByRole("button", { name: /^Mine — / })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Other — / })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    expect(chat()?.getAttribute("data-thread-id")).toBe("t2");
+  });
+
+  it("keeps the focused thread even when the filters would hide it", async () => {
+    threadPanel("t2", [row("t2", "p1", "Archived one", { archivedAt: 1 })]);
+    expect(await screen.findByRole("button", { name: /^Archived one — / })).toBeTruthy();
+  });
+
+  it("shows FocusUnavailable, not a crash, for an unknown thread; Show all clears the focus", async () => {
+    threadPanel("gone", [row("t1", "p1", "Other")]);
+    expect(await screen.findByRole("status")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Show all/ }));
+    expect(await screen.findByRole("button", { name: /^Other — / })).toBeTruthy();
+  });
+
+  it("focuses a thread named in the nav page's sub-path", async () => {
+    const panel = app.navPanels.find((entry) => entry.id === "canvas")!;
+    renderSlot(panel, { subPath: "thread/t2" }, { context: { projectId: null, threadId: null }, sdk: sdk([row("t1", "p1", "Other"), row("t2", "p1", "Mine")]) as never });
+    expect(await screen.findByRole("button", { name: /^Mine — / })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Other — / })).toBeNull();
+  });
+});

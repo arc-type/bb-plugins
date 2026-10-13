@@ -108,6 +108,9 @@ export type CanvasViewProps = {
    *  all" — goes through this prop, so a plain live-update refresh that
    *  leaves the selection untouched never re-triggers `fitView`. */
   focusSelected?: readonly string[];
+  /** Told the selected node (or null) whenever the selection changes — the
+   *  Canvas plugin's Chat tab follows it (BBP-277). */
+  onSelectionChange?: (node: CanvasNode | null) => void;
   className?: string;
 };
 
@@ -136,6 +139,7 @@ export function CanvasView({
   onToggleFocus,
   focusPathIds,
   focusSelected,
+  onSelectionChange,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -257,6 +261,12 @@ export function CanvasView({
   }
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
+  useEffect(() => {
+    onSelectionChange?.(selected);
+    // Keyed on the id: a live refresh that swaps in an equal node object
+    // must not re-announce an unchanged selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
   // BBP-200: a poll can drop the selected node. Forgetting the id, not just
   // hiding the sidebar, keeps it from coming back selected on a later poll.
   useEffect(() => {
