@@ -220,6 +220,8 @@ export type CanvasShellProps = {
   edges?: readonly CanvasEdge[];
   frames?: readonly CanvasFrame[];
   selectedId?: string | null;
+  /** The node with the keyboard halo (BBP-290); none by default. */
+  haloId?: string | null;
   /** The click's modifier keys ride along (BBP-241: Ctrl/Cmd-click toggles
    *  focus instead of selecting). */
   onSelect?: (nodeId: string, event?: ReactMouseEvent) => void;
@@ -238,6 +240,8 @@ export type CanvasShellHandle = {
   resetView: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  /** Pans to one node at the current zoom (BBP-290). */
+  centerOn: (nodeId: string) => void;
 };
 
 /** React Flow edges for the placed ones; relations sit below every card and
@@ -271,6 +275,7 @@ function toFlow(
   expandable: ReadonlySet<string>,
   onToggle: ((id: string) => void) | undefined,
   failedLoads: ReadonlySet<string>,
+  haloId: string | null = null,
 ): { flowNodes: Node[]; flowEdges: Edge[] } {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const byFrameId = new Map(frames.map((frame) => [frame.id, frame]));
@@ -287,6 +292,7 @@ function toFlow(
       status: node.status,
       kind: node.kind,
       selected: node.id === selectedId,
+      halo: node.id === haloId,
       onClick: onSelect ? (event: ReactMouseEvent<HTMLButtonElement>) => onSelect(node.id, event) : undefined,
       dimmed: dimmedIds.has(node.id),
       loadFailed: failedLoads.has(node.id),
@@ -347,6 +353,7 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
     edges = [],
     frames = [],
     selectedId,
+    haloId = null,
     onSelect,
     dimmedIds = EMPTY_DIMMED,
     failedLoads = EMPTY_DIMMED,
@@ -362,8 +369,8 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
   );
   const { flowNodes, flowEdges } = useMemo(
     () =>
-      toFlow(layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads),
-    [layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads],
+      toFlow(layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads, haloId),
+    [layout, nodes, frames, selectedId, onSelect, dimmedIds, expanded, expandable, onToggle, failedLoads, haloId],
   );
 
   const reducedMotion = usePrefersReducedMotion();
@@ -436,6 +443,12 @@ const CanvasShellInner = forwardRef<CanvasShellHandle, CanvasShellProps>(functio
       zoomOut: () => {
         userInteracted.current = true;
         flow.zoomOut();
+      },
+      centerOn: (nodeId) => {
+        userInteracted.current = true;
+        // A frame later: a jump can expand nothing, but the layout may still
+        // be settling from the selection's own re-layout.
+        requestAnimationFrame(() => void flow.fitView({ nodes: [{ id: nodeId }], maxZoom: flow.getZoom(), minZoom: flow.getZoom(), duration: 200 }));
       },
     }),
     [flow],
