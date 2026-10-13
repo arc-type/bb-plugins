@@ -11,7 +11,7 @@ import {
   turnTitle,
   type TimelineRowLike,
 } from "../lib/canvas-threads";
-import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
+import type { CanvasNode } from "../lib/types";
 import type { ThreadLike } from "../lib/canvas-details";
 
 // Real sdk.threads.timeline() rows (BBP-206 R2a/R2b) — see

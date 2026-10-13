@@ -35,8 +35,8 @@ import {
   type ThreadTitlePort,
   type TimelineRowLike,
   type TurnFirstLinePort,
-} from "../lib/canvas-threads";
-import { loadNodeDetails, type ThreadLike } from "../lib/canvas-details";
+} from "../vendor/bb-canvas/lib/canvas-threads";
+import { loadNodeDetails, type ThreadLike } from "../vendor/bb-canvas/lib/canvas-details";
 import { useOpenRun } from "./run-card";
 import type { rpcContract } from "../server";
 

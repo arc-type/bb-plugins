@@ -1,0 +1,48 @@
+// Which of the three visual tiers a node's kind renders as (BBP-214 stage 2).
+// A single place to look up size and typography per tier, so `layoutTree`
+// and `NodeCard` agree on geometry without duplicating the mapping.
+import type { CanvasNodeKind } from "./types";
+
+export type Tier = "group" | "card" | "row";
+
+/** Group: a headerless header row (agents/project/crew). Card: today's node
+ *  shape (graph-run/thread/member). Row: a compact line for high-volume leaf
+ *  activity (step/turn/tool-call/subagent). */
+export const TIER_OF: Record<CanvasNodeKind, Tier> = {
+  agents: "group",
+  project: "group",
+  crew: "group",
+  "graph-run": "card",
+  thread: "card",
+  member: "card",
+  step: "row",
+  turn: "row",
+  "tool-call": "row",
+  subagent: "row",
+  "system-event": "row",
+};
+
+export type TierSize = { width: number; height: number };
+
+export const TIER_SIZE: Record<Tier, TierSize> = {
+  group: { width: 220, height: 28 },
+  card: { width: 220, height: 52 },
+  row: { width: 200, height: 26 },
+};
+
+export type TierTypography = {
+  titleSize: number;
+  titleWeight: number;
+  subSize: number;
+  subWeight: number;
+};
+
+export const TIER_TYPOGRAPHY: Record<Tier, TierTypography> = {
+  group: { titleSize: 13, titleWeight: 600, subSize: 12, subWeight: 400 },
+  card: { titleSize: 13, titleWeight: 600, subSize: 11, subWeight: 400 },
+  row: { titleSize: 12, titleWeight: 400, subSize: 12, subWeight: 400 },
+};
+
+export function sizeOf(kind: CanvasNodeKind): TierSize {
+  return TIER_SIZE[TIER_OF[kind]];
+}

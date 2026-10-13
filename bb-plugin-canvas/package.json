@@ -1,20 +1,56 @@
 {
-  "name": "bb-plugin-canvas-spike",
-  "private": true,
-  "version": "0.0.0",
-  "description": "BBP-174 spike 2: canvas.notify prototype with caller verification on @get-bb/plugin-sdk >= 0.6.15. Not a shippable plugin.",
+  "name": "bb-plugin-canvas",
+  "version": "0.1.0",
+  "description": "Every BB thread as one navigable tree: Agents, projects, threads.",
+  "author": "sajov",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sajov/bb-plugins.git",
+    "directory": "bb-plugin-canvas"
+  },
+  "keywords": [
+    "bb-plugin",
+    "canvas",
+    "threads",
+    "agents"
+  ],
   "type": "module",
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+  "engines": {
+    "bb": ">=0.44",
+    "bbPluginSdk": ">=0.6.15"
+  },
+  "bb": {
+    "name": "Canvas",
+    "description": "Every thread in BB, chat threads included, as one navigable tree under Agents and its project.",
+    "branding": {
+      "icon": "./assets/icon.svg"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.12.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "^0.6.15",
-    "better-sqlite3": ">=12",
+    "@get-bb/plugin-sdk": "0.6.15",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
     "cron-parser": "^5.5.0",
     "hono": "^4.11.9",
-    "typescript": "^5.6.2",
-    "vitest": "^2.1.1",
-    "zod": "^4.3.6"
+    "jsdom": "^30.1.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.3"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "bb plugin build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   }
 }

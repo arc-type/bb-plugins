@@ -70,6 +70,10 @@ export type CanvasViewProps = {
    *  before their children arrive; every other node without children is a
    *  leaf. Absent: any node may load, as long as a loader is given. */
   canLoadChildren?: (node: CanvasNode) => boolean;
+  /** Raising a node's number re-runs `loadChildren` for it, replacing its
+   *  children once the new ones arrive — but only if they were loaded
+   *  already: a node nobody opened stays unloaded (BBP-189, live updates). */
+  reloadChildren?: ReadonlyMap<string, number>;
   /** Fetches extra sidebar fields for a node the first time it is selected —
    *  a thread's provider, model, times and turn count from the SDK (BBP-179).
    *  The result is merged over the node's own `meta` for the sidebar only.
@@ -108,6 +112,9 @@ export type CanvasViewProps = {
    *  all" — goes through this prop, so a plain live-update refresh that
    *  leaves the selection untouched never re-triggers `fitView`. */
   focusSelected?: readonly string[];
+  /** Told the selected node (or null) whenever the selection changes — the
+   *  Canvas plugin's Chat tab follows it (BBP-277). */
+  onSelectionChange?: (node: CanvasNode | null) => void;
   className?: string;
 };
 
@@ -124,6 +131,7 @@ export function CanvasView({
   initialExpanded,
   loadChildren,
   canLoadChildren,
+  reloadChildren,
   loadDetails,
   surface,
   resetKey,
@@ -136,6 +144,7 @@ export function CanvasView({
   onToggleFocus,
   focusPathIds,
   focusSelected,
+  onSelectionChange,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -257,6 +266,12 @@ export function CanvasView({
   }
 
   const selected = selectedId !== null ? (byId.get(selectedId) ?? null) : null;
+  useEffect(() => {
+    onSelectionChange?.(selected);
+    // Keyed on the id: a live refresh that swaps in an equal node object
+    // must not re-announce an unchanged selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
   // BBP-200: a poll can drop the selected node. Forgetting the id, not just
   // hiding the sidebar, keeps it from coming back selected on a later poll.
   useEffect(() => {
@@ -334,10 +349,21 @@ export function CanvasView({
     startLoad(id);
   }
 
-  function startLoad(id: string) {
+  const seenReloads = useRef(new Map<string, number>());
+  useEffect(() => {
+    if (!reloadChildren) return;
+    for (const [id, version] of reloadChildren) {
+      if (seenReloads.current.get(id) === version) continue;
+      seenReloads.current.set(id, version);
+      if (loaded.has(id)) startLoad(id, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadChildren]);
+
+  function startLoad(id: string, reload = false) {
     const node = byId.get(id);
     if (node && canLoadChildren && !canLoadChildren(node)) return;
-    if (!node || !loadChildren || loaded.has(id) || loading.current.has(id)) return;
+    if (!node || !loadChildren || (loaded.has(id) && !reload) || loading.current.has(id)) return;
     loading.current.add(id);
     void loadChildren(node).then(
       (result) => {

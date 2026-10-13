@@ -1,7 +1,7 @@
 # Real timeline fixtures (BBP-206 R2a)
 
 `real-timeline-rows.json` holds representative `sdk.threads.timeline()` rows —
-the shape `canvas-threads.ts` (crew and graph-studio) actually maps, as
+the shape `lib/canvas-threads.ts` (vendored into crew and graph-studio) actually maps, as
 documented in the "Timeline shape" comment on BBP-206.
 
 ## Why these aren't a raw dump

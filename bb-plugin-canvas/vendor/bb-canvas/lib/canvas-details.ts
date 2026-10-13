@@ -2,8 +2,8 @@
 // acceptance): BB's status, provider and model, times, and turn count,
 // loaded once when the node is selected. Identical in crew and graph-studio;
 // the SDK sits behind `ThreadDetailsPort` so the mapping is testable.
-import { formatTimestamp } from "../vendor/bb-canvas/lib/format";
-import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
+import { formatTimestamp } from "./format";
+import type { CanvasNode } from "./types";
 
 /** The slice of the SDK's `ThreadResponse` this reads. */
 export type ThreadLike = {

@@ -11,7 +11,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 plugins=("$@")
-[ ${#plugins[@]} -eq 0 ] && plugins=(bb-plugin-graph-studio bb-plugin-crew)
+[ ${#plugins[@]} -eq 0 ] && plugins=(bb-plugin-graph-studio bb-plugin-crew bb-plugin-canvas)
 
 for plugin in "${plugins[@]}"; do
   target="$root/$plugin/vendor/bb-canvas"

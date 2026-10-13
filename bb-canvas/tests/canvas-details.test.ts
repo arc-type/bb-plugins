@@ -1,7 +1,7 @@
 // Identical in crew and graph-studio, like the module it tests.
 import { describe, expect, it, vi } from "vitest";
 import { loadNodeDetails, threadDetails, type ThreadDetailsPort } from "../lib/canvas-details";
-import type { CanvasNode } from "../vendor/bb-canvas/lib/types";
+import type { CanvasNode } from "../lib/types";
 
 const at = (iso: string) => Date.parse(iso);
 

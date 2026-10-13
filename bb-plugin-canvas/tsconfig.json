@@ -1,13 +1,14 @@
 {
   "compilerOptions": {
+    "strict": true,
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
     "noEmit": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "types": ["vitest/globals"]
+    "skipLibCheck": true
   },
-  "include": ["lib", "tests"]
+  "include": ["server.ts", "app.tsx", "components", "lib", "tests", "vitest.config.ts"]
 }
