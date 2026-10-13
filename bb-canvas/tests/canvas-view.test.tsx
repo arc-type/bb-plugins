@@ -455,3 +455,24 @@ describe("CanvasView focus (BBP-241)", () => {
     expect(card(/^Alpha/).getAttribute("aria-disabled")).toBe("false");
   });
 });
+
+describe("CanvasView reveal and sidebar extra (BBP-291)", () => {
+  it("reveal opens a nested node's ancestors and selects it", () => {
+    const { rerender } = render(<CanvasView nodes={nodes} initialExpanded={new Set()} />);
+    expect(screen.queryByRole("button", { name: /^steps-impl — / })).toBeNull();
+    rerender(<CanvasView nodes={nodes} initialExpanded={new Set()} reveal={{ id: "m2", seq: 1 }} />);
+    expect(card(/^steps-impl — /).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("reveal of an unknown node changes nothing and does not throw", () => {
+    const { rerender } = render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} />);
+    rerender(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} reveal={{ id: "gone", seq: 1 }} />);
+    expect(card(/^orch-lead — /).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("renders the page's extra section in the sidebar of the selected node", () => {
+    render(<CanvasView nodes={nodes} initialExpanded={new Set(["crew"])} renderSidebarExtra={(node) => <p>extra for {node.label}</p>} />);
+    fireEvent.click(card(/^orch-lead — /));
+    expect(screen.getByText("extra for orch-lead")).toBeTruthy();
+  });
+});

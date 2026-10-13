@@ -67,6 +67,14 @@ layers those plugins contribute; editing them on the canvas is deferred.
 register inside their own UI. It stays until the Canvas plugin takes over the
 crew and graph layers; it is not the Canvas.
 
+**Active work** — on the Canvas, a node that is running or waiting,
+together with the chain of nodes above it up to the project. "Active only"
+shows exactly this and nothing else; finished siblings drop out.
+
+**Overview window** — the default Canvas view: threads touched within a recent
+time span plus all active work regardless of age, capped at the newest N.
+Anything older rotates out as newer threads arrive; "Show all" lifts the cap.
+
 **Parked merge** — a merge request whose merge commit exists but has not moved
 `main` yet, because the human's checkout of `main` has uncommitted changes. It
 counts as not merged until `main` catches up; the lead sees it on "Needs you".

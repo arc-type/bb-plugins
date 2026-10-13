@@ -19,6 +19,7 @@ const thread = (overrides: Partial<ThreadListItem> & { id: string }): ThreadList
 const ids = (threads: readonly ThreadListItem[]) => threads.map((t) => t.id);
 const only = (patch: Partial<ThreadFilter>): ThreadFilter => ({
   ...DEFAULT_THREAD_FILTER,
+  windowMs: null,
   limit: null,
   hideArchived: false,
   ...patch,
@@ -69,5 +70,28 @@ describe("limitTurns", () => {
   it("keeps the newest turns, in their order", () => {
     expect(limitTurns([1, 2, 3, 4], 2)).toEqual([3, 4]);
     expect(limitTurns([1, 2], null)).toEqual([1, 2]);
+  });
+});
+
+// BBP-287 (BBP-225): running, waiting and failed threads never fall out of
+// the overview, whatever their age or the limit.
+describe("filterThreads keeps live threads", () => {
+  it("shows a running thread three days old although the window is 12 h", () => {
+    const threads = [thread({ id: "busy", status: "active", updatedAt: NOW - 72 * HOUR }), thread({ id: "done", updatedAt: NOW - 72 * HOUR })];
+    expect(ids(filterThreads(threads, only({ windowMs: 12 * HOUR }), NOW))).toEqual(["busy"]);
+  });
+
+  it("keeps a failed thread beyond the limit", () => {
+    const threads = [thread({ id: "new", updatedAt: NOW }), thread({ id: "err", status: "error", updatedAt: NOW - HOUR })];
+    expect(ids(filterThreads(threads, only({ limit: 1 }), NOW))).toEqual(["new", "err"]);
+  });
+
+  it("still drops a live thread of a project that is not picked", () => {
+    const threads = [thread({ id: "busy", status: "active", projectId: "p2" })];
+    expect(ids(filterThreads(threads, only({ projectIds: ["p1"] }), NOW))).toEqual([]);
+  });
+
+  it("defaults to the last 12 h, 20 threads and 1 turn", () => {
+    expect(DEFAULT_THREAD_FILTER).toMatchObject({ windowMs: 12 * HOUR, limit: 20, turnsPerThread: 1 });
   });
 });

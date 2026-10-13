@@ -3,7 +3,7 @@
 // block for everything else a provider put in `meta`. A chat or replay feed
 // for `thread`/`turn` nodes is a later ticket, once there is a timeline to
 // lazily load into this same slot.
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { clampWidth, DEFAULT_WIDTH, fitWidth, maxWidthFor, MIN_WIDTH } from "../lib/clampWidth";
 import { curateMeta, type CanvasNode, type CuratedField, type CanvasStatus } from "../lib/types";
 import type { RelationGroup } from "../lib/relations";
@@ -254,6 +254,8 @@ export type SidebarProps = {
   /** Shown as "Focus this" only for a crew/graph-run/thread node (BBP-242);
    *  replaces the whole focus selection with just this node's id. */
   onFocusThis?: (id: string) => void;
+  /** A page-owned section after the relations (BBP-291). */
+  extra?: ReactNode;
 };
 
 const FOCUSABLE_KINDS = new Set<CanvasNode["kind"]>(["crew", "graph-run", "thread"]);
@@ -268,7 +270,7 @@ function numberMeta(node: CanvasNode, key: string): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect, onFocusThis }: SidebarProps) {
+export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, onOpenAtRow, relations = [], onSelect, onFocusThis, extra }: SidebarProps) {
   const { curated, details: allDetails, debug } = curateMeta(node.kind, node.meta);
   // A bundle's `titles` render as their own list below, not again in Details.
   const entries = stringList(node.meta?.titles);
@@ -443,6 +445,7 @@ export function Sidebar({ node, onClose, onOpenThread, onOpenRun, onOpenCrew, on
           ))}
         </section>
       ) : null}
+      {extra}
       {hasActions ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {threadId !== undefined ? (

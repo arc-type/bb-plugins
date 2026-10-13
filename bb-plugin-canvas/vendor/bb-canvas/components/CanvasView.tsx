@@ -16,6 +16,7 @@ import {
   type ExpandedState,
 } from "../lib/expanded-state";
 import { loadRelations, outgoingRelations, relationsView, saveRelations } from "../lib/relations";
+import { nextRunningId } from "../lib/running-cycle";
 import type { CanvasEdge, CanvasFrame, CanvasNode } from "../lib/types";
 
 const TOOLBAR_BUTTON = {
@@ -115,6 +116,17 @@ export type CanvasViewProps = {
   /** Told the selected node (or null) whenever the selection changes — the
    *  Canvas plugin's Chat tab follows it (BBP-277). */
   onSelectionChange?: (node: CanvasNode | null) => void;
+  /** Opens a node's ancestors and selects it (BBP-291: a click in the
+   *  thread panel's Activity list). A new `seq` repeats the request. A node
+   *  not (yet) in `nodes` waits until it arrives; one that never does
+   *  changes nothing. */
+  reveal?: { id: string; seq: number } | null;
+  /** A page-owned section in the selected node's sidebar, after its relations. */
+  renderSidebarExtra?: (node: CanvasNode) => ReactNode;
+  /** BBP-290: J cycles through the running nodes, pans to the one it lands
+   *  on and gives it a halo. Off: J selects the first running node, as the
+   *  Activity Canvas always did. */
+  halo?: boolean;
   className?: string;
 };
 
@@ -144,7 +156,10 @@ export function CanvasView({
   onToggleFocus,
   focusPathIds,
   focusSelected,
+  reveal,
+  renderSidebarExtra,
   onSelectionChange,
+  halo = false,
   className,
 }: CanvasViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() =>
@@ -155,6 +170,8 @@ export function CanvasView({
   );
   const [fitRequest, setFitRequest] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The halo marks where J landed; any other selection drops it.
+  const [haloId, setHaloId] = useState<string | null>(null);
   const [details, setDetails] = useState<ReadonlyMap<string, Record<string, unknown>>>(() => new Map());
   const detailsRequested = useRef(new Set<string>());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -182,6 +199,7 @@ export function CanvasView({
     lastResetKey.current = resetKey;
     setExpanded(restoreExpanded(initialExpanded ?? [], surface === undefined ? null : loadExpandedState(surface)));
     setSelectedId(null);
+    setHaloId(null);
     setDetails(new Map());
     detailsRequested.current = new Set();
     setLoaded(new Map());
@@ -322,6 +340,7 @@ export function CanvasView({
 
   function select(id: string | null) {
     setSelectedId(id);
+    setHaloId(null);
   }
 
   const FOCUSABLE_KINDS = new Set(["crew", "graph-run", "thread"]);
@@ -348,6 +367,23 @@ export function CanvasView({
     setExpanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
     startLoad(id);
   }
+
+  const pendingReveal = useRef<string | null>(null);
+  useEffect(() => {
+    if (reveal) pendingReveal.current = reveal.id;
+  }, [reveal?.id, reveal?.seq]);
+  useEffect(() => {
+    const id = pendingReveal.current;
+    if (id === null) return;
+    const node = byId.get(id);
+    if (!node) return;
+    pendingReveal.current = null;
+    const ancestors: string[] = [];
+    for (let parent = parentOf(byId, node); parent !== null; parent = parentOf(byId, byId.get(parent)!)) ancestors.push(parent);
+    if (ancestors.some((ancestor) => !expanded.has(ancestor))) setExpanded((prev) => new Set([...prev, ...ancestors]));
+    select(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal?.id, reveal?.seq, byId]);
 
   const seenReloads = useRef(new Map<string, number>());
   useEffect(() => {
@@ -457,8 +493,16 @@ export function CanvasView({
   }
 
   function jumpToActive() {
-    const active = visible.find((node) => node.status === "running");
-    if (active) select(active.id);
+    if (!halo) {
+      const active = visible.find((node) => node.status === "running");
+      if (active) select(active.id);
+      return;
+    }
+    const next = nextRunningId(visible, selectedId);
+    if (next === null) return;
+    setSelectedId(next);
+    setHaloId(next);
+    shellRef.current?.centerOn(next);
   }
 
   /** Jumps to the first visible node whose label contains `query`, and says
@@ -478,6 +522,10 @@ export function CanvasView({
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (searchOpen) return; // SearchBox handles its own keys and stops propagation.
+    // A key typed into a toolbar field (a limit, a filter search) is text,
+    // not a shortcut — "0" must reach the number field, not reset the view.
+    const target = event.target as HTMLElement;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -616,6 +664,7 @@ export function CanvasView({
             edges={shownEdges}
             frames={frames}
             selectedId={selectedId}
+            haloId={halo ? haloId : null}
             onSelect={handleSelect}
             dimmedIds={dimmedIds}
             failedLoads={failedLoads}
@@ -635,6 +684,7 @@ export function CanvasView({
                   onFocusThis={onFocusThis}
                   relations={hasRelations ? outgoingRelations(allEdges, selected.id, byId) : undefined}
                   onSelect={select}
+                  extra={renderSidebarExtra?.(sidebarNode ?? selected)}
                 />
               )
             : null}

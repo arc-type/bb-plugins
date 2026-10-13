@@ -19,25 +19,37 @@ export type ThreadFilter = {
   statuses: readonly CanvasStatus[];
 };
 
+const HOUR = 3_600_000;
+
 export const DEFAULT_THREAD_FILTER: ThreadFilter = {
-  windowMs: null,
-  limit: 50,
-  turnsPerThread: 20,
+  windowMs: 12 * HOUR,
+  limit: 20,
+  turnsPerThread: 1,
   hideArchived: true,
   projectIds: [],
   statuses: [],
 };
 
-export function filterThreads(threads: readonly ThreadListItem[], filter: ThreadFilter, now: number): ThreadListItem[] {
+/** Statuses that need attention: never dropped by the window or the limit (BBP-225). */
+const LIVE: ReadonlySet<CanvasStatus> = new Set(["running", "waiting", "failed", "escalated"]);
+
+const isLive = (thread: ThreadListItem) => LIVE.has(threadStatus(thread.status));
+
+/** The project, status and archived filters: what the window and limit then count against. */
+export function narrowThreads(threads: readonly ThreadListItem[], filter: ThreadFilter): ThreadListItem[] {
   const projects = new Set(filter.projectIds);
   const statuses = new Set(filter.statuses);
-  const kept = threads
+  return threads
     .filter((thread) => !(filter.hideArchived && thread.archivedAt !== null))
-    .filter((thread) => filter.windowMs === null || now - thread.updatedAt <= filter.windowMs)
     .filter((thread) => projects.size === 0 || projects.has(thread.projectId))
-    .filter((thread) => statuses.size === 0 || statuses.has(threadStatus(thread.status)))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-  return filter.limit === null ? kept : kept.slice(0, filter.limit);
+    .filter((thread) => statuses.size === 0 || statuses.has(threadStatus(thread.status)));
+}
+
+export function filterThreads(threads: readonly ThreadListItem[], filter: ThreadFilter, now: number): ThreadListItem[] {
+  const sorted = narrowThreads(threads, filter).sort((a, b) => b.updatedAt - a.updatedAt);
+  const quiet = sorted.filter((thread) => !isLive(thread) && (filter.windowMs === null || now - thread.updatedAt <= filter.windowMs));
+  const kept = new Set(filter.limit === null ? quiet : quiet.slice(0, filter.limit));
+  return sorted.filter((thread) => kept.has(thread) || isLive(thread));
 }
 
 /** The newest `limit` turns, still in timeline order. */

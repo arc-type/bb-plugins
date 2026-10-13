@@ -1143,3 +1143,28 @@ describe("BBP-228 acceptance: request-kind × provider fixture matrix", () => {
     expect(nodes[0]!.label).not.toContain("thr_2pse9tz7ku");
   });
 });
+
+describe("turnDetailsToCanvas with a steps limit (BBP-286)", () => {
+  const steps = Array.from({ length: 12 }, (_, i) => ({ id: `w${i + 1}`, kind: "work", workKind: "tool", toolName: `tool${i + 1}` }) as TimelineRowLike);
+
+  it("keeps the newest steps under the turn and hides the older ones behind +N earlier", () => {
+    const { nodes } = turnDetailsToCanvas("row:turn", { rows: steps }, "t1", 10);
+    const underTurn = nodes.filter((node) => node.parentId === "row:turn");
+    expect(underTurn.map((node) => node.label)).toEqual(["+2 earlier", ...Array.from({ length: 10 }, (_, i) => `tool${i + 3}`)]);
+    const earlier = underTurn[0]!;
+    expect(nodes.filter((node) => node.parentId === earlier.id).map((node) => node.label)).toEqual(["tool1", "tool2"]);
+  });
+
+  it("adds no +N earlier node when the steps fit", () => {
+    const { nodes } = turnDetailsToCanvas("row:turn", { rows: steps.slice(0, 10) }, "t1", 10);
+    expect(nodes.map((node) => node.label)).not.toContain(expect.stringMatching(/earlier/));
+    expect(nodes).toHaveLength(10);
+  });
+
+  it("keeps a hidden subagent's own steps with it", () => {
+    const sub = { id: "s1", kind: "work", workKind: "delegation", description: "Review", childRows: [{ id: "c1", kind: "work", workKind: "tool", toolName: "inner" }] } as TimelineRowLike;
+    const { nodes } = turnDetailsToCanvas("row:turn", { rows: [sub, ...steps.slice(0, 2)] }, "t1", 2);
+    expect(nodes.find((node) => node.label === "inner")!.parentId).toBe("row:s1");
+    expect(nodes.find((node) => node.label === "Agent: Review")!.parentId).toBe("row:turn:earlier");
+  });
+});
