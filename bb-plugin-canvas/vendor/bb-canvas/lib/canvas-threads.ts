@@ -763,13 +763,29 @@ export function timelineToCanvas(
 /** Converts a turn's lazily-fetched steps (`timelineTurnSummaryDetails`'s
  *  `rows`) into canvas nodes under the turn's own node id. Same row mapping
  *  as `timelineToCanvas`'s thread-level rows (tool-call, subagent incl.
- *  nested `childRows`) — only the parent differs. */
+ *  nested `childRows`) — only the parent differs. With a `stepsLimit`, only
+ *  the newest that many steps hang off the turn; the older ones move under
+ *  one collapsed "+N earlier" node in front of them (BBP-286). */
 export function turnDetailsToCanvas(
   turnNodeId: string,
   response: { rows: readonly TimelineRowLike[] },
   threadId?: string,
+  stepsLimit: number | null = null,
 ): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
-  return { nodes: mapRows(response.rows, turnNodeId, threadId), edges: [] };
+  const nodes = mapRows(response.rows, turnNodeId, threadId);
+  const steps = nodes.filter((node) => node.parentId === turnNodeId);
+  if (stepsLimit === null || steps.length <= stepsLimit) return { nodes, edges: [] };
+  const hidden = new Set(steps.slice(0, steps.length - stepsLimit).map((node) => node.id));
+  const earlierId = `${turnNodeId}:earlier`;
+  const earlier: CanvasNode = {
+    id: earlierId,
+    kind: "system-event",
+    label: `+${hidden.size} earlier`,
+    parentId: turnNodeId,
+    meta: { earlier: hidden.size },
+  };
+  const moved = nodes.map((node) => (hidden.has(node.id) ? { ...node, parentId: earlierId } : node));
+  return { nodes: [earlier, ...moved], edges: [] };
 }
 
 /** What `enrichTurnNodes` needs to fetch one turn's lazily-loaded steps —
