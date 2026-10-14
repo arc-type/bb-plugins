@@ -33,13 +33,15 @@ import {
   END_NODE,
   KIND_LABEL,
   START_NODE,
+  isFallback,
   nodeExecution,
   spawnsThread,
   type NodeExecution,
   type Graph,
   type GraphNode,
 } from "../lib/graph";
-import { MARGIN, layoutGraph, type PlacedEdge } from "../lib/layout";
+import { MARGIN, layoutGraph, withoutNodes, type PlacedEdge } from "../lib/layout";
+import { unreachedFallbacks, type NodeVisualStatus } from "../lib/run-status";
 import { elapsedLabel } from "../lib/activity";
 import { cn } from "@/lib/utils";
 import { usePrefersReducedMotion } from "./ui/hooks/use-media-query";
@@ -58,17 +60,25 @@ function shortModel(model: string): string {
   return tail.length > 16 ? `${tail.slice(0, 15)}…` : tail;
 }
 
-export type NodeVisualStatus =
-  | "idle"
-  | "running"
-  | "done"
-  | "failed"
-  | "waiting";
+// Defined with the derivation in lib/run-status.ts; re-exported because the
+// canvas is where every surface has always imported it from.
+export type { NodeVisualStatus };
 
 export type GraphCanvasProps = {
   graph: Graph;
   /** Per-node run status; missing ids render as `idle`. */
   statuses?: Record<string, NodeVisualStatus>;
+  /**
+   * What a card says in place of the bare status word (`runStatuses`): a
+   * subgraph names the step inside it that is running or waiting.
+   */
+  statusTexts?: Record<string, string>;
+  /**
+   * Leave out fallback nodes (`path: "fallback"`) the run has not reached,
+   * with their edges, and offer a control to show them. Run views only: in
+   * the editor and the preview the whole graph is the point.
+   */
+  hideUnreachedFallbacks?: boolean;
   /**
    * Branch progress for nodes that run fanned out. A node running n times has
    * no single status, so it says "3 of 7 done" instead of pretending one.
@@ -348,6 +358,7 @@ function StepView({ data }: NodeProps<StepNode>) {
   // difference is what explains two agents behaving differently. The short
   // name is enough on the canvas; the full one is in the tooltip and the
   // editor.
+  if (isFallback(node)) return <CompactStepView data={data} />;
   const execution = nodeExecution(node);
   const chips = nodeChips(node, execution);
   const kindLine =
@@ -543,6 +554,65 @@ function StepView({ data }: NodeProps<StepNode>) {
           {doing.length > 30 ? `${doing.slice(0, 29)}…` : doing}
         </div>
       ) : null}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        isConnectable={data.connectable}
+        className={handleClass(data.connectable)}
+      />
+    </div>
+  );
+}
+
+/**
+ * A fallback node: one line, dashed and muted while nothing happened there.
+ * It says what it is and whether the run went there — the model, skills and
+ * fields of a contingency are in the inspector for whoever needs them.
+ */
+function CompactStepView({ data }: { data: StepData }) {
+  const { node, status, statusText, selected, elapsed, dim } = data;
+  const quiet = status === "idle";
+  return (
+    <div
+      className={cn("relative h-full w-full cursor-pointer", dim && "opacity-45")}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={[node.label, "fallback", statusText, elapsed]
+        .filter((part) => part !== null && part !== undefined && part !== "")
+        .join(" — ")}
+      onKeyDown={activateOnKey(data.onActivate)}
+      data-path="fallback"
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        isConnectable={data.connectable}
+        className={handleClass(data.connectable)}
+      />
+      <div
+        className={cn(
+          "flex h-full w-full items-center gap-1.5 overflow-hidden rounded-full px-2.5",
+          quiet && "text-muted-foreground",
+        )}
+        style={{
+          background: STATUS_FILL[status],
+          border: `${selected ? 2 : 1}px ${quiet && !selected ? "dashed" : "solid"} ${selected ? "var(--primary)" : STATUS_STROKE[status]}`,
+        }}
+        data-kind={node.kind}
+      >
+        <span
+          aria-hidden
+          className={cn("size-1.5 shrink-0 rounded-full", status === "running" && "animate-pulse")}
+          style={{ background: STATUS_DOT[status] }}
+        />
+        <span className="min-w-0 flex-1 truncate text-[10px]" title={node.label}>
+          {node.label}
+        </span>
+        {quiet ? null : (
+          <span className="shrink-0 text-[9px] text-muted-foreground">{statusText}</span>
+        )}
+      </div>
       <Handle
         type="source"
         position={Position.Bottom}
@@ -854,6 +924,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
 function GraphCanvasInner({
   graph,
   statuses = {},
+  statusTexts = {},
+  hideUnreachedFallbacks = false,
   branches = {},
   selectedId = null,
   onSelect,
@@ -873,7 +945,23 @@ function GraphCanvasInner({
   durations = {},
   className,
 }: GraphCanvasProps) {
-  const layout = useMemo(() => layoutGraph(graph), [graph]);
+  const [showFallbacks, setShowFallbacks] = useState(false);
+  // Fallbacks the run never reached, left out until asked for. Computed from
+  // the statuses the caller derived, so an approval that was answered or a
+  // resolver that ran comes back into the picture by itself.
+  const unreached = useMemo(
+    () => (hideUnreachedFallbacks ? unreachedFallbacks(graph, statuses) : new Set<string>()),
+    [hideUnreachedFallbacks, graph, statuses],
+  );
+  const hidden = showFallbacks ? new Set<string>() : unreached;
+  const hiddenKey = [...hidden].sort().join("|");
+  const shown = useMemo(
+    () => withoutNodes(graph, hidden),
+    // `hidden` is a fresh Set each render; its members decide.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [graph, hiddenKey],
+  );
+  const layout = useMemo(() => layoutGraph(shown), [shown]);
   const [hostRef, colorMode] = useHostColorMode();
   const byId = useMemo(
     () => new Map(graph.nodes.map((node) => [node.id, node])),
@@ -985,7 +1073,7 @@ function GraphCanvasInner({
           status,
           statusText: branch
             ? `${branch.done} of ${branch.total} done`
-            : STATUS_LABEL[status],
+            : (statusTexts[placed.id] ?? STATUS_LABEL[status]),
           selected: selectedId === placed.id,
           elapsed:
             live && live.startedAt !== null && now !== undefined
@@ -1141,6 +1229,20 @@ function GraphCanvasInner({
         </Controls>
         <FollowNodes ids={followTargets} positions={boxes} paused={followPaused} />
       </ReactFlow>
+      {unreached.size > 0 ? (
+        // Small and in a corner: the hidden steps are what the run did NOT
+        // do, worth a look when something went wrong and otherwise not.
+        <button
+          type="button"
+          className="absolute right-2 top-2 z-10 rounded-full border border-border bg-card px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary hover:text-foreground"
+          aria-pressed={showFallbacks}
+          onClick={() => setShowFallbacks((was) => !was)}
+        >
+          {showFallbacks
+            ? "Hide fallback paths"
+            : `Show fallback paths (${unreached.size})`}
+        </button>
+      ) : null}
     </div>
   );
 }

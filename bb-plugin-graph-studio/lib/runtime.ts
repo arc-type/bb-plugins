@@ -22,8 +22,10 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import {
   END_NODE,
   START_NODE,
+  renderCommand,
   composeDialogPrompt,
   composeNodePrompt,
+  continuedNode,
   parseDialogTurn,
   emptyRunState,
   edgeTargets,
@@ -42,6 +44,7 @@ import {
   joinGroups,
   routeAll,
   routeFrom,
+  threadKey,
   type CollectedResult,
   type FieldValue,
   type Graph,
@@ -60,10 +63,40 @@ export type RuntimeHost = {
     skills: string[];
     /** Explicit provider/model, or null to inherit the parent thread. */
     execution: NodeExecution | null;
+    /**
+     * The directory to spawn the worker in, as its own environment; null
+     * reuses the parent's. Already rendered.
+     */
+    cwd: string | null;
+    /**
+     * The graph's `workerVisibility`. Optional so a host that predates it
+     * keeps spawning visible threads, which is what every graph did.
+     */
+    visibility?: "visible" | "hidden";
   }): Promise<string>;
+  /**
+   * Command nodes: run one shell command to its end. Rejects only when it
+   * could not run at all (or was stopped); a non-zero exit is a result, and
+   * the node decides what it means. Optional because only the real host can
+   * reach a shell — a host without it fails the node rather than letting a
+   * worker guess at the command.
+   */
+  runCommand?(args: {
+    nodeId: string;
+    command: string;
+    /** Rendered working directory; null = the run's environment. */
+    cwd: string | null;
+    timeoutMs: number;
+  }): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Resolve with the thread's final assistant text, or reject if it failed. */
   awaitThread(threadId: string): Promise<string>;
-  /** Dialogue nodes: send the user's answer into the worker's own thread. */
+  /**
+   * Send a message into a worker thread that already exists: the user's
+   * answer into a dialogue, or the next step's prompt into the thread a node
+   * continues (`continueThread`). Resolves once the thread has picked the
+   * message up, so the `awaitThread` that follows cannot return the answer
+   * the thread gave before it.
+   */
   sendMessage(threadId: string, text: string): Promise<void>;
   /**
    * Dialogue nodes: the conversation already open for this visit, and how
@@ -182,6 +215,14 @@ const StateAnnotation = Annotation.Root({
   // fan-out nothing reads it, and inside it each instance gets its own via
   // `Send`, never through the reducer.
   item: Annotation<string>({ reducer: (_, next) => next, default: () => "" }),
+  // Worker threads by `threadKey`, for the nodes that continue one. Merged by
+  // key like `outputs`: parallel critics each add their own lens's thread.
+  // A channel rather than host bookkeeping so a checkpoint carries it, and a
+  // rerun from an earlier point continues the thread of that point.
+  threads: Annotation<Record<string, string>>({
+    reducer: (previous, next) => ({ ...previous, ...next }),
+    default: () => ({}),
+  }),
   visits: Annotation<Record<string, number>>({
     // Visit counts add up across branches rather than overwriting.
     reducer: (previous, next) => {
@@ -209,9 +250,27 @@ function asRunState(state: State): RunState {
     collected: state.collected,
     errors: state.errors,
     item: state.item,
+    threads: state.threads,
     visits: state.visits,
     steps: state.steps,
   };
+}
+
+/** A node's working directory, rendered; null when it has none. */
+function renderCwd(
+  template: string | undefined,
+  state: RunState,
+  known: ReadonlySet<string>,
+): string | null {
+  const cwd = renderPrompt(template ?? "", state, known).trim();
+  return cwd === "" ? null : cwd;
+}
+
+/** How much of a failed command's output the error carries. */
+const COMMAND_TAIL_LINES = 40;
+
+function tailLines(text: string, count: number): string {
+  return text.trimEnd().split("\n").slice(-count).join("\n");
 }
 
 export function compileGraph(
@@ -240,6 +299,51 @@ export function compileGraph(
       .filter((edge) => fanOutKey(edge) !== "")
       .map((edge) => edge.to),
   );
+
+  // Per graph, not per run: an embedded graph is compiled with its own
+  // setting, so a generated track hides its workers even inside a parent
+  // that does not.
+  const visibility = graph.workerVisibility ?? "visible";
+
+  /**
+   * Where a node's thread is kept: under the node it continues (or its own
+   * id), per fan-out entry when that node runs fanned out. `validateGraph`
+   * guarantees a fanned-out node only ever continues itself, so the entry in
+   * this instance's state is the right one to key by.
+   */
+  const threadSlot = (node: Graph["nodes"][number], state: RunState): string => {
+    // Only an agent node continues anything (the validator warns about the
+    // field elsewhere); a dialogue that carries one anyway must still file
+    // its thread under its own id, not under a node it never continued.
+    const owner = (node.kind === "agent" ? continuedNode(node) : "") || node.id;
+    return threadKey(owner, fanOutTargets.has(owner), state.item);
+  };
+
+  /**
+   * Run a command node once and return its stdout as the node's text. The
+   * declared fields are parsed from that text by the caller, exactly as for a
+   * worker's answer, so the last JSON object on stdout is the contract.
+   */
+  const runCommandNode = async (
+    node: Graph["nodes"][number],
+    state: RunState,
+  ): Promise<string> => {
+    if (!host.runCommand) {
+      throw new Error(`"${node.label}" is a command node, but this host cannot run commands.`);
+    }
+    const result = await host.runCommand({
+      nodeId: node.id,
+      command: renderCommand(node.command, state, knownNodes),
+      cwd: renderCwd(node.cwd, state, knownNodes),
+      timeoutMs: node.timeoutMinutes * 60_000,
+    });
+    if (result.exitCode !== 0 && node.failOnExit !== false) {
+      const tail = tailLines(`${result.stdout}\n${result.stderr}`, COMMAND_TAIL_LINES);
+      throw new Error(`The command exited with ${result.exitCode}.${tail === "" ? "" : `\n${tail}`}`);
+    }
+    const stdout = result.stdout.trim();
+    return stdout === "" ? `(exit ${result.exitCode}, no output)` : stdout;
+  };
 
   for (const node of graph.nodes) {
     // A subgraph is added as a compiled graph, not as a function that invokes
@@ -276,7 +380,9 @@ export function compileGraph(
     // burn the backoff delays — three attempts at growing intervals — on a
     // result that is already decided.
     const retryPolicy =
-      node.kind === "agent" && node.maxAttempts > 1 && node.onError !== "route"
+      (node.kind === "agent" || node.kind === "command") &&
+      node.maxAttempts > 1 &&
+      node.onError !== "route"
         ? {
             maxAttempts: node.maxAttempts,
             initialInterval: 1_000,
@@ -338,6 +444,8 @@ export function compileGraph(
               nodeId: node.id,
               skills: node.skills,
               execution: nodeExecution(node),
+              cwd: renderCwd(node.cwd, runState, knownNodes),
+              visibility,
             });
             session = { threadId, turns: 0 };
             await host.saveDialog(node.id, visits, session);
@@ -404,6 +512,9 @@ export function compileGraph(
             output: message,
             error: null,
           });
+          // Kept like an agent's, so a later agent node can continue the
+          // conversation the interview left behind.
+          const slot = threadSlot(node, runState);
           await host.onStateChange({
             ...runState,
             outputs: { ...runState.outputs, [node.id]: message },
@@ -411,6 +522,7 @@ export function compileGraph(
             ...(node.onError === "route"
               ? { errors: { ...runState.errors, [node.id]: "" } }
               : {}),
+            threads: { ...(runState.threads ?? {}), [slot]: threadId },
             visits: { ...runState.visits, [node.id]: visits },
             steps,
           });
@@ -418,6 +530,7 @@ export function compileGraph(
             outputs: { [node.id]: message },
             ...(node.fields.length > 0 ? { fields: { [node.id]: fields } } : {}),
             ...(node.onError === "route" ? { errors: { [node.id]: "" } } : {}),
+            threads: { [slot]: threadId },
             visits: { [node.id]: visits },
             steps,
           };
@@ -565,21 +678,52 @@ export function compileGraph(
         const nodeRunId = await host.onNodeStart(node.id);
         let childThreadId: string | null = null;
         try {
-          // A takeover hands back the previous driver's still-living worker
-          // for this attempt; waiting on it is the same wait as below, so the
-          // node finishes with that worker's answer instead of paying for it twice.
-          childThreadId = host.adoptedThread?.(nodeRunId) ?? null;
-          if (childThreadId === null) {
-            childThreadId = await host.spawn({
-              prompt: composeNodePrompt(node, runState, knownNodes, lockedSkills),
-              title: node.label.slice(0, 80),
-              nodeId: node.id,
-              skills: node.skills,
-              execution: nodeExecution(node),
-            });
-            await host.onNodeThread(nodeRunId, childThreadId);
+          let output: string;
+          if (node.kind === "command") {
+            output = await runCommandNode(node, runState);
+          } else {
+            // A takeover hands back the previous driver's still-living worker
+            // for this attempt; waiting on it is the same wait as below, so the
+            // node finishes with that worker's answer instead of paying for it twice.
+            childThreadId = host.adoptedThread?.(nodeRunId) ?? null;
+            if (childThreadId === null) {
+              const prompt = composeNodePrompt(node, runState, knownNodes, lockedSkills);
+              // Only a node that asks to continue reads the slot: every other
+              // node writes its thread there too, and reading it back would
+              // turn a fresh worker per visit into a continued one behind the
+              // author's back.
+              const continued =
+                continuedNode(node) === ""
+                  ? undefined
+                  : runState.threads?.[threadSlot(node, runState)];
+              if (continued) {
+                // The same thread on every attempt, a retry included: the
+                // worker sees its own rejected answer above the repeated
+                // prompt, which is a better second try than a stranger's.
+                // Sent before the row names the thread: `sendMessage`
+                // returns once the thread has picked the prompt up, so a
+                // driver that takes over and adopts this row waits for this
+                // step's answer, not for the one the thread gave before.
+                // (Should the pick-up never be seen, the host logs it and the
+                // wait below may read that earlier answer — the race the host
+                // narrows, it cannot close it.)
+                await host.sendMessage(continued, prompt);
+                childThreadId = continued;
+              } else {
+                childThreadId = await host.spawn({
+                  prompt,
+                  title: node.label.slice(0, 80),
+                  nodeId: node.id,
+                  skills: node.skills,
+                  execution: nodeExecution(node),
+                  cwd: renderCwd(node.cwd, runState, knownNodes),
+                  visibility,
+                });
+              }
+              await host.onNodeThread(nodeRunId, childThreadId);
+            }
+            output = await host.awaitThread(childThreadId);
           }
-          const output = await host.awaitThread(childThreadId);
           // Parsing before recording: a broken contract is a failed attempt, so
           // the retry policy gives the worker another go instead of writing
           // half-understood text into the state.
@@ -595,6 +739,9 @@ export function compileGraph(
           // `outputs` would hold whichever branch happened to finish last and
           // look like the node's result.
           const collects = fanOutTargets.has(node.id);
+          // A command node has no thread to keep.
+          const threads =
+            childThreadId === null ? {} : { [threadSlot(node, runState)]: childThreadId };
           const next: Partial<State> = {
             ...(collects
               ? { collected: { [node.id]: [{ visit: visits, text: output }] } }
@@ -605,11 +752,13 @@ export function compileGraph(
             // Only for a node that can leave an error behind: on a cycle's next
             // lap this is what takes the old failure back off the state.
             ...(node.onError === "route" ? { errors: { [node.id]: "" } } : {}),
+            ...(childThreadId === null ? {} : { threads }),
             visits: { [node.id]: visits },
             steps,
           };
           await host.onStateChange({
             ...runState,
+            threads: { ...(runState.threads ?? {}), ...threads },
             ...(collects
               ? {
                   collected: {

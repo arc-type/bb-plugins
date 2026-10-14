@@ -8,7 +8,9 @@ import {
   FieldContractError,
   fieldContract,
   fieldSchema,
+  graphSchema,
   parseFields,
+  validateGraph,
   type GraphField,
 } from "../lib/graph";
 
@@ -164,5 +166,68 @@ describe("list fields", () => {
 
   it("tells the worker the expected shape in the contract", () => {
     expect(fieldContract([dateien])).toMatch(/a list of strings/);
+  });
+});
+
+describe("optional fields", () => {
+  const status = field({ name: "status", type: "enum", options: ["DONE", "NEEDS_HUMAN"] });
+  const question = field({ name: "question", optional: true });
+  const files = field({ name: "files", type: "list", optional: true });
+
+  it("stores a missing optional field as its empty value", () => {
+    expect(parseFields([status, question, files], '```json\n{ "status": "DONE" }\n```')).toEqual({
+      status: "DONE",
+      question: "",
+      files: [],
+    });
+    // null is "not given" too — what a worker writes when it means nothing.
+    expect(parseFields([status, question], '```json\n{ "status": "DONE", "question": null }\n```')).toEqual({
+      status: "DONE",
+      question: "",
+    });
+  });
+
+  it("still takes a given optional field as written", () => {
+    const answer = '```json\n{ "status": "NEEDS_HUMAN", "question": "Which one?" }\n```';
+    expect(parseFields([status, question], answer)).toEqual({ status: "NEEDS_HUMAN", question: "Which one?" });
+  });
+
+  it("still refuses a missing required field next to an optional one", () => {
+    expect(() => parseFields([status, question], '```json\n{ "question": "x" }\n```')).toThrow(
+      'Field "status" is missing from the answer.',
+    );
+  });
+
+  it("says on the key that it may be left out, and only there", () => {
+    const contract = fieldContract([status, question]);
+    expect(contract).toMatch(/"question": text \(optional — leave it out when it does not apply\)/);
+    expect(contract).not.toMatch(/"status".*optional/);
+    expect(contract).toContain("the ones marked optional may be left out");
+    // Without an optional field the contract reads exactly as before.
+    expect(fieldContract([status])).toContain("It holds exactly these keys:");
+  });
+
+  it("is required by default", () => {
+    expect(field({ name: "x" }).optional).toBe(false);
+  });
+
+  it("may only be text or a list: a missing number, yes/no or choice is refused", () => {
+    const withField = (declared: Record<string, unknown>) =>
+      validateGraph(
+        graphSchema.parse({
+          id: "g",
+          name: "G",
+          nodes: [{ id: "a", label: "A", prompt: "x", fields: [declared] }],
+          edges: [{ from: "__start__", to: "a" }, { from: "a", to: "__end__" }],
+        }),
+      ).filter((problem) => /optional/.test(problem.message));
+    for (const type of ["number", "boolean", "enum"]) {
+      const problems = withField({ name: "f", type, options: ["X"], optional: true });
+      expect(problems.map((problem) => problem.level)).toEqual(["error"]);
+      expect(problems[0]!.message).toContain(`marks its ${type} field "f" optional`);
+    }
+    for (const type of ["string", "list"]) {
+      expect(withField({ name: "f", type, optional: true })).toEqual([]);
+    }
   });
 });

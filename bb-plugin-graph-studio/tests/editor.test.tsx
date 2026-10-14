@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { GraphEditor } from "../components/graph-editor";
 import { TEMPLATES } from "../lib/templates";
+import { graphSchema } from "../lib/graph";
 
 afterEach(cleanup);
 
@@ -1024,5 +1025,86 @@ describe("node colour picker", () => {
     fireEvent.click(within(picker).getByRole("radio", { name: "No colour" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave.mock.calls[1]![0].nodes[0].color).toBeNull();
+  });
+});
+
+describe("GraphEditor > fallback path, continued thread, optional fields", () => {
+  const probe = graphSchema.parse({
+    id: "probe",
+    name: "Probe",
+    description: "",
+    example: "",
+    nodes: [
+      {
+        id: "impl",
+        label: "Implement",
+        kind: "agent",
+        prompt: "x",
+        fields: [
+          { name: "status", type: "enum", options: ["DONE"], description: "", optional: false },
+          { name: "question", type: "string", options: [], description: "", optional: false },
+        ],
+      },
+      { id: "fix", label: "Fix", kind: "agent", prompt: "y" },
+      { id: "gate", label: "Gate", kind: "command", command: "true" },
+    ],
+    edges: [
+      { from: "__start__", to: "impl" },
+      { from: "impl", to: "fix" },
+      { from: "fix", to: "gate" },
+      { from: "gate", to: "__end__" },
+    ],
+  });
+  const open = (onSave: (graph: unknown) => void) =>
+    editor({
+      graphs: [probe],
+      templates: TEMPLATES,
+      graphId: "probe",
+      pending: false,
+      onSave,
+      onCancel: noop,
+      onClone: noop,
+      onDelete: noop,
+    });
+  const saved = (onSave: ReturnType<typeof vi.fn>) => {
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    return onSave.mock.calls.at(-1)![0] as { nodes: Array<Record<string, any>> };
+  };
+  const selectNode = (label: string) =>
+    fireEvent.click(screen.getAllByRole("button").find((element) => element.getAttribute("aria-label")?.startsWith(label))!);
+
+  it("marks a node as a fallback path and back", () => {
+    const onSave = vi.fn();
+    open(onSave);
+    // The first node's card is open from the start.
+    const box = screen.getByLabelText("Node 1 is a fallback path") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    expect(saved(onSave).nodes[0]!.path).toBe("fallback");
+    fireEvent.click(screen.getByLabelText("Node 1 is a fallback path"));
+    expect(saved(onSave).nodes[0]!.path).toBe("main");
+  });
+
+  it("offers a fresh thread, its own, or another worker's — and no command's", () => {
+    const onSave = vi.fn();
+    open(onSave);
+    selectNode("Fix");
+    const select = screen.getByLabelText("Thread of node 2") as HTMLSelectElement;
+    const options = [...select.options].map((option) => option.value);
+    expect(options).toEqual(["", "fix", "impl"]);
+    fireEvent.change(select, { target: { value: "impl" } });
+    expect(saved(onSave).nodes[1]!.continueThread).toBe("impl");
+  });
+
+  it("offers optional on a text field, not on a choice, and saves it", () => {
+    const onSave = vi.fn();
+    open(onSave);
+    expect(screen.getByLabelText("Field 2 in node 1 is optional")).toBeTruthy();
+    expect(screen.queryByLabelText("Field 1 in node 1 is optional")).toBeNull();
+    const box = screen.getByLabelText("Field 2 in node 1 is optional") as HTMLInputElement;
+    fireEvent.click(box);
+    const fields = saved(onSave).nodes[0]!.fields;
+    expect(fields[1].optional).toBe(true);
+    expect(fields[0].optional).toBe(false);
   });
 });

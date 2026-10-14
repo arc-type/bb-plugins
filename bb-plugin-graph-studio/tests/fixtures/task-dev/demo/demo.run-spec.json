@@ -1,0 +1,58 @@
+{
+  "ticket": "DEMO-1",
+  "title": "Two small shell tools and their docs",
+  "acceptance": "Goal: the repository ships greet.sh and count.sh, both documented in README.md. Acceptance: ./check.sh passes; greet.sh prints 'Hello, <name>!' for its first argument; count.sh prints the number of lines of the file it is given; README.md has a 'Tools' section describing both. Non-goals: tests, CI, packaging.",
+  "maxParallel": 2,
+  "dryRun": false,
+  "groups": [
+    {
+      "letter": "A",
+      "tracks": [
+        {
+          "key": "DEMO-2",
+          "title": "greet.sh",
+          "app": "tools",
+          "spec": "Add an executable greet.sh at the repository root that prints 'Hello, <name>!' for its first argument, and 'Hello, world!' without one. Commit it.",
+          "files": ["greet.sh"],
+          "critics": ["spec-tests", "correctness"],
+          "maxRounds": 1
+        },
+        {
+          "key": "DEMO-3",
+          "title": "count.sh",
+          "app": "tools",
+          "spec": "Add an executable count.sh at the repository root that prints the number of lines of the file given as its first argument, and exits 1 with a message on stderr when the file does not exist. Commit it.",
+          "files": ["count.sh"],
+          "critics": ["correctness"],
+          "maxRounds": 1
+        }
+      ]
+    },
+    {
+      "letter": "B",
+      "tracks": [
+        {
+          "key": "DEMO-4",
+          "title": "Document the tools",
+          "app": "tools",
+          "spec": "Add a 'Tools' section to README.md that describes greet.sh and count.sh with one usage example each. Commit it.",
+          "files": ["README.md"],
+          "critics": ["spec-tests"],
+          "maxRounds": 1
+        }
+      ]
+    }
+  ],
+  "layers": [
+    { "branch": "demo-1/a1-greet", "tracks": ["DEMO-2"] },
+    { "branch": "demo-1/a2-count", "tracks": ["DEMO-3"] },
+    { "branch": "demo-1/b1-docs", "tracks": ["DEMO-4"] }
+  ],
+  "finalReview": { "lenses": ["acceptance", "correctness"] },
+  "checkpoints": { "afterGroups": ["A"] },
+  "appDocs": { "tools": "AGENTS.md" },
+  "models": {
+    "implementer": { "provider": "claude-code", "model": "claude-haiku-5-5", "reasoningLevel": "low" },
+    "critic": { "provider": "claude-code", "model": "claude-haiku-5-5", "reasoningLevel": "low" }
+  }
+}

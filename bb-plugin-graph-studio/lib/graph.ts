@@ -75,8 +75,24 @@ export const fieldSchema = z.object({
   /** Allowed values for `enum`; ignored otherwise. */
   options: z.array(z.string().trim().min(1).max(60)).max(20).default([]),
   description: z.string().max(200).default(""),
+  /**
+   * The worker may leave this key out. A field that only applies to one
+   * outcome — `question`, which means something only when the status is
+   * NEEDS_HUMAN — used to be required like every other, and a worker that
+   * reasonably dropped it failed its attempt with "Field \"question\" is
+   * missing" on a perfectly good answer.
+   *
+   * Only for `string` and `list` (see `validateGraph`): both have an empty
+   * value that means "nothing", and `parseFields` stores that. A number, a
+   * yes/no or a choice has no such value, and inventing one would put a
+   * verdict into the state that nobody gave.
+   */
+  optional: z.boolean().default(false),
 });
 export type GraphField = z.infer<typeof fieldSchema>;
+
+/** The field types whose empty value honestly means "not given". */
+export const OPTIONAL_FIELD_TYPES: readonly FieldType[] = ["string", "list"];
 
 /**
  * `dialog` is an agent node that is allowed to ask back. An `agent` node is
@@ -115,6 +131,7 @@ export const NODE_KINDS = [
   "note",
   "subgraph",
   "member",
+  "command",
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
 
@@ -126,6 +143,7 @@ export const KIND_LABEL: Record<NodeKind, string> = {
   note: "Note",
   subgraph: "Subgraph",
   member: "Crew member",
+  command: "Command",
 };
 
 /**
@@ -167,6 +185,34 @@ export const NODE_COLORS = [
   "#E5484D",
   "#BE6BA8",
 ] as const;
+
+/** See `nodeSchema.path`. */
+export const NODE_PATHS = ["main", "fallback"] as const;
+export type NodePath = (typeof NODE_PATHS)[number];
+
+/** Read through here: graphs stored before `path` existed carry none. */
+export function isFallback(node: Pick<GraphNode, "path">): boolean {
+  return node.path === "fallback";
+}
+
+/**
+ * The node whose thread `node` continues, or "" when it spawns its own. Read
+ * through here for the same reason as `fanOutKey`: a node stored before the
+ * field existed has none.
+ */
+export function continuedNode(node: Pick<GraphNode, "continueThread">): string {
+  return (node.continueThread ?? "").trim();
+}
+
+/**
+ * Where a node's worker thread is kept in the run state. A node that runs
+ * once per fan-out entry keeps one thread per entry, keyed by the entry: the
+ * critic for "security" must not continue the thread that reviewed
+ * "readability".
+ */
+export function threadKey(ownerId: string, perItem: boolean, item: string): string {
+  return perItem ? `${ownerId}#${item}` : ownerId;
+}
 
 export const nodeSchema = z.object({
   id: z
@@ -240,6 +286,60 @@ export const nodeSchema = z.object({
    * not to the graph — a member node carries none.
    */
   member: z.string().trim().max(200).default(""),
+  /**
+   * `command` only: a shell command run with `bash -lc` instead of spawning a
+   * worker. Deterministic steps — a git worktree, a Turbo gate, a squash —
+   * were run by an agent reading a command off its prompt before this, which
+   * cost a thread per step and could misreport an exit code. Placeholders
+   * render shell-quoted, so a worker's text can never become shell syntax.
+   */
+  command: z.string().max(4000).default(""),
+  /**
+   * Where the node runs; placeholders render. Empty = the run's environment.
+   * For a `command` node it is the working directory. For an `agent` or
+   * `dialog` node it is the directory the worker is spawned in, as its own
+   * environment — so parallel branches each get their own checkout instead of
+   * queueing for the one the parent thread holds.
+   */
+  cwd: z.string().max(500).default(""),
+  /** `command` only: the command is killed after this long. */
+  timeoutMinutes: z.number().int().min(1).max(240).default(30),
+  /**
+   * `command` only: whether a non-zero exit fails the attempt. Off for a
+   * command whose failure is an answer rather than an accident — a red gate
+   * reports `{"ok": false}` and the graph routes on it.
+   */
+  failOnExit: z.boolean().default(true),
+  /**
+   * `agent` only: the id of a node whose worker thread this node continues —
+   * its own id included, which makes a node continue its own thread on its
+   * next visit. When that thread exists in this run, the prompt is sent into
+   * it instead of spawning a fresh worker; otherwise the node spawns as usual
+   * and its thread becomes the one to continue.
+   *
+   * It exists because a fresh thread per step is expensive in exactly the
+   * way that shows: a real three-track run spawned 21 workers, and every
+   * "fix the findings" step started by re-reading the code the implementer
+   * had just written. Continuing the implementer's thread keeps what it
+   * knows, and keeps the sidebar to one thread per role.
+   *
+   * On a node that runs once per entry of a fan-out it may only name the
+   * node itself, and the thread is then kept per entry — one critic thread
+   * per lens, continued round after round.
+   */
+  continueThread: z.string().trim().max(48).default(""),
+  /**
+   * Whether the node is on the path a run normally takes, or a contingency —
+   * the conflict resolver, the fix for a red gate, the approval that only
+   * asks when something is stuck. The canvas draws a fallback small and, in
+   * a run, leaves it out until the run actually reaches it: in a compiled
+   * task-dev graph almost half the nodes are such paths, and drawn at full
+   * size they buried the dozen steps that actually ran.
+   *
+   * Purely presentational. The runtime treats both alike, so marking a node
+   * wrongly costs a picture, never a run.
+   */
+  path: z.enum(NODE_PATHS).default("main"),
   /**
    * Optional explicit execution; unset inherits the parent thread. The four
    * fields are one decision, not four: BB only honours a model together with
@@ -367,7 +467,21 @@ export function spawnsThread(node: GraphNode): boolean {
  * reaches a thread that already exists.
  */
 export function doesWork(node: GraphNode): boolean {
-  return node.kind === "agent" || node.kind === "dialog" || node.kind === "member";
+  return (
+    node.kind === "agent" ||
+    node.kind === "dialog" ||
+    node.kind === "member" ||
+    node.kind === "command"
+  );
+}
+
+/**
+ * Every text of a node that placeholders render in. One place, so the
+ * validator checks a command line and a working directory exactly as it checks
+ * a prompt — a typo in `{{wt.path}}` is the same silent hole in all three.
+ */
+export function nodeTemplates(node: GraphNode): string {
+  return [node.prompt, node.command ?? "", node.cwd ?? ""].join("\n");
 }
 
 /** `member@crew`, both parts in the Crew plugin's key syntax. */
@@ -442,8 +556,10 @@ export const graphSchema = z.object({
    * CLI line offers, so a placeholder like "<task>" would teach nothing.
    */
   example: z.string().trim().max(200).default(""),
-  nodes: z.array(nodeSchema).min(1).max(60),
-  edges: z.array(edgeSchema).max(200),
+  // Sized for a compiled run (lib/task-dev.ts): ten tracks over four groups
+  // already need some 65 nodes in the parent graph alone.
+  nodes: z.array(nodeSchema).min(1).max(150),
+  edges: z.array(edgeSchema).max(400),
   /** Global guard: total node executions before the run stops itself. */
   maxSteps: z.number().int().min(1).max(500).default(60),
   /**
@@ -462,10 +578,44 @@ export const graphSchema = z.object({
   positions: z
     .record(z.string(), z.object({ x: z.number(), y: z.number() }))
     .default({}),
+  /**
+   * Short lowercase labels. One carries meaning today: `dynamic` marks a
+   * graph a program wrote for one occasion — a compiled task-dev run and its
+   * track graphs — and keeps it out of every listing of the library unless
+   * asked for. Those graphs are real and must stay resolvable by id (a run
+   * renders and resumes from them), but a dozen of them per ticket in "Your
+   * graphs" buried the ones a person wrote and comes back to.
+   */
+  tags: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(/^[a-z0-9][a-z0-9:_-]{0,39}$/, "tag: lowercase letters, digits, - _ :"),
+    )
+    .max(12)
+    .default([]),
+  /**
+   * Whether the worker threads this graph spawns show up in the sidebar.
+   * `hidden` spawns them as BB's hidden helper threads — out of the thread
+   * list, still openable by id, which is how the run inspector's "Open child
+   * thread" reaches them (BB's own workflows plugin works the same way). For
+   * generated graphs whose workers nobody browses to from the sidebar;
+   * `visible` keeps every existing graph exactly as it was.
+   */
+  workerVisibility: z.enum(["visible", "hidden"]).default("visible"),
   createdAt: z.number().default(0),
   updatedAt: z.number().default(0),
 });
 export type Graph = z.infer<typeof graphSchema>;
+
+/** The tag that keeps a generated graph out of the library listings. */
+export const DYNAMIC_TAG = "dynamic";
+
+/** Read through here: a graph stored before tags existed has none. */
+export function isDynamic(graph: Pick<Graph, "tags">): boolean {
+  return (graph.tags ?? []).includes(DYNAMIC_TAG);
+}
 
 /* ── validation ─────────────────────────────────────────────────────────── */
 
@@ -602,7 +752,14 @@ export function validateGraph(
         message: `"${node.label}" is set to "every matching branch" but has only ${out.length === 0 ? "no" : "one"} outgoing edge; the setting has no effect.`,
       });
     }
-    if (doesWork(node) && node.prompt.trim() === "") {
+    if (node.kind === "command") {
+      if ((node.command ?? "").trim() === "") {
+        problems.push({
+          level: "error",
+          message: `"${node.label}" is a command node without a command.`,
+        });
+      }
+    } else if (doesWork(node) && node.prompt.trim() === "") {
       problems.push({
         level: "warning",
         message: `"${node.label}" has an empty prompt.`,
@@ -846,6 +1003,16 @@ export function validateGraph(
         message: `"${node.label}" is a ${KIND_LABEL[node.kind]} node and starts no worker; the model choice goes unused.`,
       });
     }
+    if (
+      (node.cwd ?? "").trim() !== "" &&
+      !spawnsThread(node) &&
+      node.kind !== "command"
+    ) {
+      problems.push({
+        level: "warning",
+        message: `"${node.label}" is a ${KIND_LABEL[node.kind]} node and runs nothing; its working directory goes unused.`,
+      });
+    }
   }
 
   // Member nodes. Whether the member exists is the Crew plugin's to say and
@@ -967,7 +1134,7 @@ export function validateGraph(
       });
     }
     for (const node of graph.nodes) {
-      for (const [, name] of node.prompt.matchAll(PLACEHOLDER)) {
+      for (const [, name] of nodeTemplates(node).matchAll(PLACEHOLDER)) {
         if (!subgraphIds.has(name)) continue;
         problems.push({
           level: "error",
@@ -1121,7 +1288,7 @@ export function validateGraph(
     if (!node) continue;
     // A fan-out target that never reads `{{item}}` runs n identical threads —
     // the branches exist, but nothing distinguishes them.
-    if (!/\{\{\s*item\s*\}\}/.test(node.prompt)) {
+    if (!/\{\{\s*item\s*\}\}/.test(nodeTemplates(node))) {
       problems.push({
         level: "warning",
         message: `"${node.label}" is the target of a fan-out but reads no {{item}}; every branch would get the same prompt.`,
@@ -1179,7 +1346,7 @@ export function validateGraph(
   // node ids resolve; catching the rest here is the only point where anyone
   // is still looking.
   for (const node of graph.nodes) {
-    for (const [, name] of node.prompt.matchAll(PLACEHOLDER)) {
+    for (const [, name] of nodeTemplates(node).matchAll(PLACEHOLDER)) {
       // `{{item}}` only means something in a node the graph fans out into;
       // anywhere else it renders as the empty string and the prompt silently
       // loses whatever the author thought it referred to.
@@ -1293,6 +1460,94 @@ export function validateGraph(
     }
   }
 
+  // An optional field is stored as its empty value when the worker leaves it
+  // out. Text and lists have one that means "nothing"; a number, a yes/no or
+  // a choice does not, and any value picked for them would be a verdict the
+  // worker never gave — routed on as if it had.
+  for (const node of graph.nodes) {
+    for (const declared of node.fields) {
+      if (!declared.optional || OPTIONAL_FIELD_TYPES.includes(declared.type)) continue;
+      problems.push({
+        level: "error",
+        message: `"${node.label}" marks its ${declared.type} field "${declared.name}" optional; only text and list fields can be left out, because a missing ${declared.type} has no empty value that would not read as an answer.`,
+      });
+    }
+  }
+
+  problems.push(...continuedThreadProblems(graph));
+
+  return problems;
+}
+
+/**
+ * `continueThread`, checked. Every rule here guards against a message landing
+ * in a thread that is not the one the author meant — the failure that does
+ * not crash, it just answers the wrong question in the wrong conversation.
+ */
+function continuedThreadProblems(graph: Graph): GraphProblem[] {
+  const problems: GraphProblem[] = [];
+  const fannedOut = new Set(
+    graph.edges.filter((edge) => fanOutKey(edge) !== "").map((edge) => edge.to),
+  );
+  for (const node of graph.nodes) {
+    const target = continuedNode(node);
+    if (target === "") continue;
+    // A dialogue keeps its own conversation per visit, a member node has its
+    // member's thread, a command has none: only the one-shot agent node has a
+    // spawn that continuing could replace.
+    if (node.kind !== "agent") {
+      problems.push({
+        level: "warning",
+        message: `"${node.label}" is a ${KIND_LABEL[node.kind]} node; only agent nodes continue a thread, so "${target}" goes unused.`,
+      });
+      continue;
+    }
+    // Its own thread is always there to continue, fanned out or not — per
+    // entry in the second case.
+    if (target === node.id) continue;
+    const owner = graph.nodes.find((entry) => entry.id === target);
+    if (!owner) {
+      problems.push({
+        level: "error",
+        message: `"${node.label}" continues the thread of "${target}", which is no node in this graph.`,
+      });
+      continue;
+    }
+    if (!spawnsThread(owner)) {
+      problems.push({
+        level: "error",
+        message: `"${node.label}" continues the thread of "${owner.label}", a ${KIND_LABEL[owner.kind]} node that has no worker thread.`,
+      });
+      continue;
+    }
+    if (fannedOut.has(owner.id)) {
+      problems.push({
+        level: "error",
+        message: `"${node.label}" continues the thread of "${owner.label}", which runs once per fan-out entry; there is no single thread to continue.`,
+      });
+      continue;
+    }
+    if (fannedOut.has(node.id)) {
+      problems.push({
+        level: "error",
+        message: `"${node.label}" runs once per fan-out entry and would send every entry into the one thread of "${owner.label}"; a fanned-out node may only continue its own thread.`,
+      });
+      continue;
+    }
+    // Not an error: the node's own choice still applies whenever it has to
+    // start the thread itself. But once it continues, the thread keeps what
+    // it was started with, and an author who picked a model here would
+    // otherwise believe the step ran on it.
+    const sameModel =
+      JSON.stringify(nodeExecution(node)) === JSON.stringify(nodeExecution(owner));
+    const sameCwd = (node.cwd ?? "").trim() === (owner.cwd ?? "").trim();
+    if (!sameModel || !sameCwd) {
+      problems.push({
+        level: "warning",
+        message: `"${node.label}" continues the thread of "${owner.label}" but names a different ${sameModel ? "working directory" : "model"}; a continued thread keeps the one it was started with.`,
+      });
+    }
+  }
   return problems;
 }
 
@@ -1374,6 +1629,16 @@ export type RunState = {
   errors: Record<string, string>;
   /** The element this instance was fanned out with; `{{item}}` renders it. */
   item: string;
+  /**
+   * The worker thread of each node that spawned one, by `threadKey` — what a
+   * node with `continueThread` sends into. Part of the checkpointed state
+   * rather than kept by the host, so a resume or a rerun from a checkpoint
+   * continues the thread that belonged to *that* point of the run.
+   *
+   * Optional only for states written before it existed; the runtime always
+   * carries it.
+   */
+  threads?: Record<string, string>;
   visits: Record<string, number>;
   steps: number;
 };
@@ -1386,6 +1651,7 @@ export function emptyRunState(input: string): RunState {
     collected: {},
     errors: {},
     item: "",
+    threads: {},
     visits: {},
     steps: 0,
   };
@@ -1827,11 +2093,16 @@ export function fieldContract(fields: readonly GraphField[]): string {
             boolean: "true or false",
             list: 'a list of strings, e.g. ["a", "b"]',
           }[field.type];
-    return `  "${field.name}": ${type}${field.description ? ` — ${field.description}` : ""}`;
+    // Said on the key itself: a worker reads the contract line by line, and a
+    // general sentence about "some keys" is the one it skims.
+    const optional = field.optional ? " (optional — leave it out when it does not apply)" : "";
+    return `  "${field.name}": ${type}${optional}${field.description ? ` — ${field.description}` : ""}`;
   });
   return [
     "ANSWER FORMAT: end your answer with a JSON object in a ```json block.",
-    "It holds exactly these keys:",
+    fields.some((field) => field.optional)
+      ? "It holds these keys; the ones marked optional may be left out:"
+      : "It holds exactly these keys:",
     "{",
     lines.join(",\n"),
     "}",
@@ -2031,6 +2302,16 @@ export function parseFields(
   for (const field of fields) {
     const value = source[field.name];
     if (value === undefined || value === null) {
+      if (field.optional) {
+        // "Not given" is stored as the empty value, so `{{node.question}}`
+        // renders empty and a condition reads "" — the same as a node that
+        // answered with nothing to say. A number, yes/no or choice cannot be
+        // optional (validateGraph), so it never reaches here; one that does
+        // through an unvalidated graph is left out rather than invented.
+        if (field.type === "string") out[field.name] = "";
+        else if (field.type === "list") out[field.name] = [];
+        continue;
+      }
       throw new FieldContractError(`Field "${field.name}" is missing from the answer.`);
     }
     switch (field.type) {
@@ -2060,13 +2341,13 @@ export function parseFields(
           throw new FieldContractError(`Field "${field.name}" is not a list.`);
         }
         const items = value
-          .map((entry) => String(entry).trim())
+          .map((entry) => scalarText(entry).trim())
           .filter((entry) => entry !== "");
         out[field.name] = items;
         break;
       }
       case "enum": {
-        const text = String(value).trim();
+        const text = scalarText(value).trim();
         const match = field.options.find(
           (option) => option.toLowerCase() === text.toLowerCase(),
         );
@@ -2079,10 +2360,45 @@ export function parseFields(
         break;
       }
       default:
-        out[field.name] = String(value);
+        out[field.name] = scalarText(value);
     }
   }
   return out;
+}
+
+/**
+ * A JSON value as field text. `String()` turns an object into
+ * "[object Object]" — which is how a decision map answered as JSON reached the
+ * next prompt as exactly those fifteen characters. Structured values stay
+ * readable as JSON instead.
+ */
+function scalarText(value: unknown): string {
+  return typeof value === "object" && value !== null
+    ? JSON.stringify(value)
+    : String(value);
+}
+
+/** One argument for `bash`, whatever it contains. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * `renderPrompt` for a command line: every substituted value is one quoted
+ * shell word. A field is text a worker wrote, and pasted raw into
+ * `bash -lc` it would be a shell injection waiting for the first `$(`. A name
+ * the prompt would leave standing (a typo, which the validator reports) stays
+ * standing here as well.
+ */
+export function renderCommand(
+  template: string,
+  state: RunState,
+  known?: ReadonlySet<string>,
+): string {
+  return template.replace(PLACEHOLDER, (whole) => {
+    const value = renderPrompt(whole, state, known);
+    return value === whole ? whole : shellQuote(value);
+  });
 }
 
 /**

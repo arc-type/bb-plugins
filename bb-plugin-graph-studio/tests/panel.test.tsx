@@ -581,3 +581,32 @@ describe("library grouping in the run picker", () => {
     });
   });
 });
+
+describe("generated graphs in the run picker", () => {
+  const generated = { ...TEMPLATES[0]!, id: "td-demo-1", name: "DEMO-1 · compiled", tags: ["dynamic"] };
+  const withGenerated = () =>
+    panel({ listGraphs: () => ({ graphs: [generated, mine, ...TEMPLATES], templates: TEMPLATES }) });
+  const optionIds = (slot: ReturnType<typeof panel>) =>
+    [...slot.getByRole("listbox").querySelectorAll('[role="option"]')].map((node) =>
+      node.id.replace("gs-option-", ""),
+    );
+
+  it("leaves a generated graph out until the switch is on, then lists it under Generated", async () => {
+    const slot = withGenerated();
+    // Not the default choice either, although it comes first in the library.
+    await waitFor(() => expect(slot.getByLabelText("Graph").textContent).toContain("My Graph"));
+    fireEvent.click(slot.getByLabelText("Graph"));
+    expect(optionIds(slot)).not.toContain("td-demo-1");
+    expect(optionIds(slot)).toContain("my-graph");
+    fireEvent.click(slot.getByLabelText("Show generated graphs"));
+    await waitFor(() => expect(optionIds(slot)).toContain("td-demo-1"));
+    const option = slot.getByRole("listbox").querySelector("#gs-option-td-demo-1")!;
+    expect(option.parentElement!.querySelector("p")!.textContent).toBe("Generated");
+  });
+
+  it("offers no switch when the library holds no generated graph", async () => {
+    const slot = panel();
+    fireEvent.click(await slot.findByLabelText("Graph"));
+    expect(slot.queryByLabelText("Show generated graphs")).toBeNull();
+  });
+});

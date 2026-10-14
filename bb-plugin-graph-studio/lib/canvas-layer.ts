@@ -9,7 +9,8 @@
 import { EMPTY_LAYER, mergeLayers, projectNodeId, withRoots, type CanvasLayer } from "../vendor/bb-canvas/lib/layer";
 import type { CanvasEdge, CanvasNode, CanvasStatus } from "../vendor/bb-canvas/lib/types";
 import { formatTimestamp } from "../vendor/bb-canvas/lib/format";
-import { END_NODE, START_NODE, type Graph } from "./graph";
+import { END_NODE, START_NODE, type Graph, type RunState } from "./graph";
+import { runResolver, runStatuses } from "./run-status";
 import { now } from "./edge-state";
 import { layoutGraph } from "./layout";
 
@@ -23,7 +24,16 @@ export type CanvasRun = {
   status: RunStatus;
   threadId: string | null;
   createdAt: number;
-  nodeRuns: { nodeId: string; attempt: number; status: StepStatus }[];
+  nodeRuns: { nodeId: string; attempt: number; status: StepStatus; endedAt?: number | null }[];
+  /**
+   * The run state, the open question and the embedded graphs (`RunDto`
+   * carries all three). With them a step that never gets an attempt row — an
+   * approval, a note, a subgraph — shows what it did (lib/run-status.ts);
+   * without them the rows alone decide, as before.
+   */
+  state?: Pick<RunState, "visits" | "outputs"> & Partial<RunState>;
+  pendingQuestion?: { nodeId: string } | null;
+  embedded?: Graph[];
 };
 
 const RUN_STATUS: Record<RunStatus, CanvasStatus> = {
@@ -90,7 +100,18 @@ function addRun(layer: CanvasLayer, run: CanvasRun, parentId: string): void {
     const seen = latest.get(step.nodeId);
     if (!seen || step.attempt >= seen.attempt) latest.set(step.nodeId, step);
   }
-  const done = run.graph.nodes.filter((node) => latest.get(node.id)?.status === "done").length;
+  const derived = run.state
+    ? runStatuses(
+        { ...run, state: run.state, pendingQuestion: run.pendingQuestion ?? null },
+        runResolver(run),
+      ).statuses
+    : null;
+  const stepStatus = (nodeId: string): CanvasStatus | undefined => {
+    const last = latest.get(nodeId);
+    if (!derived) return last ? STEP_STATUS[last.status] : undefined;
+    return derived[nodeId] ?? (last ? "idle" : undefined);
+  };
+  const done = run.graph.nodes.filter((node) => stepStatus(node.id) === "done").length;
   const started = formatTimestamp(run.createdAt);
   layer.nodes.push({
     id,
@@ -110,11 +131,12 @@ function addRun(layer: CanvasLayer, run: CanvasRun, parentId: string): void {
 
   for (const node of run.graph.nodes) {
     const last = latest.get(node.id);
+    const status = stepStatus(node.id);
     const step: CanvasNode = {
       id: stepNodeId(run.id, node.id),
       kind: "step",
       label: node.label,
-      ...(last ? { status: STEP_STATUS[last.status] } : {}),
+      ...(status ? { status } : {}),
       parentId: id,
       meta: { nodeId: node.id, attempts: last?.attempt ?? 0 },
     };

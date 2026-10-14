@@ -146,3 +146,57 @@ it("negative: a step retried in place (no attempt at the loop's source) does not
   ] })], new Map()).edges;
   expect(edges[0]).not.toHaveProperty("state");
 });
+
+describe("steps without attempt rows (run state given)", () => {
+  const approval = graphSchema.parse({
+    id: "ok",
+    name: "Approval",
+    nodes: [
+      { id: "a", label: "Plan" },
+      { id: "ok", label: "OK?", kind: "human" },
+    ],
+    edges: [
+      { from: "__start__", to: "a" },
+      { from: "a", to: "ok" },
+      { from: "ok", to: "__end__" },
+    ],
+  });
+  const step = (layer: ReturnType<typeof graphCanvasLayer>, id: string) =>
+    layer.nodes.find((node) => node.id === `step:r1:${id}`)!;
+  const state = (visits: Record<string, number>) => ({ visits, outputs: {} });
+
+  it("shows an answered approval as done and counts it", () => {
+    const layer = graphCanvasLayer("p1", [run({
+      graph: approval,
+      nodeRuns: [{ nodeId: "a", attempt: 1, status: "done" }],
+      state: state({ a: 1, ok: 1 }),
+      pendingQuestion: null,
+    })], new Map());
+    expect(step(layer, "ok").status).toBe("done");
+    expect(layer.nodes.find((node) => node.kind === "graph-run")!.meta!.steps).toBe("2/2");
+  });
+
+  it("shows the approval the run waits on as waiting, an unvisited one with no status", () => {
+    const waiting = graphCanvasLayer("p1", [run({
+      graph: approval,
+      status: "waiting-human",
+      nodeRuns: [{ nodeId: "a", attempt: 1, status: "done" }],
+      state: state({ a: 1 }),
+      pendingQuestion: { nodeId: "ok" },
+    })], new Map());
+    expect(step(waiting, "ok").status).toBe("waiting");
+    const before = graphCanvasLayer("p1", [run({
+      graph: approval,
+      status: "running",
+      nodeRuns: [{ nodeId: "a", attempt: 1, status: "running" }],
+      state: state({}),
+      pendingQuestion: null,
+    })], new Map());
+    expect(step(before, "ok")).not.toHaveProperty("status");
+  });
+
+  it("negative: without the run state the rows alone decide, as before", () => {
+    const layer = graphCanvasLayer("p1", [run({ graph: approval, nodeRuns: [{ nodeId: "a", attempt: 1, status: "done" }] })], new Map());
+    expect(step(layer, "ok")).not.toHaveProperty("status");
+  });
+});

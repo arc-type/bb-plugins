@@ -51,6 +51,8 @@ import { SqliteCheckpointer } from "./lib/checkpointer";
 import { MIGRATIONS, createStore, type RunRow, type RunStatus } from "./lib/store";
 import { RENAMED_TEMPLATES, TEMPLATES, searchGraphs } from "./lib/templates";
 import { whileWorkspaceBusy } from "./lib/workspace";
+import { DEFAULT_HELPER, compileRunSpec } from "./lib/task-dev";
+import { resolveIn, runShell } from "./lib/shell";
 import { canvasPageLayer } from "./lib/canvas-layer";
 import { ACTIVITY_EVENT_TYPES, describeActivity } from "./lib/activity";
 import {
@@ -112,6 +114,8 @@ const runStateSchema = z.object({
   errors: z.record(z.string(), z.string()).default({}),
   /** The fanned-out element of one instance; empty outside a fan-out. */
   item: z.string().default(""),
+  /** Worker threads by `threadKey`, for `continueThread`. */
+  threads: z.record(z.string(), z.string()).default({}),
   visits: z.record(z.string(), z.number()),
   steps: z.number(),
 });
@@ -133,6 +137,14 @@ const runSchema = z.object({
   pendingQuestion: z
     .object({ nodeId: z.string(), label: z.string(), question: z.string() })
     .nullable(),
+  /**
+   * The graphs the run's graph embeds, at any depth. A subgraph node's state
+   * is read from the nodes inside it, and the surfaces drawing a run in the
+   * chat (card, banner) have no library at hand to look them up in — without
+   * these a track card stays grey for the whole run. Optional so a run object
+   * from before it existed still reads.
+   */
+  embedded: z.array(graphSchema).optional(),
 });
 
 export type RunDto = z.infer<typeof runSchema>;
@@ -769,12 +781,30 @@ export default function graphStudio(bb: BbPluginApi) {
     for (const row of store.listNodeRuns(runId)) activity.delete(row.id);
   }
 
+  /** Every graph `graph` embeds, at any depth, each once; cycle-safe. */
+  function embeddedGraphs(graph: Graph): Graph[] {
+    const found = new Map<string, Graph>();
+    const walk = (current: Graph) => {
+      for (const node of current.nodes) {
+        if (node.kind !== "subgraph" || found.has(node.graphId)) continue;
+        const child = resolveGraph(node.graphId);
+        if (!child || child.id === graph.id) continue;
+        found.set(child.id, child);
+        walk(child);
+      }
+    };
+    walk(graph);
+    return [...found.values()];
+  }
+
   function toDto(runId: string): RunDto | null {
     const row = store.getRun(runId);
     if (!row) return null;
     return {
       ...row,
-      state: row.state as RunState,
+      embedded: embeddedGraphs(row.graph),
+      // A state stored before `threads` existed has none; the DTO promises it.
+      state: { ...(row.state as RunState), threads: (row.state as RunState).threads ?? {} },
       nodeRuns: store
         .listNodeRuns(runId)
         .map((nodeRun) => ({
@@ -830,13 +860,65 @@ export default function graphStudio(bb: BbPluginApi) {
     }
   }
 
+  /**
+   * The environment of the thread a run belongs to: where its workers run,
+   * and the root a node's relative working directory is read against.
+   */
+  async function parentEnvironment(parentThreadId: string | null) {
+    if (!parentThreadId) throw new Error("A run needs a parent thread.");
+    const parent = await bb.sdk.threads.get({ threadId: parentThreadId });
+    if (!parent.environmentId) {
+      throw new Error(
+        `Parent thread ${parentThreadId} has no environment a node could run in.`,
+      );
+    }
+    const environment = await bb.sdk.environments.get({
+      environmentId: parent.environmentId,
+    });
+    if (!environment.path) {
+      throw new Error(
+        `The environment of thread ${parentThreadId} has no path on its host.`,
+      );
+    }
+    return { parent, hostId: environment.hostId, root: environment.path };
+  }
+
   function makeHost(
     runId: string,
     parentThreadId: string | null,
     projectId: string | null,
   ): RuntimeHost {
     return {
-      async spawn({ prompt, title, execution }) {
+      async runCommand({ command, cwd, timeoutMs }) {
+        if (halted(runId)) throw new GuardStop("The run was stopped.");
+        const { hostId, root } = await parentEnvironment(parentThreadId);
+        // The command runs in this process, so only where this process is.
+        // Running it against a remote environment's path would hit a
+        // directory that does not exist here — or, worse, one that does.
+        const local = (await bb.sdk.system.config()).primaryHostId;
+        if (local === null || hostId !== local) {
+          throw new Error(
+            `Command nodes run on the BB server's own machine; this run's environment is on host ${hostId}.`,
+          );
+        }
+        const controller = trackStop(runId);
+        try {
+          return await runShell({
+            command,
+            cwd: resolveIn(root, cwd),
+            timeoutMs,
+            signal: controller.signal,
+          });
+        } catch (cause) {
+          if (controller.signal.aborted || halted(runId)) {
+            throw new GuardStop("The run was stopped.");
+          }
+          throw cause;
+        } finally {
+          untrackStop(runId, controller);
+        }
+      },
+      async spawn({ prompt, title, execution, cwd, visibility = "visible" }) {
         if (halted(runId)) throw new GuardStop("The run was stopped.");
         if (!parentThreadId) {
           throw new Error("A run needs a parent thread.");
@@ -852,6 +934,24 @@ export default function graphStudio(bb: BbPluginApi) {
         // Read out once: inside the retry closure TypeScript can no longer
         // rely on the check above.
         const environmentId = parent.environmentId;
+        // A node with a working directory gets that directory as its own
+        // environment. BB lets one worker hold an environment at a time, so
+        // parallel branches on the reused one queue behind each other — and
+        // would edit the same checkout if they did not.
+        const environment =
+          cwd === null
+            ? { type: "reuse" as const, environmentId }
+            : await (async () => {
+                const { hostId, root } = await parentEnvironment(parentThreadId);
+                return {
+                  type: "host" as const,
+                  hostId,
+                  workspace: {
+                    type: "unmanaged" as const,
+                    path: resolveIn(root, cwd),
+                  },
+                };
+              })();
         const projectIdForChild = projectId ?? parent.projectId;
         // A node without its own selection inherits the parent's provider. It
         // has to be named explicitly — omitting it makes BB reach for project
@@ -895,11 +995,13 @@ export default function graphStudio(bb: BbPluginApi) {
             bb.sdk.threads.spawn({
               prompt,
               title,
-              visibility: "visible",
+              // `hidden` keeps the worker out of the sidebar only; it stays
+              // openable by id, which is what the inspector's link uses.
+              visibility,
               origin: "plugin",
               parentThreadId,
               projectId: projectIdForChild,
-              environment: { type: "reuse", environmentId },
+              environment,
               ...executionArgs,
             }),
           {
@@ -1916,8 +2018,8 @@ export default function graphStudio(bb: BbPluginApi) {
   const CLI_COMMANDS = [
       {
         name: "graphs",
-        summary: "List graphs, optionally filtered",
-        usage: "bb graph-studio graphs [search]",
+        summary: "List graphs, optionally filtered (--all: with generated ones)",
+        usage: "bb graph-studio graphs [search] [--all]",
       },
       {
         name: "show",
@@ -1966,6 +2068,11 @@ export default function graphStudio(bb: BbPluginApi) {
         summary: "Read a graph from a JSON file",
         usage: "bb graph-studio import <file.json> [--overwrite]",
       },
+      {
+        name: "compile",
+        summary: "Turn a task-dev run spec into graphs (--save stores them)",
+        usage: "bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>]",
+      },
   ];
 
   /** The command list as text — what `help` prints and what a wrong command earns. */
@@ -2011,14 +2118,27 @@ export default function graphStudio(bb: BbPluginApi) {
           return ok(usageText);
         }
         case "graphs": {
-          const term = rest.join(" ");
-          const found = searchGraphs(libraryGraphs(), term);
+          // Generated graphs (tag `dynamic`) only on request: a compiled run
+          // leaves one graph per track behind, and listed by default they
+          // would be most of the library.
+          const generated = rest.includes("--all");
+          const term = rest.filter((arg) => arg !== "--all").join(" ");
+          const found = searchGraphs(libraryGraphs(), term, { generated });
           // A search that finds nothing says so, and says what it looked for.
           // An empty listing reads as an empty library.
           if (found.length === 0) {
             return ok(`No graph matches "${term}".`);
           }
-          return ok(describeLibrary(found));
+          const hidden = generated
+            ? 0
+            : searchGraphs(libraryGraphs(), term, { generated: true }).length - found.length;
+          // Saying how many were left out keeps "not listed" from reading as
+          // "not there".
+          return ok(
+            hidden > 0
+              ? `${describeLibrary(found)}\n\n${hidden} generated ${hidden === 1 ? "graph" : "graphs"} not listed; add --all to see them.`
+              : describeLibrary(found),
+          );
         }
         case "show": {
           const graph = rest[0] ? resolveGraph(rest[0]) : null;
@@ -2169,6 +2289,64 @@ export default function graphStudio(bb: BbPluginApi) {
             return fail(cause instanceof Error ? cause.message : String(cause));
           }
         }
+        case "compile": {
+          const flag = (name: string) => {
+            const index = rest.indexOf(name);
+            return index === -1 ? null : (rest[index + 1] ?? "");
+          };
+          const helper = flag("--helper") ?? DEFAULT_HELPER;
+          const file = rest.find((arg, index) => !arg.startsWith("--") && rest[index - 1] !== "--helper");
+          if (!file) {
+            return fail(
+              "Usage: bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>]",
+            );
+          }
+          let spec: unknown;
+          try {
+            spec = JSON.parse(await readFile(resolve(file), "utf8"));
+          } catch (cause) {
+            return fail(
+              `Run spec unreadable: ${cause instanceof Error ? cause.message : String(cause)}`,
+            );
+          }
+          const compiled = compileRunSpec(spec, { helper });
+          if (!compiled.ok) {
+            return fail(`The run spec is not valid:\n${compiled.errors.map((e) => `  - ${e}`).join("\n")}`);
+          }
+          const { graph, children, plan } = compiled.run;
+          const all = [...children, graph];
+          // Validated against each other first: the children only exist as a
+          // set, and the library may still hold an older version of them.
+          const fresh = new Map(all.map((entry) => [entry.id, entry]));
+          const problems = validateGraph(graph, (id) => fresh.get(id) ?? resolveGraph(id));
+          const lines = [
+            `${graph.id}: ${graph.nodes.length} nodes, ${children.length} track graphs of ${children[0]?.nodes.length ?? 0} nodes`,
+            ...plan.map(
+              (group) =>
+                `  group ${group.group}: ${group.lanes.map((lane) => lane.join(" → ")).join("  ‖  ")}`,
+            ),
+            `  helper: ${helper}`,
+            ...problems.map((problem) => `  ${problem.level}: ${problem.message}`),
+          ];
+          if (problems.some((problem) => problem.level === "error")) {
+            return fail(lines.join("\n"));
+          }
+          if (!rest.includes("--save")) {
+            return ok([...lines, "", "Nothing saved. Add --save to store the graphs."].join("\n"));
+          }
+          const taken = all.filter((entry) => store.getGraph(entry.id));
+          if (taken.length > 0 && !rest.includes("--overwrite")) {
+            return fail(
+              `${lines.join("\n")}\n\nAlready stored: ${taken.map((entry) => entry.id).join(", ")}. Replace them with --overwrite.`,
+            );
+          }
+          // Children first: the parent resolves them by id the moment it is read.
+          for (const entry of all) store.saveGraph(entry, Date.now());
+          publish();
+          return ok(
+            [...lines, "", `Saved ${all.length} graphs. Start it from a thread:`, `  bb graph-studio run ${graph.id} "${graph.example}"`].join("\n"),
+          );
+        }
         default:
           // "bb graph-studio build me a flow that …" is a sentence, not a
           // command. The CLI cannot write a graph — an agent can, so the
@@ -2189,9 +2367,10 @@ export default function graphStudio(bb: BbPluginApi) {
   bb.agents.registerTool({
     name: "graph_studio_graphs",
     description:
-      "List the Graph Studio library: one line per graph with its id, node count and name. Use this before graph_studio_describe or graph_studio_run.",
-    parameters: z.object({}),
-    execute: async () => describeLibrary(libraryGraphs()),
+      "List the Graph Studio library: one line per graph with its id, node count and name. Use this before graph_studio_describe or graph_studio_run. Graphs generated for one occasion (tag `dynamic`, e.g. a compiled task-dev run) are left out unless includeGenerated is true.",
+    parameters: z.object({ includeGenerated: z.boolean().optional() }),
+    execute: async ({ includeGenerated }) =>
+      describeLibrary(searchGraphs(libraryGraphs(), "", { generated: includeGenerated === true })),
   });
 
   bb.agents.registerTool({
@@ -2204,7 +2383,7 @@ export default function graphStudio(bb: BbPluginApi) {
       if (!graph) {
         // Naming the alternatives beats "not found": the usual cause is a
         // guessed id, and the list is the answer to the next question anyway.
-        return `No graph "${graphId}". Available:\n${describeLibrary(libraryGraphs())}`;
+        return `No graph "${graphId}". Available:\n${describeLibrary(searchGraphs(libraryGraphs(), ""))}`;
       }
       const isLockedSkill = lockedSkillPredicate(await skillCatalog(ctx.projectId ?? null));
       return describeGraph(graph, validateGraph(graph, resolveGraph, isLockedSkill));
@@ -2260,7 +2439,7 @@ export default function graphStudio(bb: BbPluginApi) {
     execute: async ({ graphId }) => {
       const graph = resolveGraph(graphId);
       if (!graph) {
-        return `No graph "${graphId}". Available:\n${describeLibrary(libraryGraphs())}`;
+        return `No graph "${graphId}". Available:\n${describeLibrary(searchGraphs(libraryGraphs(), ""))}`;
       }
       return toGraphFile(graph);
     },
@@ -2271,8 +2450,8 @@ export default function graphStudio(bb: BbPluginApi) {
     description: [
       "Create or replace a Graph Studio graph from JSON, then report the validator's findings. Fix every error and save again before telling the user it is done.",
       "",
-      "Shape (defaults may be left out): { id: lowercase-kebab, name, description, example: a real task in the user's words, nodes: [...], edges: [...] }.",
-      "Node: { id, label, kind: agent | dialog | human | note | subgraph | member, prompt, skills: [skill ids], fields: [{ name, type: string|number|boolean|enum|list, options?: [..] }], maxVisits, maxAttempts, onError: stop|route, routing: first|every, providerId + model (both or neither; leave out to inherit the thread's model), graphId (subgraph only: the graph it imports), member (member only: 'member@crew') }.",
+      "Shape (defaults may be left out): { id: lowercase-kebab, name, description, example: a real task in the user's words, nodes: [...], edges: [...], tags?: [lowercase labels; 'dynamic' marks a generated graph and hides it from every library listing — it stays runnable by id], workerVisibility?: visible|hidden (hidden spawns the workers as hidden threads: out of the sidebar, still opened from the run inspector) }.",
+      "Node: { id, label, kind: agent | dialog | human | note | subgraph | member | command, prompt, skills: [skill ids], fields: [{ name, type: string|number|boolean|enum|list, options?: [..], optional?: true (string and list only: the worker may leave it out and it is stored empty — for fields like a question that only some outcomes have) }], maxVisits, maxAttempts, onError: stop|route, routing: first|every, providerId + model (both or neither; leave out to inherit the thread's model), graphId (subgraph only: the graph it imports), member (member only: 'member@crew'), command (command only: run with bash -lc; {{node.field}} renders as one quoted word; fields come from the last JSON object on stdout), failOnExit (command only, default true), timeoutMinutes (command only), cwd (command: working directory; agent/dialog: spawn the worker in that directory as its own environment, e.g. a git worktree, so parallel branches do not queue for one checkout), continueThread (agent only: the id of an agent/dialog node — or its own id — whose worker thread this node continues instead of spawning a fresh one; a node fanned out over a list may only name itself and then keeps one thread per entry), path: main|fallback (fallback marks a contingency such as a conflict resolver or a 'needs you' approval: drawn small, and hidden in a run until reached) }.",
       "kind member: the step goes to a persistent member of a crew (plugin Crew) instead of a fresh thread — same prompt, fields and routing as an agent node, but no providerId/model/skills (the crew file sets those). Saving is refused when Crew is not installed or the member is unknown in this project; the template owner-check-loop shows the shape.",
       "Prompts read {{input}} (the run's task) and {{node_id}} (an earlier node's result).",
       "Edge: { from, to, when?: { source: output|field, key, op: contains|notContains|equals|matches|visitsBelow|failed|succeeded|always, value }, fanOutOver?: 'node.listField', handoffFrom?: 'node.field' }. Start is \"__start__\", End is \"__end__\". An edge back to an earlier node makes a cycle; give the looping node a maxVisits.",
