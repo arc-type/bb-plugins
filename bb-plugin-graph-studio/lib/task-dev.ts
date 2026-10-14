@@ -671,7 +671,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       id: "preflight",
       label: "Preflight",
       kind: "command",
-      command: `${H} preflight ${shellQuote(ticket)}`,
+      // A dry run never submits, so the helper must not require gh stack for it.
+      command: `${H} preflight ${shellQuote(ticket)}${spec.dryRun ? " --dry-run" : ""}`,
       timeoutMinutes: 30,
       maxAttempts: 1,
       failOnExit: false,
