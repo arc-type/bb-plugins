@@ -23,6 +23,7 @@ export const PREVIEW_SAMPLES: Record<string, string> = {
   pt: "É assim que as respostas vão soar quando o Listen as ler em voz alta.",
   nl: "Zo klinken de antwoorden wanneer Listen ze voorleest.",
   ru: "Так будут звучать ответы, когда Listen прочитает их вслух.",
+  uk: "Так звучатимуть відповіді, коли програма читатиме їх уголос.",
   tr: "Listen yanıtları sesli okuduğunda kulağa böyle gelecek.",
   ar: "هكذا ستبدو الإجابات عندما يقرأها Listen بصوت عالٍ.",
   zh: "这就是 Listen 朗读回答时的声音。",

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PREVIEW_SAMPLES,
@@ -64,5 +66,25 @@ describe("previewText", () => {
     for (const tag of ["en", "de", "fr", "es", "it", "pt", "nl", "ru", "tr", "ar", "zh", "ja", "ko", "hi"]) {
       expect(PREVIEW_SAMPLES[tag], tag).toBeTruthy();
     }
+  });
+});
+
+describe("every language in the voice catalog has a sample", () => {
+  // A language without one is previewed with the English sentence, which a
+  // non-English voice reads as nonsense.
+  it("covers Ukrainian, and the voice previews in Ukrainian", () => {
+    const model = { languages: ["uk-UA"], voices: [{ sid: 0, name: "Speaker 0" }] };
+    expect(previewLanguage(model, 0)).toBe("uk");
+    expect(previewText(model, 0)).toMatch(/[іїєґ]/i);
+  });
+
+  it("covers every language the catalog lists", () => {
+    const source = readFileSync(join(__dirname, "../../host/tts-catalog.ts"), "utf8");
+    // Every array of language tags, whether a `languages:` field or a piper() argument.
+    const tags = [...source.matchAll(/\[((?:"[a-z]{2}(?:-[A-Z]{2})?",?\s*)+)\]/g)].flatMap(
+      (match) => [...match[1]!.matchAll(/"([a-z]{2})/g)].map((tag) => tag[1]!),
+    );
+    expect(tags.length).toBeGreaterThan(0);
+    for (const tag of new Set(tags)) expect(PREVIEW_SAMPLES).toHaveProperty(tag);
   });
 });

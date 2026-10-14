@@ -530,7 +530,7 @@ export default experimental_defineHostEntry({
       return { deleted };
     },
 
-    speak: async ({ text, modelId, sid }, context) => {
+    speak: async ({ text, modelId, sid, language }, context) => {
       const directory = useDataDir(context.experimental_paths.dataDir);
       const started = Date.now();
       const config = readConfig(directory);
@@ -543,7 +543,10 @@ export default experimental_defineHostEntry({
       }
       // Refuse a language the voice cannot say before downloading anything:
       // checking afterwards fetched 36 MB and then rejected the voice.
-      resolveLanguageForLocal(model, config.language);
+      // A voice picked by name (preview, `--voice`) is the user's own choice
+      // and is not held to the configured language.
+      const checked = language ?? (modelId === null ? config.language : null);
+      if (checked !== null) resolveLanguageForLocal(model, checked);
 
       // Fetch the voice on first use rather than refusing.
       //
@@ -592,7 +595,8 @@ export default experimental_defineHostEntry({
           // Two voices can share an id across directories (ours and
           // pi-listen's), so the directory is part of the key.
           cacheKey: `${model.id}|${modelDir}`,
-          text,
+          // A letters-trained voice knows lowercase letters only.
+          text: model.textPhonemes ? text.toLowerCase() : text,
           sid: sid ?? config.voiceSid,
           speed: config.voiceSpeed,
           fallbackSampleRate: model.sampleRate,

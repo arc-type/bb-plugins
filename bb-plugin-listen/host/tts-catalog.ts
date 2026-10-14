@@ -94,6 +94,12 @@ export interface TtsLocalModelInfo {
 	 */
 	archiveUrl: string;
 	/**
+	 * The voice is trained on the text's letters, not on espeak phonemes, so
+	 * it needs the letters frontend and lowercase input — see
+	 * onnx-metadata.ts. Most Piper voices are not like this.
+	 */
+	textPhonemes?: boolean;
+	/**
 	 * Optional SHA-256 hex digest of the archive bytes for integrity
 	 * verification. When set, ensureTtsModelInstalled() rejects a
 	 * download whose computed hash differs. v7.0.0 ships catalog entries
@@ -184,6 +190,11 @@ export const TTS_LOCAL_MODELS: TtsLocalModelInfo[] = [
 	piper("zh_CN-chaowen-medium-int8", "Piper Chaowen (zh-CN)", 14_050_918, ["zh-CN"], "Mandarin Chinese — smaller archive than other languages", "MIT", true, 22050),
 	piper("it_IT-paola-medium-int8", "Piper Paola (it-IT)", 21_169_356, ["it-IT"], "Italian, female voice", "MIT", true, 22050, "female"),
 	piper("ru_RU-denis-medium-int8", "Piper Denis (ru-RU)", 21_065_728, ["ru-RU"], "Russian, male voice", "MIT", true, 22050, "male"),
+	piper("ru_RU-irina-medium-int8", "Piper Irina (ru-RU)", 21_149_417, ["ru-RU"], "Russian, female voice", "MIT", false, 22050, "female"),
+	piper("ru_RU-dmitri-medium-int8", "Piper Dmitri (ru-RU)", 21_129_441, ["ru-RU"], "Russian, male voice", "MIT", false, 22050, "male"),
+	piper("ru_RU-ruslan-medium-int8", "Piper Ruslan (ru-RU)", 21_127_907, ["ru-RU"], "Russian, male voice", "MIT", false, 22050, "male"),
+	piper("uk_UA-ukrainian_tts-medium-int8", "Piper Ukrainian TTS (uk-UA)", 22_767_075, ["uk-UA"], "Ukrainian, three speakers: Lada, Mykyta, Tetiana", "MIT", true, 22050, "neutral", 3, true),
+	piper("uk_UA-lada-x_low-int8", "Piper Lada (uk-UA)", 13_332_976, ["uk-UA"], "Ukrainian, female — smaller and faster, lower quality", "MIT", false, 16000, "female"),
 	piper("ar_JO-kareem-medium-int8", "Piper Kareem (ar-JO)", 20_971_520, ["ar-JO"], "Levantine Arabic, male voice", "MIT", false, 22050, "male"),
 	piper("tr_TR-fahrettin-medium-int8", "Piper Fahrettin (tr-TR)", 21_065_728, ["tr-TR"], "Turkish, male voice", "MIT", false, 22050, "male"),
 	piper("nl_NL-pim-medium-int8", "Piper Pim (nl-NL)", 21_065_728, ["nl-NL"], "Dutch, male voice", "MIT", false, 22050, "male"),
@@ -393,6 +404,7 @@ function piper(
 	sampleRate: number,
 	gender: "male" | "female" | "neutral" = "neutral",
 	voiceCount = 1,
+	textPhonemes = false,
 ): TtsLocalModelInfo {
 	const voices: TtsVoice[] = voiceCount === 1
 		? [{ sid: 0, name: displayName, gender }]
@@ -417,6 +429,7 @@ function piper(
 		defaultSid: 0,
 		archiveUrl: `${TTS_RELEASE}/vits-piper-${stem}.tar.bz2`,
 		sampleRate,
+		...(textPhonemes ? { textPhonemes } : {}),
 	};
 }
 

@@ -181,14 +181,19 @@ a file and `bb listen transcribe` reads it back, both halves work.
 
 ## Settings
 
-`language`, `model`, `summarize`, `summaryBackend`,
-`summaryThreadModel`, `summaryThreadProvider`, `summaryApiUrl`,
-`summaryApiModel`, `summaryApiKey`, `summaryPrompt`, `voiceModel`,
-`voiceSid`, `voiceSpeed` — set them in BB's settings UI or with
-`bb plugin config listen set <key> <value>`. Settings are read at load, so the
-plugin reloads itself after a change.
+Almost everything is chosen on the Listen settings page, with dropdowns: the
+primary and secondary language, which voice reads each, the recognition model,
+and how answers are condensed. Those choices live in the plugin's own storage,
+so BB's generic settings form shows only what has no dropdown: `summaryApiKey`,
+`summaryPrompt` and `voiceSpeed`. Change them there or with
+`bb plugin config listen set <key> <value>`.
 
-`language` matters more than it looks. BB's transcription call carries no
+Answers are read in the language they are written in. The script of the text
+(Cyrillic or Latin) picks between the primary and the secondary voice, so
+Ukrainian and English are told apart, but Ukrainian and Russian, or English and
+German, are not — with two languages in one script the primary voice reads both.
+
+The primary language matters more than it looks. BB's transcription call carries no
 language, so this setting is the only way the recognizer learns one — and the
 speech filter uses it too: spelling numbers out and expanding abbreviations
 produce English words, so those run for English only. A German summary ending

@@ -36,13 +36,16 @@ Downloads return immediately and continue in the background — poll
 
 ## Settings
 
-`bb plugin config listen` lists them; `bb plugin config listen set <key>
-<value>` changes one. Keys: `language`, `model`, `summarize`,
-`summaryBackend`, `summaryThreadModel`, `summaryThreadProvider`,
-`summaryApiUrl`, `summaryApiModel`, `summaryApiKey`, `summaryPrompt`,
-`voiceModel`, `voiceSid`, `voiceSpeed`.
+Most choices are made on the Listen settings page and stored in the plugin's
+own storage (primary and secondary language, the voice for each, the
+recognition model, the condensing route and its model or endpoint). Only
+`summaryApiKey`, `summaryPrompt` and `voiceSpeed` are BB settings:
+`bb plugin config listen` lists them and `bb plugin config listen set <key>
+<value>` changes one. Each answer is read by the voice whose language matches
+its script (Cyrillic or Latin), so a second language must be written
+differently from the first.
 
-`summaryBackend` is `thread` (a hidden BB thread, no setup, ~8s and real
+The condensing route is `thread` (a hidden BB thread, no setup, ~8s and real
 tokens) or `api` (any OpenAI-compatible `/chat/completions` endpoint — Ollama,
 LM Studio, vLLM, a company proxy — under a second with a small local model).
 `gemma3:4b` is the measured pick; 3B models are fast but invent things, and

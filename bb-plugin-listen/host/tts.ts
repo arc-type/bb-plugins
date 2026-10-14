@@ -45,6 +45,7 @@
  * differs (STT swaps on language change; TTS swaps on model change).
  */
 
+import { ensureCharacterFrontend } from "./onnx-metadata.js";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
@@ -548,12 +549,15 @@ export function buildTtsConfig(model: TtsLocalModelInfo, modelDir: string): any 
 			// (`en_US-lessac-medium.onnx`, etc.). The downloader records the
 			// extracted file name so we don't have to grep for it here.
 			const onnx = findPiperOnnx(modelDir);
+			// Letters-trained voices get no espeak data: without it sherpa
+			// uses the letters frontend that the patch below switches on.
+			if (model.textPhonemes) ensureCharacterFrontend(onnx);
 			return {
 				model: {
 					vits: {
 						model: onnx,
 						tokens,
-						dataDir,
+						dataDir: model.textPhonemes ? "" : dataDir,
 						// Defaults from sherpa-onnx upstream; surface only if we add knobs
 						noiseScale: 0.667,
 						noiseScaleW: 0.8,

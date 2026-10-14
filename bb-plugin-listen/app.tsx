@@ -35,10 +35,31 @@ interface State {
   sttModels: ModelState[];
   voices: VoiceState[];
   config: { language: string; voiceModel: string; voiceSid: number };
-  summarize: boolean;
+  settings: PageSettings;
   transcriptionSetting: string;
   active: boolean;
 }
+
+type PageSettings = {
+  primaryLanguage: string;
+  secondaryLanguage: string;
+  primaryVoice: { id: string; sid: number };
+  secondaryVoice: { id: string; sid: number };
+  model: string;
+  summarize: boolean;
+  summaryBackend: "thread" | "api";
+  summaryThreadProvider: string;
+  summaryThreadModel: string;
+  summaryApiModel: string;
+  summaryApiUrl: string;
+  hasApiKey: boolean;
+};
+
+type Catalog = {
+  providers: { id: string; name: string; available: boolean }[];
+  models: { model: string; name: string; isDefault: boolean }[];
+  automatic: { provider: string; model: string } | null;
+};
 
 /** The whole page's data, refetched whenever the host reports movement. */
 function useListenState() {
@@ -67,19 +88,42 @@ function useListenState() {
 function Section({
   title,
   description,
+  collapsible = false,
   children,
 }: {
   title: string;
   description?: ReactNode;
+  /** Starts collapsed; the title becomes the toggle. */
+  collapsible?: boolean;
   children: ReactNode;
 }) {
+  const [open, setOpen] = useState(!collapsible);
   return (
     <section className="mt-6 first:mt-0">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {description === undefined ? null : (
+      <h3 className="text-sm font-medium">
+        {collapsible ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            className="flex items-center gap-1.5 text-left"
+          >
+            <span
+              aria-hidden
+              className={cn("inline-block text-xs transition-transform", open && "rotate-90")}
+            >
+              ▸
+            </span>
+            {title}
+          </button>
+        ) : (
+          title
+        )}
+      </h3>
+      {open && description !== undefined ? (
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      )}
-      <div className="mt-3">{children}</div>
+      ) : null}
+      {open ? <div className="mt-3">{children}</div> : null}
     </section>
   );
 }
@@ -234,13 +278,17 @@ function SetupCard({
 
 function ModelRow({
   model,
+  active,
   runtimeReady,
+  onUse,
   onDownload,
   onCancel,
   onDelete,
 }: {
   model: ModelState;
+  active: boolean;
   runtimeReady: boolean;
+  onUse: () => void;
   onDownload: () => void;
   onCancel: () => void;
   onDelete: () => void;
@@ -259,6 +307,11 @@ function ModelRow({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <span className="text-sm font-medium">{model.name}</span>
+          {active ? (
+            <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+              in use
+            </span>
+          ) : null}
           {model.recommended ? (
             <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
               recommended
@@ -274,9 +327,16 @@ function ModelRow({
               Cancel
             </Button>
           ) : model.installed ? (
-            <Button variant="ghost" size="sm" onClick={onDelete}>
-              Delete
-            </Button>
+            <>
+              {active ? null : (
+                <Button variant="secondary" size="sm" onClick={onUse}>
+                  Use
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={onDelete}>
+                Delete
+              </Button>
+            </>
           ) : (
             <Button
               variant="secondary"
@@ -328,18 +388,31 @@ function ModelRow({
   );
 }
 
+/** One language slot a voice can be assigned to. */
+type VoiceRole = {
+  slot: "primary" | "secondary";
+  /** The language's name, e.g. "Ukrainian". */
+  label: string;
+  /** Whether this voice says that language at all. */
+  supported: boolean;
+  /** The speaker currently assigned to the slot, when it is this voice. */
+  sid: number | null;
+};
+
 function VoiceRow({
   voice,
-  active,
+  roles,
   runtimeReady,
+  onUse,
   onDownload,
   onCancel,
   onDelete,
   onPreview,
 }: {
   voice: VoiceState;
-  active: boolean;
+  roles: VoiceRole[];
   runtimeReady: boolean;
+  onUse: (slot: VoiceRole["slot"], sid: number) => void;
   onDownload: () => void;
   onCancel: () => void;
   onDelete: () => void;
@@ -351,11 +424,16 @@ function VoiceRow({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <span className="text-sm font-medium">{voice.name}</span>
-          {active ? (
-            <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-              in use
-            </span>
-          ) : null}
+          {roles
+            .filter((role) => role.sid !== null)
+            .map((role) => (
+              <span
+                key={role.slot}
+                className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
+              >
+                {role.label}
+              </span>
+            ))}
           {voice.recommended ? (
             <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
               recommended
@@ -385,6 +463,18 @@ function VoiceRow({
               <Button variant="secondary" size="sm" onClick={() => onPreview(sid)}>
                 Preview
               </Button>
+              {roles
+                .filter((role) => role.supported && role.sid !== sid)
+                .map((role) => (
+                  <Button
+                    key={role.slot}
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onUse(role.slot, sid)}
+                  >
+                    Use for {role.label}
+                  </Button>
+                ))}
               <Button variant="ghost" size="sm" onClick={onDelete}>
                 Delete
               </Button>
@@ -434,6 +524,367 @@ function VoiceRow({
   );
 }
 
+const selectClass =
+  "h-8 w-full max-w-xs rounded border border-border bg-background px-2 text-sm";
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <label className="mt-3 block first:mt-0">
+      <span className="block text-sm">{label}</span>
+      {children}
+      {hint === undefined ? null : (
+        <span className="mt-1 block text-xs text-muted-foreground">{hint}</span>
+      )}
+    </label>
+  );
+}
+
+const LANGUAGES: [string, string][] = [
+  ["en", "English"],
+  ["de", "Deutsch"],
+  ["fr", "Français"],
+  ["es", "Español"],
+  ["it", "Italiano"],
+  ["pt", "Português"],
+  ["nl", "Nederlands"],
+  ["pl", "Polski"],
+  ["uk", "Українська"],
+  ["ru", "Русский"],
+  ["ja", "日本語"],
+  ["zh", "中文"],
+];
+
+function languageName(code: string): string {
+  return LANGUAGES.find(([known]) => known === code)?.[1] ?? code;
+}
+
+function voiceRoles(voice: VoiceState, settings: PageSettings): VoiceRole[] {
+  const slots = [
+    { slot: "primary" as const, language: settings.primaryLanguage, assigned: settings.primaryVoice },
+    ...(settings.secondaryLanguage === ""
+      ? []
+      : [
+          {
+            slot: "secondary" as const,
+            language: settings.secondaryLanguage,
+            assigned: settings.secondaryVoice,
+          },
+        ]),
+  ];
+  return slots.map(({ slot, language, assigned }) => ({
+    slot,
+    label: languageName(language),
+    supported: voice.languages.some(
+      (tag) => tag.split(/[-_]/)[0]!.toLowerCase() === language,
+    ),
+    sid: assigned.id === voice.id ? assigned.sid : null,
+  }));
+}
+
+function LanguageSelect({
+  value,
+  optional = false,
+  onChange,
+}: {
+  value: string;
+  optional?: boolean;
+  onChange: (code: string) => void;
+}) {
+  return (
+    <select className={selectClass} value={value} onChange={(event) => onChange(event.target.value)}>
+      {optional ? <option value="">None</option> : null}
+      {value !== "" && !LANGUAGES.some(([code]) => code === value) ? (
+        <option value={value}>{value}</option>
+      ) : null}
+      {LANGUAGES.map(([code, name]) => (
+        <option key={code} value={code}>
+          {name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+const API_PRESETS = [
+  { label: "Ollama (this computer)", url: "http://127.0.0.1:11434/v1" },
+  { label: "LM Studio (this computer)", url: "http://127.0.0.1:1234/v1" },
+];
+
+/** What a person reads at a glance, before any control. */
+function describeCondensing(settings: PageSettings): string {
+  if (!settings.summarize) return "off — answers are read in full";
+  if (settings.summaryBackend === "api") {
+    return `own endpoint — ${settings.summaryApiModel || "no model set"} at ${settings.summaryApiUrl}`;
+  }
+  const provider = settings.summaryThreadProvider || "any available provider";
+  const model = settings.summaryThreadModel || "small model chosen automatically";
+  return `connected models — ${provider}, ${model}`;
+}
+
+function voiceSummary(state: State): [string, string][] {
+  const { settings } = state;
+  const line = (assigned: { id: string; sid: number }) => {
+    const voice = state.voices.find((entry) => entry.id === assigned.id);
+    return voice === undefined
+      ? `${assigned.id} (not in the catalog)`
+      : `${voice.name}${voice.installed ? "" : " — not installed yet"}`;
+  };
+  return [
+    [`Speaks ${languageName(settings.primaryLanguage)}`, line(settings.primaryVoice)],
+    ...(settings.secondaryLanguage === ""
+      ? []
+      : [[`Speaks ${languageName(settings.secondaryLanguage)}`, line(settings.secondaryVoice)] as [string, string]]),
+  ];
+}
+
+function CurrentSettings({ state }: { state: State }) {
+  const { settings } = state;
+  const model = state.sttModels.find((entry) => entry.id === settings.model);
+  const rows: [string, string][] = [
+    [
+      "Listening",
+      model === undefined
+        ? `${settings.model} (not in the catalog)`
+        : `${model.name}${model.installed ? "" : " — not downloaded yet"}`,
+    ],
+    ...voiceSummary(state),
+    ["Condensing", describeCondensing(settings)],
+  ];
+  return (
+    <section className="mb-6 rounded-md border border-border p-3">
+      <h3 className="text-sm font-medium">Current settings</h3>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function SpokenAnswers({
+  settings,
+  save,
+}: {
+  settings: PageSettings;
+  save: (values: Partial<PageSettings> & { summaryApiKey?: string }) => void;
+}) {
+  const mode = !settings.summarize ? "off" : settings.summaryBackend === "api" ? "api" : "connected";
+  return (
+    <div>
+      <Field
+        label="Condense answers before speaking"
+        hint="A long reply is boiled down to two or three plain sentences first."
+      >
+        <select
+          className={selectClass}
+          value={mode}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (next === "off") save({ summarize: false });
+            else save({ summarize: true, summaryBackend: next === "api" ? "api" : "thread" });
+          }}
+        >
+          <option value="off">Off — read answers in full</option>
+          <option value="connected">Use connected models</option>
+          <option value="api">Use my own endpoint (Ollama, LM Studio…)</option>
+        </select>
+      </Field>
+      {mode === "connected" ? <ConnectedModelPicker settings={settings} save={save} /> : null}
+      {mode === "api" ? <ApiPicker settings={settings} save={save} /> : null}
+    </div>
+  );
+}
+
+function ConnectedModelPicker({
+  settings,
+  save,
+}: {
+  settings: PageSettings;
+  save: (values: Partial<PageSettings>) => void;
+}) {
+  const rpc = useRpc<typeof rpcContract>();
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const providerId = settings.summaryThreadProvider;
+
+  useEffect(() => {
+    let current = true;
+    rpc.call("modelCatalog", { providerId: providerId === "" ? null : providerId }).then(
+      (next) => {
+        if (!current) return;
+        setCatalog(next);
+        setFailure(null);
+      },
+      (cause: unknown) => {
+        if (current) setFailure(cause instanceof Error ? cause.message : String(cause));
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [rpc, providerId]);
+
+  const providers = catalog?.providers.filter((entry) => entry.available) ?? [];
+  const models = catalog?.models ?? [];
+  // A saved choice the catalog no longer lists stays visible instead of
+  // silently showing "Automatic" while a different value is stored.
+  const providerMissing = providerId !== "" && !providers.some((entry) => entry.id === providerId);
+  const modelMissing =
+    settings.summaryThreadModel !== "" &&
+    catalog !== null &&
+    !models.some((entry) => entry.model === settings.summaryThreadModel);
+
+  return (
+    <div className="mt-3">
+      {failure === null ? null : (
+        <p role="alert" className="mb-2 text-sm text-destructive">
+          Could not list providers: {failure}
+        </p>
+      )}
+      <Field label="Provider">
+        <select
+          className={selectClass}
+          value={providerId}
+          // A model belongs to one provider, so changing it clears the model.
+          onChange={(event) =>
+            save({ summaryThreadProvider: event.target.value, summaryThreadModel: "" })
+          }
+        >
+          <option value="">Automatic — first available provider</option>
+          {providerMissing ? <option value={providerId}>{providerId} (unavailable)</option> : null}
+          {providers.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field
+        label="Model"
+        hint={
+          settings.summaryThreadModel === ""
+            ? "Automatic takes the cheapest-looking model of the provider: one whose name contains haiku, mini, flash, nano, lite, small or fast, otherwise the provider's default model. A short summary does not need a big model."
+            : undefined
+        }
+      >
+        <select
+          className={selectClass}
+          value={settings.summaryThreadModel}
+          disabled={providerId === ""}
+          onChange={(event) => save({ summaryThreadModel: event.target.value })}
+        >
+          <option value="">
+            {catalog?.automatic
+              ? `Automatic — now ${catalog.automatic.model} (${catalog.automatic.provider})`
+              : catalog === null
+                ? "Automatic"
+                : "Automatic — no provider found, the project default is used"}
+          </option>
+          {modelMissing ? (
+            <option value={settings.summaryThreadModel}>{settings.summaryThreadModel} (unavailable)</option>
+          ) : null}
+          {models.map((entry) => (
+            <option key={entry.model} value={entry.model}>
+              {entry.name}
+              {entry.isDefault ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+        {providerId === "" ? (
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Choose a provider to pick one of its models yourself.
+          </span>
+        ) : null}
+      </Field>
+    </div>
+  );
+}
+
+function ApiPicker({
+  settings,
+  save,
+}: {
+  settings: PageSettings;
+  save: (values: Partial<PageSettings> & { summaryApiKey?: string }) => void;
+}) {
+  const preset = API_PRESETS.find((entry) => entry.url === settings.summaryApiUrl);
+  const [url, setUrl] = useState(settings.summaryApiUrl);
+  const [model, setModel] = useState(settings.summaryApiModel);
+  const [key, setKey] = useState("");
+  // Text boxes save when left, not on every key, so a half-typed address is
+  // never stored.
+  return (
+    <div className="mt-3">
+      <Field label="Server">
+        <select
+          className={selectClass}
+          value={preset?.url ?? "custom"}
+          onChange={(event) => {
+            if (event.target.value === "custom") return;
+            setUrl(event.target.value);
+            save({ summaryApiUrl: event.target.value });
+          }}
+        >
+          {API_PRESETS.map((entry) => (
+            <option key={entry.url} value={entry.url}>
+              {entry.label}
+            </option>
+          ))}
+          <option value="custom">Other address…</option>
+        </select>
+      </Field>
+      {preset === undefined ? (
+        <Field label="Address" hint="Any OpenAI-compatible endpoint, including the version path (…/v1).">
+          <Input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            onBlur={() => url !== settings.summaryApiUrl && save({ summaryApiUrl: url })}
+          />
+        </Field>
+      ) : null}
+      <Field label="Model name" hint="The name the server knows, e.g. gemma3:4b.">
+        <Input
+          value={model}
+          onChange={(event) => setModel(event.target.value)}
+          onBlur={() => model !== settings.summaryApiModel && save({ summaryApiModel: model })}
+        />
+      </Field>
+      <Field
+        label="API key"
+        hint={
+          settings.hasApiKey
+            ? "A key is saved. Type a new one to replace it. Local servers need none."
+            : "Leave empty for local servers."
+        }
+      >
+        <Input
+          type="password"
+          value={key}
+          autoComplete="off"
+          onChange={(event) => setKey(event.target.value)}
+          onBlur={() => {
+            if (key === "") return;
+            save({ summaryApiKey: key });
+            setKey("");
+          }}
+        />
+      </Field>
+    </div>
+  );
+}
+
 function ListenSettings() {
   const { rpc, state, error, report, refetch } = useListenState();
   const [query, setQuery] = useState("");
@@ -449,6 +900,8 @@ function ListenSettings() {
   const run = (promise: Promise<unknown>) => {
     promise.then(refetch, report);
   };
+  const save = (values: Partial<PageSettings> & { summaryApiKey?: string }) =>
+    rpc.call("updateSettings", values);
   const needle = query.trim().toLowerCase();
   const models =
     needle === ""
@@ -467,6 +920,40 @@ function ListenSettings() {
         </p>
       )}
 
+      <CurrentSettings state={state} />
+
+      <Section
+        title="Languages"
+        description="Answers are read in the language they are written in, with the voice you assign to it below."
+      >
+        <Field
+          label="Primary language"
+          hint="Also the language the microphone listens for."
+        >
+          <LanguageSelect
+            value={state.settings.primaryLanguage}
+            onChange={(code) => run(save({ primaryLanguage: code }))}
+          />
+        </Field>
+        <Field
+          label="Secondary language"
+          hint="Told apart from the primary one by script, so pick one that is written differently — Ukrainian and English, not English and German."
+        >
+          <LanguageSelect
+            value={state.settings.secondaryLanguage}
+            optional
+            onChange={(code) => run(save({ secondaryLanguage: code }))}
+          />
+        </Field>
+      </Section>
+
+      <Section
+        title="Spoken answers"
+        description="What happens to an answer before it is read aloud."
+      >
+        <SpokenAnswers settings={state.settings} save={(values) => run(save(values))} />
+      </Section>
+
       <Section
         title="Setup"
         description="Speech recognition runs entirely on this machine. Nothing is sent anywhere."
@@ -481,14 +968,15 @@ function ListenSettings() {
 
       <Section
         title="Voices"
+        collapsible
         description={
           <>
             Each thread starts silent — press the speaker beside the
             microphone to hear its answers
-            {state.summarize
+            {state.settings.summarize
               ? ", condensed to two or three sentences first."
-              : " in full — turn on “Condense before speaking” above for a short spoken summary instead."}{" "}
-            Install a voice that matches your language.
+              : " in full — turn on condensing under “Spoken answers” above for a short spoken summary instead."}{" "}
+            Install a voice, then press “Use for” the language it should read.
           </>
         }
       >
@@ -497,8 +985,11 @@ function ListenSettings() {
             <VoiceRow
               key={voice.id}
               voice={voice}
-              active={voice.id === state.config.voiceModel}
+              roles={voiceRoles(voice, state.settings)}
               runtimeReady={state.setup.runtime.installed}
+              onUse={(slot, sid) =>
+                run(save(slot === "primary" ? { primaryVoice: { id: voice.id, sid } } : { secondaryVoice: { id: voice.id, sid } }))
+              }
               onDownload={() => run(rpc.call("downloadVoice", { modelId: voice.id }))}
               onCancel={() => run(rpc.call("cancelVoiceDownload", { modelId: voice.id }))}
               onDelete={() => run(rpc.call("deleteVoice", { modelId: voice.id }))}
@@ -516,10 +1007,11 @@ function ListenSettings() {
 
       <Section
         title="Recognition models"
+        collapsible
         description={
           <>
-            Open models from the sherpa-onnx catalog. Set the one you download
-            as the plugin's <em>Recognition model</em> setting above.
+            Open models from the sherpa-onnx catalog. Download one, then press
+            Use to make it the model BB's microphone transcribes with.
           </>
         }
       >
@@ -539,6 +1031,8 @@ function ListenSettings() {
               <ModelRow
                 key={model.id}
                 model={model}
+                active={model.id === state.settings.model}
+                onUse={() => run(save({ model: model.id }))}
                 runtimeReady={state.setup.runtime.installed}
                 onDownload={() => run(rpc.call("downloadModel", { modelId: model.id }))}
                 onCancel={() => run(rpc.call("cancelDownload", { modelId: model.id }))}

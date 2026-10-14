@@ -22,6 +22,9 @@ import {
   voiceStateSchema,
 } from "./contract.js";
 import { shouldSpeak, speaksAloud, spokenText } from "./lib/speech/decide.js";
+import { withLanguageRule } from "./lib/speech/language-rule.js";
+import { chooseVoice, normalizePrefs, prefsSchema, sameScript, type Prefs } from "./lib/prefs.js";
+import { pickModel, type PickedModel } from "./lib/speech/pick-model.js";
 import { condenseWithApi, CondenseApiError } from "./lib/speech/condense-api.js";
 import { previewText } from "./lib/speech/preview-text.js";
 import { isSelectedForVoice, selectCommand, transcriptOrThrow } from "./lib/ai-service.js";
@@ -65,7 +68,25 @@ const speechChoiceSchema = z.object({
   available: z.boolean(),
 });
 
+/** The settings the page shows and edits; the rest stay in BB's generic form. */
+const pageSettingsSchema = prefsSchema.extend({ hasApiKey: z.boolean() });
+
 export const rpcContract = defineRpcContract({
+  /** Change settings from the page; an absent field is left alone. */
+  updateSettings: {
+    input: prefsSchema.extend({ summaryApiKey: z.string() }).partial(),
+    output: z.object({ ok: z.boolean() }),
+  },
+  /** Providers BB can run, and the models of one of them. */
+  modelCatalog: {
+    input: z.object({ providerId: z.string().nullable() }),
+    output: z.object({
+      providers: z.array(z.object({ id: z.string(), name: z.string(), available: z.boolean() })),
+      models: z.array(z.object({ model: z.string(), name: z.string(), isDefault: z.boolean() })),
+      /** What "Automatic" resolves to right now; null when nothing is installed. */
+      automatic: z.object({ provider: z.string(), model: z.string() }).nullable(),
+    }),
+  },
   state: {
     input: z.null(),
     output: z.object({
@@ -73,7 +94,8 @@ export const rpcContract = defineRpcContract({
       sttModels: z.array(modelStateSchema),
       voices: z.array(voiceStateSchema),
       config: hostConfigSchema,
-      summarize: z.boolean(),
+      /** Current values of the settings the page edits; the API key is never sent. */
+      settings: pageSettingsSchema,
       /** The command that points BB's voice input here, assembled for copying. */
       transcriptionSetting: z.string(),
       /** Whether BB's voice task is pinned to this plugin. */
@@ -147,68 +169,15 @@ export const rpcContract = defineRpcContract({
 
 export default async function plugin(bb: BbPluginApi) {
 
-  const settings = bb.settings.define({
-    language: {
-      type: "string",
-      label: "Spoken language",
-      description:
-        "BCP-47 tag such as de or en-GB. Models that detect the language themselves ignore it.",
-      default: "en",
-    },
-    model: {
-      type: "string",
-      label: "Recognition model",
-      description:
-        "The model id BB's microphone transcribes with.",
-      default: "parakeet-v3",
-    },
-    summarize: {
-      type: "boolean",
-      label: "Condense before speaking",
-      description:
-        "Send the answer through a hidden thread first and speak two or three plain sentences instead of the full reply.",
-      default: true,
-    },
-    summaryBackend: {
-      type: "select",
-      label: "Condense with",
-      description:
-        "A hidden BB thread needs no setup and uses a model you already pay for. An API is any OpenAI-compatible endpoint — Ollama, LM Studio, llama.cpp, vLLM, a company proxy — and is usually faster and cheaper.",
-      options: ["thread", "api"],
-      default: "thread",
-    },
-    summaryThreadModel: {
-      type: "string",
-      label: "Condensing model (thread route)",
-      description:
-        "A BB model id for the hidden thread — a small, cheap one is plenty. Empty uses the project default.",
-      default: "",
-    },
-    summaryThreadProvider: {
-      type: "string",
-      label: "Condensing provider (thread route)",
-      description: "The BB provider that owns the model above. Empty uses the project default.",
-      default: "",
-    },
-    summaryApiModel: {
-      type: "string",
-      label: "Condensing model (API route)",
-      description:
-        "The model name the endpoint knows. Kept separate from the thread route's model so switching routes cannot send one a name meant for the other.",
-      default: "gemma3:4b",
-    },
-    summaryApiUrl: {
-      type: "string",
-      label: "API address",
-      description:
-        "API route only. Include the version path. Ollama: http://127.0.0.1:11434/v1 — LM Studio: http://127.0.0.1:1234/v1",
-      default: "http://127.0.0.1:11434/v1",
-    },
+  // Only what has no place on the Listen page lives in BB's generic form: a
+  // secret, a prompt and a number. Everything the page edits with a dropdown
+  // is in `prefs` (lib/prefs.ts), so it is not shown twice.
+  const bbSettings = bb.settings.define({
     summaryApiKey: {
       type: "string",
       label: "API key",
       secret: true,
-      description: "API route only. Leave empty for local servers, which need none.",
+      description: "Only for “Use my own endpoint”. Leave empty for local servers, which need none.",
     },
     summaryPrompt: {
       type: "string",
@@ -218,18 +187,6 @@ export default async function plugin(bb: BbPluginApi) {
         "What the hidden thread is told. The answer is appended below it. Leave empty to use the built-in prompt.",
       default: DEFAULT_SUMMARY_PROMPT,
     },
-    voiceModel: {
-      type: "string",
-      label: "Voice",
-      description: "Voice model id, e.g. piper-de_DE-thorsten-medium-int8.",
-      default: "kitten-nano-en-v0_2",
-    },
-    voiceSid: {
-      type: "number",
-      label: "Voice number",
-      description: "Which speaker inside the voice model to use.",
-      default: 0,
-    },
     voiceSpeed: {
       type: "number",
       label: "Speaking rate",
@@ -237,6 +194,25 @@ export default async function plugin(bb: BbPluginApi) {
       default: 1,
     },
   });
+
+  const PREFS_KEY = "prefs";
+  const readPrefs = async (): Promise<Prefs> =>
+    normalizePrefs(await bb.storage.kv.get<unknown>(PREFS_KEY));
+
+  /** Both stores as one object, so a reader does not care where a value lives. */
+  const settings = {
+    async get() {
+      const [prefs, rest] = await Promise.all([readPrefs(), bbSettings.get()]);
+      return {
+        ...rest,
+        ...prefs,
+        // What the microphone and the one-voice paths (CLI, preview) use.
+        language: prefs.primaryLanguage,
+        voiceModel: prefs.primaryVoice.id,
+        voiceSid: prefs.primaryVoice.sid,
+      };
+    },
+  };
 
   const host = bb.hosts.experimental_client({
     contract: hostContract,
@@ -337,14 +313,12 @@ export default async function plugin(bb: BbPluginApi) {
    */
   async function speechAvailable(): Promise<boolean> {
     try {
-      const [{ setup, voices }, { voiceModel }] = await Promise.all([
-        callHost("state", null),
-        settings.get(),
-      ]);
+      const [{ setup, voices }, prefs] = await Promise.all([callHost("state", null), readPrefs()]);
+      const chosen = [prefs.primaryVoice.id, ...(prefs.secondaryLanguage === "" ? [] : [prefs.secondaryVoice.id])];
       return (
         setup.runtime.installed &&
         setup.node !== null &&
-        voices.some((voice) => voice.id === voiceModel && voice.installed)
+        voices.some((voice) => chosen.includes(voice.id) && voice.installed)
       );
     } catch {
       return false;
@@ -419,6 +393,23 @@ export default async function plugin(bb: BbPluginApi) {
     answer: string,
     source: { projectId: string; prompt: string },
   ): Promise<string | null> {
+    const summary = await condenseUnchecked(answer, {
+      ...source,
+      prompt: withLanguageRule(source.prompt),
+    });
+    // A small model sometimes answers in English whatever it is told. Better
+    // to speak the original than to read a translation with the wrong voice.
+    if (summary !== null && !sameScript(answer, summary)) {
+      bb.log.warn("the condensed answer switched language; speaking the original instead");
+      return null;
+    }
+    return summary;
+  }
+
+  async function condenseUnchecked(
+    answer: string,
+    source: { projectId: string; prompt: string },
+  ): Promise<string | null> {
     const values = await settings.get();
     if (values.summaryBackend === "api") {
       if (values.summaryApiModel.trim() === "") {
@@ -449,12 +440,39 @@ export default async function plugin(bb: BbPluginApi) {
     });
   }
 
+  // Read at most once a minute: answers can finish back to back, and the set
+  // of installed providers does not change that fast.
+  const autoPicks = new Map<string, { at: number; picked: PickedModel | null }>();
+  async function autoPickModel(onlyProvider: string): Promise<PickedModel | null> {
+    const cached = autoPicks.get(onlyProvider);
+    if (cached && Date.now() - cached.at < 60_000) return cached.picked;
+    try {
+      const providers = (await bb.sdk.providers.list()).filter(
+        (entry) => onlyProvider === "" || entry.id === onlyProvider,
+      );
+      const picked = await pickModel(providers, async (providerId) =>
+        (await bb.sdk.providers.models({ providerId })).models,
+      );
+      autoPicks.set(onlyProvider, { at: Date.now(), picked });
+      return picked;
+    } catch (cause) {
+      bb.log.warn(`could not list providers to pick a condensing model: ${String(cause)}`);
+      return null;
+    }
+  }
+
   async function condenseInThread(
     answer: string,
     source: { projectId: string; prompt: string; model: string; providerId: string },
   ): Promise<string | null> {
     let workerId: string | null = null;
     try {
+      // No model chosen: use a small model of the chosen provider, or of any installed one, and only
+      // when none can be found fall through to the project default.
+      if (source.model === "") {
+        const picked = await autoPickModel(source.providerId);
+        if (picked !== null) source = { ...source, ...picked };
+      }
       const worker = await bb.sdk.threads.spawn({
         projectId: source.projectId,
         environment: { type: "project-default" },
@@ -510,13 +528,18 @@ export default async function plugin(bb: BbPluginApi) {
                   : values.summaryPrompt,
             })
           : null;
-        const spoken = spokenText(summary, answer, values.language);
+        // The voice follows the language of what is said, not of the setting:
+        // an English summary of a Ukrainian thread is read by the English voice.
+        const prefs = await readPrefs();
+        const choice = chooseVoice(prefs, summary ?? answer);
+        const spoken = spokenText(summary, answer, choice.language);
         if (spoken === null) return;
 
         const audio = await callHost("speak", {
           text: spoken.text,
-          modelId: null,
-          sid: null,
+          modelId: choice.voice.id,
+          sid: choice.voice.sid,
+          language: choice.language,
         });
         pending = {
           id: randomUUID(),
@@ -543,7 +566,10 @@ export default async function plugin(bb: BbPluginApi) {
         ...state,
         transcriptionSetting: selectCommand(SERVICE_ID),
         active: isSelectedForVoice(config.selections.voice, bb.pluginId, SERVICE_ID),
-        summarize: values.summarize,
+        settings: {
+          ...(await readPrefs()),
+          hasApiKey: (values.summaryApiKey ?? "") !== "",
+        },
       };
     },
     installRuntime: async () => callHost("installRuntime", null),
@@ -564,6 +590,53 @@ export default async function plugin(bb: BbPluginApi) {
         sid,
       });
       return { wavBase64: audio.wavBase64 };
+    },
+    updateSettings: async ({ summaryApiKey, ...changes }) => {
+      if (summaryApiKey !== undefined) {
+        await bbSettings.experimental_set({ summaryApiKey });
+      }
+      if (Object.keys(changes).length > 0) {
+        await bb.storage.kv.set(PREFS_KEY, { ...(await readPrefs()), ...changes });
+      }
+      await pushConfig().catch((cause) => {
+        bb.log.warn(`could not send changed settings to the host: ${String(cause)}`);
+      });
+      bb.realtime.publish(CHANGED, {});
+      return { ok: true };
+    },
+    modelCatalog: async ({ providerId }) => {
+      const providers = await bb.sdk.providers.list();
+      const models =
+        providerId === null ? [] : (await bb.sdk.providers.models({ providerId })).models;
+      const picked = await autoPickModel(providerId ?? "");
+      let automatic: { provider: string; model: string } | null = null;
+      if (picked !== null) {
+        const pickedModels =
+          picked.providerId === providerId
+            ? models
+            : (await bb.sdk.providers.models({ providerId: picked.providerId })).models;
+        automatic = {
+          provider:
+            providers.find((entry) => entry.id === picked.providerId)?.displayName ??
+            picked.providerId,
+          model:
+            pickedModels.find((entry) => entry.model === picked.model)?.displayName ??
+            picked.model,
+        };
+      }
+      return {
+        automatic,
+        providers: providers.map((entry) => ({
+          id: entry.id,
+          name: entry.displayName,
+          available: entry.available,
+        })),
+        models: models.map((entry) => ({
+          model: entry.model,
+          name: entry.displayName,
+          isDefault: entry.isDefault,
+        })),
+      };
     },
     threadSpeech: async ({ threadId }) => describeThreadSpeech(threadId),
     setThreadSpeech: async ({ threadId, enabled }) => {
@@ -825,7 +898,7 @@ export default async function plugin(bb: BbPluginApi) {
   // Language and voice live in two places: BB's settings and the host's own
   // config file. Without this, changing a setting left the host speaking the
   // old language until the next plugin reload.
-  settings.onChange(() => {
+  bbSettings.onChange(() => {
     void pushConfig().catch((cause) => {
       bb.log.warn(`could not send changed settings to the host: ${String(cause)}`);
     });

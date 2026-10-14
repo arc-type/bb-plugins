@@ -135,6 +135,8 @@ export const hostContract = defineRpcContract({
       /** Overrides the configured voice, for the settings page's preview. */
       modelId: z.string().nullable(),
       sid: z.number().nullable(),
+      /** The language being spoken; the voice is refused if it cannot say it. */
+      language: z.string().optional(),
     }),
     output: z.object({
       wavBase64: z.string(),
