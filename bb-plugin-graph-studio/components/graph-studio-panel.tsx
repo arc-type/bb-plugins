@@ -8,7 +8,16 @@ import {
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import type { NodeRunDto, RunDto, rpcContract } from "../server";
-import { KIND_LABEL, START_NODE, edgeKey, fanOutProgress, type Graph } from "../lib/graph";
+import {
+  KIND_LABEL,
+  START_NODE,
+  edgeKey,
+  fanOutProgress,
+  isDynamic,
+  type Graph,
+  type GraphResolver,
+} from "../lib/graph";
+import { reachedNodes, runResolver, runStatuses, type RunStatuses } from "../lib/run-status";
 import { describeCost, runCommand, runTotal } from "../lib/describe";
 import { activityByNode, durationByNode } from "../lib/activity";
 import { suggestGraphs } from "../lib/suggest";
@@ -35,22 +44,23 @@ export const RUN_STATUS: Record<RunDto["status"], string> = {
   stopped: "stopped",
 };
 
-/** Latest attempt per node decides the colour on the canvas. */
-export function statusesFromRun(run: RunDto | null): Record<string, NodeVisualStatus> {
-  if (!run) return {};
-  const out: Record<string, NodeVisualStatus> = {};
-  for (const nodeRun of run.nodeRuns) {
-    out[nodeRun.nodeId] =
-      nodeRun.status === "running"
-        ? "running"
-        : nodeRun.status === "failed"
-          ? "failed"
-          : nodeRun.status === "done"
-            ? "done"
-            : "idle";
-  }
-  if (run.pendingQuestion) out[run.pendingQuestion.nodeId] = "waiting";
-  return out;
+/**
+ * Every node's colour on the canvas and what its card says, for one run.
+ * The rules live in lib/run-status.ts; this is the one call every surface
+ * that draws a run goes through, with the run's own embedded graphs first and
+ * the caller's library after them.
+ */
+export function runView(run: RunDto | null, library?: GraphResolver): RunStatuses {
+  if (!run) return { statuses: {}, texts: {} };
+  return runStatuses(run, runResolver(run, library));
+}
+
+/** The statuses alone — see `runView`. */
+export function statusesFromRun(
+  run: RunDto | null,
+  library?: GraphResolver,
+): Record<string, NodeVisualStatus> {
+  return runView(run, library).statuses;
 }
 
 /**
@@ -83,9 +93,17 @@ export function useNow(active: boolean): number {
  * source needs an attempt too, so a diamond reaching its join over one
  * branch does not light the other branch's way in.
  */
-export function travelledEdges(run: RunDto | null): Set<string> {
+export function travelledEdges(
+  run: RunDto | null,
+  /**
+   * Nodes the run reached that have no attempt row — an answered approval, a
+   * note it passed, a subgraph that ran (`reachedNodes`). Without them the
+   * edge into a checkpoint stayed dark after it was answered.
+   */
+  reached: ReadonlySet<string> = new Set(),
+): Set<string> {
   if (!run) return new Set();
-  const attempted = new Set(run.nodeRuns.map((nodeRun) => nodeRun.nodeId));
+  const attempted = new Set([...run.nodeRuns.map((nodeRun) => nodeRun.nodeId), ...reached]);
   const keys = new Set<string>();
   for (const edge of run.graph.edges) {
     if (!attempted.has(edge.to)) continue;
@@ -401,18 +419,8 @@ function RunView({
   const label = (id: string) =>
     run.graph.nodes.find((node) => node.id === id)?.label ?? id;
   const branches = useMemo(() => fanOutProgress(run.graph, run.state), [run]);
-  const statuses = useMemo(() => {
-    const base = statusesFromRun(run);
-    // A fanned-out node has one node_run row per branch, and the last row read
-    // wins — so a node with three of seven branches finished can render as
-    // "done". The branch count knows better.
-    for (const [nodeId, progress] of Object.entries(branches)) {
-      if (base[nodeId] === "failed") continue;
-      base[nodeId] = progress.done < progress.total ? "running" : "done";
-    }
-    return base;
-  }, [run, branches]);
-  const travelled = useMemo(() => travelledEdges(run), [run]);
+  const { statuses, texts } = useMemo(() => runView(run, resolveGraph), [run, resolveGraph]);
+  const travelled = useMemo(() => travelledEdges(run, reachedNodes(statuses)), [run, statuses]);
   const live = useMemo(() => liveEdges(run), [run]);
   const activity = useMemo(() => activityByNode(run.nodeRuns), [run]);
   const durations = useMemo(() => durationByNode(run.nodeRuns), [run]);
@@ -513,6 +521,8 @@ function RunView({
     <GraphCanvas
       graph={run.graph}
       statuses={statuses}
+      statusTexts={texts}
+      hideUnreachedFallbacks
       branches={branches}
       selectedId={selected}
       onSelect={selectNode}
@@ -688,11 +698,15 @@ function Library({
   onDismissExport: () => void;
 }) {
   const [importText, setImportText] = useState("");
-  const active = graphId || graphs[0]?.id || "";
+  // Generated graphs stay out of the default choice and the suggestions; the
+  // picker shows them behind its own switch, and a run of one still opens
+  // from the run list below.
+  const listed = useMemo(() => graphs.filter((graph) => !isDynamic(graph)), [graphs]);
+  const active = graphId || listed[0]?.id || "";
   const preview = graphs.find((graph) => graph.id === active) ?? null;
   const suggestions = useMemo(
-    () => suggestGraphs(graphs, task).filter((graph) => graph.id !== active),
-    [graphs, task, active],
+    () => suggestGraphs(listed, task).filter((graph) => graph.id !== active),
+    [listed, task, active],
   );
   // Runs that want attention come first: a run waiting for an answer that
   // sits at the bottom of a list is a run that quietly stops.

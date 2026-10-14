@@ -13,8 +13,10 @@
 import { groupedLibrary, templatePattern } from "./templates";
 import { elapsedLabel } from "./activity";
 import {
+  continuedNode,
   fanOutKey,
   handoffKey,
+  isFallback,
   nodeExecution,
   type Graph,
   type GraphEdge,
@@ -156,9 +158,9 @@ function describeNode(node: GraphNode): string {
     (node.fields.length > 0
       ? `  fields: ${node.fields
           .map((field) =>
-            field.type === "enum"
+            (field.type === "enum"
               ? `${field.name}(${field.options.join("|")})`
-              : `${field.name}:${field.type}`,
+              : `${field.name}:${field.type}`) + (field.optional ? "?" : ""),
           )
           .join(", ")}`
       : "") +
@@ -171,6 +173,14 @@ function describeNode(node: GraphNode): string {
     // Whether a failure here ends the run is the difference between a graph
     // that stops and one that has a fallback; the edges alone do not say it.
     (node.onError === "route" ? "  routes its failure" : "") +
+    // Which conversation a step lands in decides what its worker already
+    // knows; two agent nodes look alike in the listing otherwise.
+    (continuedNode(node) !== ""
+      ? continuedNode(node) === node.id
+        ? "  continues its own thread"
+        : `  continues ${continuedNode(node)}'s thread`
+      : "") +
+    (isFallback(node) ? "  fallback path" : "") +
     // Two nodes of the same kind behaving differently is only explicable if
     // the listing says which one runs on its own model.
     (execution ? `  model: ${execution.providerId}/${execution.model}` : "")
@@ -210,6 +220,7 @@ export function describeGraph(graph: Graph, problems: GraphProblem[]): string {
   return [
     `${graph.name} (${graph.id})`,
     graph.description,
+    ...((graph.tags ?? []).length > 0 ? [`Tags: ${graph.tags.join(", ")}`] : []),
     // The one line that answers "is this the graph for what I have in front
     // of me" — the description says how the graph works, not what it is fed.
     ...(graph.example ? [`Example: ${runCommand(graph)}`] : []),

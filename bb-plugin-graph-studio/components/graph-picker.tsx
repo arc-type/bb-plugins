@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import type { Graph } from "@/lib/graph";
+import { isDynamic, type Graph } from "@/lib/graph";
 import { groupedLibrary, searchGraphs, templatePattern } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 
@@ -32,14 +32,22 @@ export function GraphPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
+  /**
+   * Generated graphs (tag `dynamic`) are left out until asked for — a
+   * compiled run brings a graph per track, and listed among "Your graphs"
+   * they drowned the ones somebody wrote. Behind one switch rather than gone:
+   * starting a generated graph from here is legitimate, just not the usual.
+   */
+  const [generated, setGenerated] = useState(false);
+  const generatedCount = useMemo(() => graphs.filter(isDynamic).length, [graphs]);
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const selected = graphs.find((graph) => graph.id === value) ?? null;
   const sections = useMemo(
-    () => groupedLibrary(searchGraphs(graphs, term), "section"),
-    [graphs, term],
+    () => groupedLibrary(searchGraphs(graphs, term, { generated }), "section"),
+    [graphs, term, generated],
   );
   // The keyboard moves through one flat run of graphs; the headings are not
   // stops. Built from the same sections the eye reads, so "third from the top"
@@ -57,6 +65,9 @@ export function GraphPicker({
   // pick, and starting elsewhere loses the place.
   useEffect(() => {
     if (!open) return;
+    // A generated graph that is already chosen must be findable in the list
+    // it was chosen from.
+    if (selected && isDynamic(selected)) setGenerated(true);
     const at = flat.findIndex((graph) => graph.id === value);
     setActiveIndex(at === -1 ? 0 : at);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -231,6 +242,17 @@ export function GraphPicker({
               ))
             )}
           </div>
+          {generatedCount > 0 ? (
+            <label className="flex cursor-pointer items-center gap-2 border-t border-border px-2 py-1.5 text-[11px] text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={generated}
+                onChange={(event) => setGenerated(event.target.checked)}
+                aria-label="Show generated graphs"
+              />
+              Show generated graphs ({generatedCount})
+            </label>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -427,3 +427,37 @@ describe("describeAttempt", () => {
     ).toBe("  skipped  write (attempt 1)");
   });
 });
+
+describe("describeGraph on the newer node settings", () => {
+  const graph = graphSchema.parse({
+    id: "newer",
+    name: "Newer",
+    tags: ["dynamic"],
+    nodes: [
+      { id: "impl", label: "Implement", prompt: "x", continueThread: "impl", fields: [{ name: "question", optional: true }] },
+      { id: "fix", label: "Fix", prompt: "x", continueThread: "impl", path: "fallback" },
+      { id: "plain", label: "Plain", prompt: "x", fields: [{ name: "summary" }] },
+    ],
+    edges: [
+      { from: "__start__", to: "impl" },
+      { from: "impl", to: "fix" },
+      { from: "fix", to: "plain" },
+      { from: "plain", to: "__end__" },
+    ],
+  });
+  const lines = describeGraph(graph, []).split("\n");
+  const line = (id: string) => lines.find((entry) => entry.includes(`] ${id} —`))!;
+
+  it("says which thread a node continues, that it is a fallback, and which fields are optional", () => {
+    expect(line("impl")).toContain("continues its own thread");
+    expect(line("impl")).toContain("question:string?");
+    expect(line("fix")).toContain("continues impl's thread");
+    expect(line("fix")).toContain("fallback path");
+    expect(lines).toContain("Tags: dynamic");
+  });
+
+  it("says none of it for a node on the defaults", () => {
+    expect(line("plain")).not.toMatch(/continues|fallback|\?/);
+    expect(describeGraph({ ...graph, tags: [] }, [])).not.toContain("Tags:");
+  });
+});

@@ -44,6 +44,73 @@ describe("graph file", () => {
     expect(graph.nodes[0]!.skills).toEqual([]);
   });
 
+  it("round-trips tags, worker visibility, continued threads, paths and optional fields", () => {
+    const graph = graphSchema.parse({
+      id: "with-new-fields",
+      name: "With new fields",
+      tags: ["dynamic", "ticket:demo-1"],
+      workerVisibility: "hidden",
+      nodes: [
+        {
+          id: "a",
+          label: "A",
+          prompt: "x",
+          continueThread: "a",
+          fields: [{ name: "question", optional: true }],
+        },
+        { id: "b", label: "B", kind: "human", path: "fallback" },
+      ],
+      edges: [
+        { from: "__start__", to: "a" },
+        { from: "a", to: "b" },
+        { from: "b", to: "__end__" },
+      ],
+    });
+    const file = JSON.parse(toGraphFile(graph));
+    expect(file.graph.tags).toEqual(["dynamic", "ticket:demo-1"]);
+    expect(file.graph.workerVisibility).toBe("hidden");
+    expect(file.graph.nodes[0].continueThread).toBe("a");
+    expect(file.graph.nodes[0].fields[0].optional).toBe(true);
+    expect(file.graph.nodes[1].path).toBe("fallback");
+    const restored = fromGraphFile(toGraphFile(graph));
+    expect(restored.tags).toEqual(graph.tags);
+    expect(restored.workerVisibility).toBe("hidden");
+    expect(restored.nodes).toEqual(graph.nodes);
+  });
+
+  it("leaves the new fields out of a file when they hold their defaults", () => {
+    const file = JSON.parse(toGraphFile(templateById("routing")!));
+    expect(file.graph).not.toHaveProperty("tags");
+    expect(file.graph).not.toHaveProperty("workerVisibility");
+    for (const node of file.graph.nodes) {
+      expect(node).not.toHaveProperty("continueThread");
+      expect(node).not.toHaveProperty("path");
+      for (const declared of node.fields ?? []) expect(declared).not.toHaveProperty("optional");
+    }
+  });
+
+  it("reads a graph written before the new fields existed with today's behaviour", () => {
+    const graph = fromGraphFile(
+      JSON.stringify({
+        id: "old",
+        name: "Old",
+        nodes: [{ id: "a", label: "A", prompt: "x", fields: [{ name: "f" }] }],
+        edges: [{ from: "__start__", to: "a" }, { from: "a", to: "__end__" }],
+      }),
+    );
+    expect(graph.tags).toEqual([]);
+    expect(graph.workerVisibility).toBe("visible");
+    expect(graph.nodes[0]!.continueThread).toBe("");
+    expect(graph.nodes[0]!.path).toBe("main");
+    expect(graph.nodes[0]!.fields[0]!.optional).toBe(false);
+  });
+
+  it("refuses a tag that is not a lowercase label", () => {
+    expect(() =>
+      fromGraphFile(JSON.stringify({ id: "t", name: "T", tags: ["Not OK"], nodes: [{ id: "a", label: "A" }], edges: [] })),
+    ).toThrow(/tag/);
+  });
+
   it("refuses a file from a newer format version", () => {
     const future = JSON.stringify({ version: GRAPH_FILE_VERSION + 1, graph: {} });
     expect(() => fromGraphFile(future)).toThrow(/version/);

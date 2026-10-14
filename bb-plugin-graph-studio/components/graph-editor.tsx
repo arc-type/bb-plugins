@@ -16,6 +16,7 @@ import {
   CONDITION_OPS,
   END_NODE,
   FIELD_TYPES,
+  OPTIONAL_FIELD_TYPES,
   KIND_LABEL,
   NODE_COLORS,
   NODE_KINDS,
@@ -28,6 +29,7 @@ import {
   nodeExecution,
   nodeSchema,
   spawnsThread,
+  doesWork,
   validateGraph,
   type Condition,
   type Graph,
@@ -62,6 +64,7 @@ const KIND_ICONS: Record<(typeof NODE_KINDS)[number], IconName> = {
   note: "Edit",
   subgraph: "Workflow",
   member: "Users",
+  command: "Terminal",
 };
 
 const KIND_LABELS: Record<(typeof NODE_KINDS)[number], string> = {
@@ -71,6 +74,7 @@ const KIND_LABELS: Record<(typeof NODE_KINDS)[number], string> = {
   note: "Note (does nothing)",
   subgraph: "Subgraph (embeds another graph)",
   member: "Crew member (a persistent member's thread does the step)",
+  command: "Command (runs a shell command, no thread)",
 };
 
 /**
@@ -180,6 +184,8 @@ function emptyGraph(): Graph {
     maxSteps: 60,
     maxFanOut: 12,
     positions: {},
+    tags: [],
+    workerVisibility: "visible",
     createdAt: 0,
     updatedAt: 0,
   };
@@ -348,7 +354,7 @@ function NodeExecutionSection({
           ) : null}
         </div>
 
-        {node.kind === "agent" || node.kind === "dialog" || node.kind === "member" ? (
+        {doesWork(node) ? (
           <label className="space-y-1">
             <span className="block text-[11px] text-muted-foreground">
               When the attempts are used up
@@ -437,7 +443,7 @@ function NodeExecutionSection({
           ) : null}
         </div>
 
-        {node.kind === "agent" || node.kind === "dialog" || node.kind === "member" ? (
+        {doesWork(node) ? (
           <label className="space-y-1">
             <span className="block text-[11px] text-muted-foreground">
               When the attempts are used up
@@ -1396,6 +1402,21 @@ export function GraphEditor({
                     ))}
                   </div>
                 </div>
+                <label className="flex items-start gap-2 text-[11px] text-muted-foreground sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={node.path === "fallback"}
+                    onChange={(event) =>
+                      patchNode(index, { path: event.target.checked ? "fallback" : "main" })
+                    }
+                    aria-label={`Node ${index + 1} is a fallback path`}
+                  />
+                  <span>
+                    Fallback path — a contingency the run usually does not
+                    take. Drawn small, and hidden in a run until reached.
+                  </span>
+                </label>
           </div>
                 {/* Five kinds as five buttons: an option that is a whole
                     sentence was the only way to say what each does, and a
@@ -1538,6 +1559,64 @@ export function GraphEditor({
               ) : null}
             </>,
           )
+        : node.kind === "command"
+        ? section(
+            "Command",
+            node.command.trim() === "" ? "empty" : node.command.trim().split("\n")[0]!.slice(0, 48),
+            <>
+              <label className="block space-y-1">
+                <span className="text-[11px] text-muted-foreground">
+                  Shell command, run with bash -lc — {"{{node_id.field}}"} is
+                  filled in as one quoted word. The last JSON object on stdout
+                  fills the result fields.
+                </span>
+                <textarea
+                  value={node.command}
+                  onChange={(event) => patchNode(index, { command: event.target.value })}
+                  rows={3}
+                  className="w-full rounded-md border border-input bg-transparent px-2 py-1.5 font-mono text-xs"
+                  aria-label={`Command of node ${index + 1}`}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[11px] text-muted-foreground">
+                  Working directory — empty runs in the run's environment
+                </span>
+                <Input
+                  value={node.cwd}
+                  onChange={(event) => patchNode(index, { cwd: event.target.value })}
+                  aria-label={`Working directory of node ${index + 1}`}
+                />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={node.failOnExit}
+                    onChange={(event) => patchNode(index, { failOnExit: event.target.checked })}
+                    aria-label={`Non-zero exit fails node ${index + 1}`}
+                  />
+                  A non-zero exit fails the attempt
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">Timeout, minutes</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={240}
+                    value={node.timeoutMinutes}
+                    onChange={(event) =>
+                      patchNode(index, {
+                        timeoutMinutes: Number.parseInt(event.target.value, 10) || 1,
+                      })
+                    }
+                    aria-label={`Timeout of node ${index + 1}`}
+                    className="h-8 px-2 text-xs"
+                  />
+                </label>
+              </div>
+            </>,
+          )
         : section(
             node.kind === "note" ? "Note" : "Task",
             node.prompt.trim() === "" ? "empty" : `${node.prompt.trim().split("\n")[0]!.slice(0, 48)}`,
@@ -1558,6 +1637,43 @@ export function GraphEditor({
                   aria-label={`Prompt of node ${index + 1}`}
                 />
               </label>
+              {spawnsThread(node) ? (
+                <label className="block space-y-1">
+                  <span className="text-[11px] text-muted-foreground">
+                    Working directory — empty shares the run's environment;
+                    a path gives the worker its own (e.g. a git worktree)
+                  </span>
+                  <Input
+                    value={node.cwd}
+                    onChange={(event) => patchNode(index, { cwd: event.target.value })}
+                    aria-label={`Working directory of node ${index + 1}`}
+                  />
+                </label>
+              ) : null}
+              {node.kind === "agent" ? (
+                <label className="block space-y-1">
+                  <span className="text-[11px] text-muted-foreground">
+                    Thread — a fresh worker per visit, or continue one that
+                    already knows the work (once it exists in the run)
+                  </span>
+                  <select
+                    value={node.continueThread ?? ""}
+                    onChange={(event) => patchNode(index, { continueThread: event.target.value })}
+                    aria-label={`Thread of node ${index + 1}`}
+                    className={FIELD_CONTROL}
+                  >
+                    <option value="">Fresh thread</option>
+                    <option value={node.id}>Its own thread, on every later visit</option>
+                    {draft.nodes
+                      .filter((entry) => entry.id !== node.id && spawnsThread(entry))
+                      .map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          Continue “{entry.label}”
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
             </>,
           )}
 
@@ -1680,7 +1796,7 @@ export function GraphEditor({
           )
         : null}
 
-      {node.kind === "agent" || node.kind === "member"
+      {node.kind === "agent" || node.kind === "member" || node.kind === "command"
         ? section(
             "Result fields",
             node.fields.length > 0 ? `${node.fields.length}` : "none",
@@ -1774,6 +1890,20 @@ export function GraphEditor({
                             className="h-7 flex-1"
                           />
                         )}
+                        {OPTIONAL_FIELD_TYPES.includes(declared.type) || declared.optional ? (
+                          // Offered where an empty value means "not given";
+                          // shown on any other type only once set, so the
+                          // validator's complaint has a switch to undo it.
+                          <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={declared.optional ?? false}
+                              onChange={(event) => patchField({ optional: event.target.checked })}
+                              aria-label={`Field ${fieldIndex + 1} in node ${index + 1} is optional`}
+                            />
+                            optional
+                          </label>
+                        ) : null}
                         <Button
                           size="sm"
                           variant="ghost"

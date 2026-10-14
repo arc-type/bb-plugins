@@ -1,0 +1,384 @@
+{
+  "ticket": "ARC-4",
+  "title": "Voice input for Journal Highlights (web2)",
+  "maxParallel": 3,
+  "dryRun": false,
+  "groups": [
+    {
+      "letter": "A",
+      "tracks": [
+        {
+          "key": "ARC-5",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/server/groq/**",
+            "apps/web2/.env.example",
+            "apps/web2/turbo.json",
+            "apps/web2/docs/platform/deployment.md"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "security"
+          ],
+          "extraSteps": [
+            "Before editing apps/web2/turbo.json, resolve the installed turbo package from apps/web2 (`node -p \"require.resolve('turbo/package.json')\"`) and read its docs/README.md plus the env / passThroughEnv pages",
+            "Run the unit tests for src/server/groq with GROQ_API_KEY unset in the shell and confirm importing the module does not throw (lazy env)"
+          ],
+          "humanGates": [
+            "Any change to turbo.json beyond adding GROQ_API_KEY to the app's start.passThroughEnv (the root turbo.json, other tasks and existing entries stay as they are)",
+            "Adding any package, including the Groq SDK"
+          ],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "Groq Whisper client, env, docs",
+          "spec": "(The sub-task description of ARC-5 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-6",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/server/journal/voice-highlights.ts",
+            "apps/web2/src/server/journal/__tests__/voice-highlights.test.ts"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability"
+          ],
+          "extraSteps": [],
+          "humanGates": [],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "Highlights extraction prompt",
+          "spec": "(The sub-task description of ARC-6 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-7",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/server/ai-usage/actions.ts",
+            "apps/web2/src/server/journal/extract-highlights.ts",
+            "apps/web2/src/server/journal/__tests__/extract-highlights.test.ts",
+            "apps/web2/docs/planning/weekly-summary-generation.md"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "security"
+          ],
+          "extraSteps": [],
+          "humanGates": [
+            "Any change to the shared createMessage adapter or the AI usage accounting implementation"
+          ],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "Highlights extraction service",
+          "spec": "(The sub-task description of ARC-7 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-8",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/features/journal/components/voice-input.types.ts",
+            "apps/web2/src/features/journal/components/voice-input-status.tsx",
+            "apps/web2/src/features/journal/components/voice-input-controls.tsx",
+            "apps/web2/src/features/journal/components/daily-entries-card.tsx",
+            "apps/web2/src/features/journal/components/daily-entries-card.voice.stories.tsx",
+            "apps/web2/src/features/journal/components/daily-entries-card.voice-demo.stories.tsx",
+            "apps/web2/src/features/journal/components/voice-input.mock.ts",
+            "apps/web2/src/features/journal/components/__tests__/daily-entries-card.voice.test.tsx"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "a11y"
+          ],
+          "extraSteps": [
+            "Follow skill `arc-figma-to-storybook` steps 5-7 against the Step 0 Figma node-to-component/token map: one story per Figma state 01-09, 12 and 14, and one per new error (too-large, unsupported, unavailable), each with a play function where the state has interaction",
+            "Run the new stories with `nice -n 10 bunx turbo run test --filter=@arctype/web2 -- --run --project storybook --maxWorkers=2` before committing"
+          ],
+          "humanGates": [
+            "Any user-facing copy other than the existing Figma copy and the three approved error strings",
+            "A Figma state (01-09, 12, 14) with no usable Figma reference: ask for the node instead of inventing the layout"
+          ],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "Voice UI states, card behaviour, stories",
+          "spec": "(The sub-task description of ARC-8 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-9",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/features/journal/hooks/use-audio-recorder.ts",
+            "apps/web2/src/features/journal/hooks/__tests__/use-audio-recorder.test.tsx"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "performance"
+          ],
+          "extraSteps": [],
+          "humanGates": [],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "useAudioRecorder browser hook",
+          "spec": "(The sub-task description of ARC-9 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-10",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/features/journal/hooks/use-journal-week.ts",
+            "apps/web2/src/features/journal/hooks/__tests__/use-journal-week.test.ts"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability"
+          ],
+          "extraSteps": [],
+          "humanGates": [],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "useJournalWeek explicit reload()",
+          "spec": "(The sub-task description of ARC-10 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-11",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/features/journal/api/journal-api.ts",
+            "apps/web2/src/features/journal/api/voice-highlights.schemas.ts",
+            "apps/web2/src/features/journal/api/post-voice-highlights.ts",
+            "apps/web2/src/features/journal/api/__tests__/post-voice-highlights.test.ts",
+            "apps/web2/src/features/journal/api/mock-journal-api.ts",
+            "apps/web2/src/features/journal/api/__tests__/mock-journal-api.test.ts"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "security"
+          ],
+          "extraSteps": [],
+          "humanGates": [],
+          "maxRounds": 3,
+          "commitType": "feat",
+          "title": "Upload types, fetch wrapper, schemas, mock",
+          "spec": "(The sub-task description of ARC-11 goes here verbatim; shortened in this fixture.)"
+        }
+      ]
+    },
+    {
+      "letter": "B",
+      "tracks": [
+        {
+          "key": "ARC-12",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/app/api/v1/journal/days/[day]/voice-highlights/route.ts",
+            "apps/web2/src/app/api/v1/journal/__tests__/voice-highlights.test.ts",
+            "apps/web2/src/features/journal/api/journal.schemas.ts",
+            "apps/web2/src/server/api/responses.ts",
+            "apps/web2/openapi/document.ts",
+            "apps/web2/openapi/__tests__/document.test.ts",
+            "apps/web2/openapi/openapi.json",
+            "apps/web2/docs/architecture/api-layer.md",
+            "apps/web2/docs/task-context-map.md"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "security",
+            "data-migration"
+          ],
+          "extraSteps": [
+            "Before writing the route, read the installed Next.js Route Handler and route segment config (maxDuration) guides under apps/web2/node_modules/next/dist/docs",
+            "Run `bunx turbo run api:openapi --filter=@arctype/web2` and commit the regenerated apps/web2/openapi/openapi.json in the same commit; a second run leaves `git diff --exit-code apps/web2/openapi/openapi.json` clean"
+          ],
+          "humanGates": [
+            "A PLANNED_OPERATIONS exemption, or a change to an existing problem code, title or response shape",
+            "A change to CORS behaviour itself (this track only corrects the CORS paragraph in api-layer.md)"
+          ],
+          "maxRounds": 4,
+          "commitType": "feat",
+          "title": "REST route, problem codes, OpenAPI, API docs",
+          "spec": "(The sub-task description of ARC-12 goes here verbatim; shortened in this fixture.)"
+        },
+        {
+          "key": "ARC-13",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/features/journal/hooks/use-voice-input.ts",
+            "apps/web2/src/features/journal/hooks/__tests__/use-voice-input.test.tsx"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability"
+          ],
+          "extraSteps": [
+            "Read the plan of record's 'State and event model' and 'Response and recovery mapping' sections and implement every mapping row; the tests name each row"
+          ],
+          "humanGates": [
+            "A VoiceHighlightsResult outcome that the plan's mapping table does not cover, or a row that contradicts the ARC-11 result union"
+          ],
+          "maxRounds": 4,
+          "commitType": "feat",
+          "title": "useVoiceInput hook and save recovery",
+          "spec": "(The sub-task description of ARC-13 goes here verbatim; shortened in this fixture.)"
+        }
+      ]
+    },
+    {
+      "letter": "C",
+      "tracks": [
+        {
+          "key": "ARC-14",
+          "app": "web2",
+          "files": [
+            "apps/web2/src/app/(app)/journal/_components/journal-screen.tsx",
+            "apps/web2/src/app/(app)/journal/_components/__tests__/journal-screen.test.tsx",
+            "apps/web2/src/features/journal/components/journal.tsx",
+            "apps/web2/src/features/journal/components/daily-journal-view.tsx",
+            "apps/web2/src/features/journal/components/daily-timeline.tsx",
+            "apps/web2/src/features/journal/components/journal.stories.tsx",
+            "apps/web2/src/features/journal/components/daily-navigation.stories.tsx",
+            "apps/web2/src/features/journal/components/__tests__/daily-journal-view.voice.test.tsx",
+            "apps/web2/src/features/journal/components/__tests__/daily-timeline.voice.test.tsx",
+            "apps/web2/docs/architecture/state-management.md",
+            "apps/web2/docs/task-context-map.md",
+            "apps/web2/docs/planning/journal-backend.md"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness",
+            "readability",
+            "a11y"
+          ],
+          "extraSteps": [
+            "Run the updated Journal and Daily navigation stories with `nice -n 10 bunx turbo run test --filter=@arctype/web2 -- --run --project storybook --maxWorkers=2` before committing"
+          ],
+          "humanGates": [
+            "Any change to the single URL writer or to the existing week read/save queue lifetimes"
+          ],
+          "maxRounds": 4,
+          "commitType": "feat",
+          "title": "Wire highlights voice into the Journal",
+          "spec": "(The sub-task description of ARC-14 goes here verbatim; shortened in this fixture.)"
+        }
+      ]
+    },
+    {
+      "letter": "D",
+      "tracks": [
+        {
+          "key": "ARC-15",
+          "app": "web2",
+          "files": [
+            "apps/web2/docs/quality/testing.md"
+          ],
+          "critics": [
+            "spec-tests",
+            "correctness"
+          ],
+          "extraSteps": [
+            "Visually inspect the voice Storybook states at the 1024px desktop viewport against the Step 0 Figma references and note any difference",
+            "Run /journal under filtered `next dev` (`bunx turbo run dev --filter=@arctype/web2`) and verify what this environment supports (Chrome with a fake media stream: mic allow/deny, finish/cancel, no-speech, offline/provider failure, disabled mic and delete-all, week/day navigation cancel, post-200 failed save without a second upload)",
+            "List every runtime check that could not run here (Safari mp4, real microphone, 270 s auto-finish, Ukrainian and mixed-language samples against real Groq) as a manual check in the track report"
+          ],
+          "humanGates": [
+            "A runtime finding whose fix would change a settled contract (route validation order, status mapping, copy, navigation-cancel semantics) or files owned by an earlier sub-task",
+            "Any shipped difference from the Figma states found during the visual inspection"
+          ],
+          "maxRounds": 3,
+          "commitType": "docs",
+          "title": "Docs and changelog for voice highlights",
+          "spec": "(The sub-task description of ARC-15 goes here verbatim; shortened in this fixture.)"
+        }
+      ]
+    }
+  ],
+  "layers": [
+    {
+      "branch": "arc-4/a1-groq-whisper-client",
+      "tracks": [
+        "ARC-5"
+      ]
+    },
+    {
+      "branch": "arc-4/a2-highlights-extraction",
+      "tracks": [
+        "ARC-6",
+        "ARC-7"
+      ]
+    },
+    {
+      "branch": "arc-4/a4-voice-ui-states",
+      "tracks": [
+        "ARC-8"
+      ]
+    },
+    {
+      "branch": "arc-4/a5-use-audio-recorder",
+      "tracks": [
+        "ARC-9"
+      ]
+    },
+    {
+      "branch": "arc-4/a6-journal-week-reload",
+      "tracks": [
+        "ARC-10"
+      ]
+    },
+    {
+      "branch": "arc-4/a7-voice-upload-seam",
+      "tracks": [
+        "ARC-11"
+      ]
+    },
+    {
+      "branch": "arc-4/b1-voice-highlights-route",
+      "tracks": [
+        "ARC-12"
+      ]
+    },
+    {
+      "branch": "arc-4/b2-use-voice-input",
+      "tracks": [
+        "ARC-13"
+      ]
+    },
+    {
+      "branch": "arc-4/c1-wire-highlights-voice",
+      "tracks": [
+        "ARC-14",
+        "ARC-15"
+      ]
+    }
+  ],
+  "finalReview": {
+    "lenses": [
+      "acceptance",
+      "correctness",
+      "security",
+      "readability",
+      "a11y"
+    ]
+  },
+  "checkpoints": {
+    "afterGroups": [
+      "A"
+    ]
+  },
+  "decisions": {},
+  "models": {},
+  "acceptance": "(The parent ticket's goal, acceptance criteria and non-goals go here verbatim; shortened in this fixture.)"
+}

@@ -175,6 +175,50 @@ trap is caught before the run starts.
 If the worker breaks the contract (no JSON, a missing field, an invalid enum
 value), the attempt counts as failed and `maxAttempts` applies.
 
+A field that only some answers have — a `question` that means something only
+next to `NEEDS_HUMAN` — is declared `"optional": true`. The contract tells the
+worker it may leave the key out, and a missing optional field is stored as its
+empty value (`""` or `[]`) instead of failing the attempt. Only text and list
+fields can be optional: a missing number, yes/no or choice has no empty value
+that would not read as an answer, so the validator refuses those.
+
+### Continuing a thread instead of spawning
+
+By default every visit of an agent node spawns a fresh worker. A node with
+`"continueThread": "impl"` sends its prompt into the thread `impl` already has
+in this run instead — the fix for a red check lands with the worker who wrote
+the code, rather than with a stranger who reads it all again. A node's own id
+continues its own thread on its next visit; a node fanned out over a list may
+only name itself, and then keeps one thread per entry (one critic per lens,
+round after round). When the thread does not exist yet, the node spawns as
+usual and its thread becomes the one to continue.
+
+The thread ids are part of the checkpointed state (`threads`), so a resume or
+a rerun from a checkpoint continues the thread of that point. A retry of a
+continued attempt is sent into the same thread again. The validator refuses a
+target that has no worker thread (command, approval, note), an unknown id, and
+any pairing that would send several fan-out entries into one thread.
+
+### Fallback paths
+
+`"path": "fallback"` marks a node as a contingency — a conflict resolver, the
+fix for a red gate, an approval that only asks when something is stuck. The
+canvas draws it as a slim card, and a run view leaves fallbacks out (edges
+included, laid out without holes) until the run reaches them; "Show fallback
+paths" brings them back. Purely a drawing matter: the runtime treats both
+paths alike.
+
+### Generated graphs
+
+`"tags": ["dynamic"]` marks a graph a program wrote for one occasion — the
+task-dev compiler tags every graph it produces so. Generated graphs are left
+out of every listing (`bb graph-studio graphs`, `graph_studio_graphs`, the
+`#` mention, the panel's picker) unless asked for: `graphs --all`,
+`includeGenerated: true`, the picker's "Show generated graphs". They stay
+reachable by id — run, show, export, a run's subgraphs. A graph can also spawn
+its workers as hidden threads (`"workerVisibility": "hidden"`): out of the
+sidebar, still opened from the run inspector.
+
 ### Dynamic fan-out
 
 Static fan-out — several unconditional edges — fixes the number of branches

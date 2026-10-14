@@ -53,6 +53,17 @@ studio (panel → Edit, full screen) is where they review and fine-tune.
      The template `owner-check-loop` is the pattern (owner builds, check
      returns `verdict`, `fail` loops back, max 3 laps, then a human); clone it
      and replace `my-crew` with the crew's name.
+   - A step that builds on another worker's context — fixing what the
+     implementer wrote, a reviewer's next round — can continue that thread
+     instead of spawning a fresh one: `continueThread: "<node id>"` (its own
+     id for "the same thread on every visit"). A node fanned out over a list
+     may only name itself; it then keeps one thread per entry.
+   - A field only some outcomes have (a `question` next to a status) gets
+     `optional: true` (text and list fields only), so a worker leaving it out
+     does not fail its attempt.
+   - Mark contingencies — a conflict resolver, a fix for a red check, a
+     "needs you" approval — `path: "fallback"`: drawn small, and hidden in a
+     run until the run reaches them.
    - Set `example` to a real task in the user's words.
 4. **Save** with `graph_studio_save`. If it reports errors, fix and save again.
    Never present a graph as done while it has errors.

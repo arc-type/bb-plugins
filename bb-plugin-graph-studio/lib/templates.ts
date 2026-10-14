@@ -3,7 +3,7 @@
 // These are the patterns worth learning, expressed as data. Each is a
 // starting point the user clones and edits — none of them is special-cased in
 // the runtime.
-import { END_NODE, START_NODE, graphSchema, type Graph } from "./graph";
+import { END_NODE, START_NODE, graphSchema, isDynamic, type Graph } from "./graph";
 
 type Draft = {
   id: string;
@@ -440,6 +440,7 @@ const reviewFields: Graph["nodes"][number]["fields"] = [
   {
     name: "verdict",
     type: "enum",
+    optional: false,
     options: ["APPROVE", "REWORK", "BLOCK"],
     description:
       "APPROVE carries on, REWORK goes back to the draft, BLOCK ends the run",
@@ -447,6 +448,7 @@ const reviewFields: Graph["nodes"][number]["fields"] = [
   {
     name: "reason",
     type: "string",
+    optional: false,
     options: [],
     description: "one sentence on why",
   },
@@ -692,12 +694,14 @@ const testFields: Graph["nodes"][number]["fields"] = [
   {
     name: "status",
     type: "enum",
+    optional: false,
     options: ["GREEN", "RED"],
     description: "GREEN only if the run actually completed",
   },
   {
     name: "failing",
     type: "string",
+    optional: false,
     options: [],
     description: "the failing tests, otherwise empty",
   },
@@ -2874,11 +2878,30 @@ export function templatePattern(id: string): string | null {
  * an empty term matches everything — a search that hides the library until you
  * type is worse than no search.
  */
-export function searchGraphs(graphs: Graph[], term: string): Graph[] {
+export function searchGraphs(
+  graphs: Graph[],
+  term: string,
+  /**
+   * Generated graphs (tagged `dynamic`) are left out unless asked for. This
+   * is the one search every listing goes through — CLI, agent tool, mention,
+   * picker — so deciding it here is what keeps them from drifting apart.
+   * Resolving a graph by id never searches, so a generated graph stays
+   * runnable and its runs stay readable.
+   */
+  { generated = false }: { generated?: boolean } = {},
+): Graph[] {
+  const listed = generated ? graphs : graphs.filter((graph) => !isDynamic(graph));
   const needle = term.trim().toLowerCase();
-  if (needle === "") return graphs;
-  return graphs.filter((graph) =>
-    [graph.id, graph.name, graph.description, graph.example, templatePattern(graph.id) ?? ""]
+  if (needle === "") return listed;
+  return listed.filter((graph) =>
+    [
+      graph.id,
+      graph.name,
+      graph.description,
+      graph.example,
+      templatePattern(graph.id) ?? "",
+      ...(graph.tags ?? []),
+    ]
       .join(" ")
       .toLowerCase()
       .includes(needle),
@@ -2893,7 +2916,16 @@ export function groupedLibrary(
     key: "own",
     label: "Your graphs",
     group: null,
-    graphs: graphs.filter((graph) => templateGroup(graph.id) === null),
+    graphs: graphs.filter((graph) => templateGroup(graph.id) === null && !isDynamic(graph)),
+  };
+  // Last, and only when the caller let them through `searchGraphs`: written
+  // by a program for one occasion, they are the least likely thing a reader
+  // came for, and among "Your graphs" they read as if somebody had.
+  const generated: LibrarySection = {
+    key: "generated",
+    label: "Generated",
+    group: null,
+    graphs: graphs.filter((graph) => templateGroup(graph.id) === null && isDynamic(graph)),
   };
   const shelves: LibrarySection[] =
     detail === "section"
@@ -2909,7 +2941,7 @@ export function groupedLibrary(
           group,
           graphs: graphs.filter((graph) => templateGroup(graph.id) === group),
         }));
-  return [own, ...shelves].filter((section) => section.graphs.length > 0);
+  return [own, ...shelves, generated].filter((section) => section.graphs.length > 0);
 }
 
 

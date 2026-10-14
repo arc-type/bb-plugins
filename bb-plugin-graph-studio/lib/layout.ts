@@ -14,12 +14,20 @@ import {
   fanOutKey,
   handoffKey,
   handoffTargets,
+  isFallback,
   type Graph,
   type GraphEdge,
 } from "./graph";
 
 export const NODE_WIDTH = 172;
 export const NODE_HEIGHT = 72;
+/**
+ * A fallback node (`path: "fallback"`) is drawn as a slim card: one line,
+ * label and status. It is a contingency the run usually never takes, and at
+ * full size the contingencies of a compiled run outweighed the path it took.
+ */
+export const COMPACT_WIDTH = 136;
+export const COMPACT_HEIGHT = 34;
 /**
  * The vertical gap between two layers is not constant: it exists to hold the
  * arrow, and only a labelled arrow needs room for text. A uniform gap wide
@@ -218,11 +226,26 @@ export function layoutGraph(source: Graph): GraphLayout {
     byLayer.set(index, list);
   }
 
-  const widest = Math.max(
-    ...[...byLayer.values()].map((list) => list.length),
-    1,
+  // Sizes per node: a fallback is compact, everything else (Start and End
+  // included) keeps the full card.
+  const compact = new Set(graph.nodes.filter(isFallback).map((node) => node.id));
+  const sizeOf = (id: string) =>
+    compact.has(id)
+      ? { width: COMPACT_WIDTH, height: COMPACT_HEIGHT }
+      : { width: NODE_WIDTH, height: NODE_HEIGHT };
+  const rowWidthOf = (list: string[]) =>
+    list.reduce((sum, id) => sum + sizeOf(id).width, 0) + (list.length - 1) * SIBLING_GAP;
+  // A layer is as tall as its tallest card, so a row of slim fallbacks does
+  // not reserve the height of a full one.
+  const layerHeight = (index: number) => {
+    const list = byLayer.get(index) ?? [];
+    return list.length === 0 ? NODE_HEIGHT : Math.max(...list.map((id) => sizeOf(id).height));
+  };
+
+  const contentWidth = Math.max(
+    ...[...byLayer.values()].map(rowWidthOf),
+    NODE_WIDTH,
   );
-  const contentWidth = widest * NODE_WIDTH + (widest - 1) * SIBLING_GAP;
 
   const maxLayer = Math.max(...[...layers.values()], 0);
   const gaps = gapsBetweenLayers(graph, layers, back, maxLayer);
@@ -230,27 +253,31 @@ export function layoutGraph(source: Graph): GraphLayout {
   // Top edge of each layer, accumulated so a tight gap really costs less.
   const layerY: number[] = [MARGIN];
   for (let index = 0; index < maxLayer; index += 1) {
-    layerY.push(layerY[index]! + NODE_HEIGHT + gaps[index]!);
+    layerY.push(layerY[index]! + layerHeight(index) + gaps[index]!);
   }
 
   const placed = new Map<string, PlacedNode>();
   for (const [index, list] of [...byLayer.entries()].sort((a, b) => a[0] - b[0])) {
-    const rowWidth = list.length * NODE_WIDTH + (list.length - 1) * SIBLING_GAP;
-    const startX = MARGIN + (contentWidth - rowWidth) / 2;
-    list.forEach((id, column) => {
+    let x = MARGIN + (contentWidth - rowWidthOf(list)) / 2;
+    const band = layerHeight(index);
+    for (const id of list) {
+      const size = sizeOf(id);
       placed.set(id, {
         id,
-        x: startX + column * (NODE_WIDTH + SIBLING_GAP),
-        y: layerY[index] ?? MARGIN,
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
+        x,
+        // Centred in the band, so a slim card's arrows meet the full cards
+        // beside it halfway rather than at its top.
+        y: (layerY[index] ?? MARGIN) + (band - size.height) / 2,
+        width: size.width,
+        height: size.height,
         layer: index,
       });
-    });
+      x += size.width + SIBLING_GAP;
+    }
   }
 
   const width = contentWidth + MARGIN * 2 + 64; // room for back-edge arcs
-  const height = (layerY[maxLayer] ?? MARGIN) + NODE_HEIGHT + MARGIN;
+  const height = (layerY[maxLayer] ?? MARGIN) + layerHeight(maxLayer) + MARGIN;
 
   const edges: PlacedEdge[] = graph.edges.flatMap((edge): PlacedEdge[] => {
     const from = placed.get(edge.from);
@@ -311,6 +338,21 @@ export function layoutGraph(source: Graph): GraphLayout {
   });
 
   return { nodes: [...placed.values()], edges, width, height };
+}
+
+/**
+ * The graph without `hidden` nodes and every edge touching them — what a run
+ * view lays out when it leaves unreached fallbacks out. Laid out afresh rather
+ * than blanked in place, so the drawing closes up instead of keeping holes
+ * where the hidden cards would have stood.
+ */
+export function withoutNodes(graph: Graph, hidden: ReadonlySet<string>): Graph {
+  if (hidden.size === 0) return graph;
+  return {
+    ...graph,
+    nodes: graph.nodes.filter((node) => !hidden.has(node.id)),
+    edges: graph.edges.filter((edge) => !hidden.has(edge.from) && !hidden.has(edge.to)),
+  };
 }
 
 /**

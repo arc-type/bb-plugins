@@ -23,11 +23,12 @@ import { activityByNode, durationByNode } from "../lib/activity";
 import { GraphCanvas } from "./graph-canvas";
 import {
   RUN_STATUS,
-  statusesFromRun,
+  runView,
   liveEdges,
   travelledEdges,
   useNow,
 } from "./graph-studio-panel";
+import { reachedNodes, runResolver } from "../lib/run-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -126,16 +127,12 @@ export function RunView({
     if (focusToken > 0) answerRef.current?.focus();
   }, [focusToken, run.pendingQuestion?.nodeId]);
 
-  const statuses = useMemo(() => {
-    const base = statusesFromRun(run);
-    for (const [nodeId, progress] of Object.entries(fanOutProgress(run.graph, run.state))) {
-      if (base[nodeId] === "failed") continue;
-      base[nodeId] = progress.done < progress.total ? "running" : "done";
-    }
-    return base;
-  }, [run]);
+  // No library here: the card lives in the chat. The run brings the graphs it
+  // embeds, which is all a subgraph card needs to say what runs inside it.
+  const { statuses, texts } = useMemo(() => runView(run), [run]);
+  const resolveGraph = useMemo(() => runResolver(run), [run]);
   const branches = useMemo(() => fanOutProgress(run.graph, run.state), [run]);
-  const travelled = useMemo(() => travelledEdges(run), [run]);
+  const travelled = useMemo(() => travelledEdges(run, reachedNodes(statuses)), [run, statuses]);
   const live = useMemo(() => liveEdges(run), [run]);
   const activity = useMemo(() => activityByNode(run.nodeRuns), [run]);
   const durations = useMemo(() => durationByNode(run.nodeRuns), [run]);
@@ -148,6 +145,9 @@ export function RunView({
       <GraphCanvas
         graph={run.graph}
         statuses={statuses}
+        statusTexts={texts}
+        hideUnreachedFallbacks
+        resolveGraph={resolveGraph}
         branches={branches}
         activeEdgeKeys={travelled}
         liveEdgeKeys={live}
