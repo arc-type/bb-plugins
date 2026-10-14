@@ -37,8 +37,9 @@ studio (panel → Edit, full screen) is where they review and fine-tune.
      `source: "field"`), not on words in prose.
    - A loop needs an exit: a condition that ends it and a `maxVisits` on the
      node it returns to.
-   - A human decision is a `human` node; a back-and-forth with the user is a
-     `dialog` node.
+   - A free-text approval is a `human` node. Use a `dialog` node for a
+     back-and-forth with the user or a decision routed on declared enum
+     fields: `human` nodes do not parse result fields.
    - To reuse another graph, add a `subgraph` node with `graphId` — it works
      like an import: its nodes run in place and share the state; later nodes
      read their ids. Node ids must not collide with the imported graph's.

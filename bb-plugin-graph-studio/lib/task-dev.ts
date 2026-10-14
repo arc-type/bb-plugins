@@ -236,7 +236,6 @@ const question = (description: string) => ({ ...field("question", description), 
 const tagsFor = (ticket: string) => [DYNAMIC_TAG, `ticket:${slug(ticket)}`.slice(0, 40)];
 const isTrue = (key: string) => ({ source: "field", key, op: "equals", value: "true" });
 const isValue = (key: string, value: string) => ({ source: "field", key, op: "equals", value });
-const visitsBelow = (key: string, value: number) => ({ source: "output", key, op: "visitsBelow", value: String(value) });
 /** A literal list printed as the `lenses` field of a command node. */
 function listCommand(name: string, values: string[]): string {
   return `printf '%s\\n' ${shellQuote(JSON.stringify({ [name]: values }))}`;
@@ -322,6 +321,70 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
   };
   const gateCommand = (path: string, apps: string[], level: string) =>
     apps.map((app) => `${H} gate ${shellQuote(path)} ${shellQuote(app)} ${level}`).join(" && ");
+
+  // Separate each reason so a question from an earlier worker visit cannot
+  // appear alongside the result that actually brought the run here.
+  const needsYou = (
+    nodes: Draft[], edges: DraftEdge[], askId: string, guide: string,
+    accept: (source: Draft) => string,
+  ): number => {
+    const original = nodes.find(node => node.id === askId)!;
+    const incoming = edges.filter(edge => edge.to === askId);
+    const sources = [...new Set(incoming.map(edge => edge.from))];
+    const exhausted = `${askId}-exhausted`;
+    nodes.push({ id: exhausted, label: `${original.label} · assistance spent`.slice(0, 80), kind: "command", path: "fallback", maxVisits: 1,
+      command: "printf '%s\\n' 'Human assistance budget exhausted; rerun from a checkpoint with updated limits.' >&2; exit 2" });
+    edges.push({ from: exhausted, to: END_NODE });
+    nodes.splice(nodes.indexOf(original), 1);
+    for (let i = edges.length - 1; i >= 0; i--) if (edges[i]!.from === askId) edges.splice(i, 1);
+    const rounds = [...String(original.prompt).matchAll(/(?:[a-z -]*round \{\{visits\.[^}]+\}\} of \d+)/gi)].map(match => match[0]).join("; ");
+    for (const sourceId of sources) {
+      const source = nodes.find(node => node.id === sourceId)!;
+      const id = sourceId === guide ? askId : `${sourceId}-ask`;
+      const sourceFields = source.fields as Array<{ name: string }> | undefined;
+      const hasQuestion = sourceFields?.some(f => f.name === "question");
+      nodes.push({
+        id, label: `${original.label} · ${source.label}`.slice(0, 80),
+        kind: "dialog", path: "fallback", ...model("coordinator"), maxVisits: 3,
+        fields: [field("decision", "The human's explicit choice", "enum", ["GUIDE", "ACCEPT"]),
+          { ...field("guidance", "The human's guidance, if any"), optional: true }],
+        prompt: sections(
+          `${original.label}. ${rounds}`,
+          hasQuestion ? `Current question: {{${sourceId}.question}}\nCurrent response: {{${sourceId}.summary}}` : `Current result:\n{{${sourceId}}}`,
+          "Show only this current context and ask the human to choose GUIDE (give guidance and retry the repair) or ACCEPT (accept the current state and continue). Do not choose for them. Ask for clarification if their choice is unclear; finish only after their explicit decision.",
+          "Setup, integration and folding must complete before continuing. ACCEPT retries those deterministic steps. Helper configuration errors must be resolved and retried; ACCEPT cannot bypass them.",
+        ),
+      });
+      for (const edge of incoming.filter(edge => edge.from === sourceId)) {
+        edge.to = id;
+        if (!edge.when) edge.when = { source: "output", op: "always" };
+        if ((edge.when as { key?: string } | undefined)?.key === `${sourceId}.kind`) {
+          // An exhausted human target must not turn a helper error into a
+          // code repair by falling through to the next edge.
+          edges.splice(edges.indexOf(edge) + 1, 0, { ...edge, to: exhausted, label: "assistance spent" });
+        }
+      }
+      for (const edge of edges.filter(edge => edge.from === sourceId)) {
+        if (!edge.when) edge.when = { source: "output", op: "always" };
+      }
+      edges.push({ from: sourceId, to: exhausted, label: "assistance spent" });
+      const retry = sourceId === "submit" ? "layers" : sourceId;
+      if (sourceFields?.some(f => f.name === "kind")) {
+        edges.push(
+          { from: id, to: retry, when: isValue(`${sourceId}.kind`, "error"), label: "retry helper error" },
+          { from: id, to: exhausted, when: isValue(`${sourceId}.kind`, "error"), label: "assistance spent" },
+        );
+      }
+      edges.push(
+        { from: id, to: accept(source), when: isValue(`${id}.decision`, "ACCEPT"), label: "accept" },
+        { from: id, to: guide, when: isValue(`${id}.decision`, "GUIDE"), label: "guidance" },
+        { from: id, to: exhausted, label: "assistance spent" },
+      );
+      const worker = nodes.find(node => node.id === guide)!;
+      if (worker.kind !== "command") worker.prompt = sections(String(worker.prompt), `Maintainer guidance from ${source.label}: {{${id}.guidance}}`);
+    }
+    return sources.length * 3;
+  };
 
   /* ── one track ── */
   const compileTrack = (track: Track, base: string): Graph => {
@@ -501,7 +564,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: id("gate"), to: id("review-round"), when: isTrue(`${id("gate")}.ok`), label: "green" },
       { from: id("gate"), to: id("ask"), when: isTrue(`${id("gate")}.ok`), label: "review rounds spent" },
       { from: id("review-round"), to: id("lenses") },
-      { from: id("gate"), to: id("red-round"), when: visitsBelow(id("red-round"), rounds + 1), label: "red" },
+      { from: id("gate"), to: id("red-round"), when: isValue(`${id("gate")}.ok`, "false"), label: "red" },
       { from: id("red-round"), to: id("gatefix") },
       { from: id("gate"), to: id("ask"), label: "red, rounds spent" },
       { from: id("gatefix"), to: id("gate"), when: isValue(`${id("gatefix")}.status`, "FIXED"), label: "fixed" },
@@ -516,6 +579,11 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: id("squash"), to: END_NODE },
     ];
 
+    const manualRounds = needsYou(nodes, edges, id("ask"), id("impl"), source =>
+      source.id === wt || source.id === id("squash") ? source.id : id("squash"));
+    for (const [name, automatic] of [["wt", 1], ["impl", 1], ["gate", 2 * rounds + 2], ["gatefix", rounds + 1], ["fix", rounds], ["squash", 1]] as const) {
+      nodes.find(node => node.id === id(name))!.maxVisits = automatic + manualRounds;
+    }
     return graphSchema.parse({
       id: `${graphId}-${p}`.slice(0, 48),
       name: `${track.key} · ${track.title}`.slice(0, 80),
@@ -579,7 +647,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
     const edges: DraftEdge[] = [
       { from: gate, to: ask, when: isValue(`${gate}.kind`, "error"), label: "helper error" },
       { from: gate, to: next, when: isTrue(`${gate}.ok`), label: "green" },
-      { from: gate, to: redRound, when: visitsBelow(redRound, fixer.rounds), label: "red" },
+      { from: gate, to: redRound, when: isValue(`${gate}.ok`, "false"), label: "red" },
       { from: redRound, to: fixer.id },
       { from: gate, to: ask, label: "red, rounds spent" },
       { from: fold, to: ask, when: isValue(`${fold}.kind`, "error"), label: "helper error" },
@@ -724,7 +792,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: join, to: integrate },
       { from: integrate, to: gate.ask, when: isValue(`${integrate}.kind`, "error"), label: "helper error" },
       { from: integrate, to: gate.entry, when: isTrue(`${integrate}.ok`), label: "picked" },
-      { from: integrate, to: conflictRound, when: visitsBelow(conflictRound, fixRounds), label: "conflict" },
+      { from: integrate, to: conflictRound, when: isValue(`${integrate}.ok`, "false"), label: "conflict" },
       { from: conflictRound, to: fixer },
       { from: integrate, to: gate.ask, label: "conflict, rounds spent" },
       { from: fixer, to: integrate, when: isValue(`${fixer}.status`, "RESOLVED"), label: "resolved" },
@@ -732,6 +800,12 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: fixer, to: gate.ask, label: "question" },
       ...gate.edges,
     );
+
+    const manualRounds = needsYou(nodes, edges, gate.ask, fixer, source =>
+      source.id === gate.gate ? after : source.id === gate.fold ? gate.fold : integrate);
+    for (const [id, automatic] of [[integrate, 1 + fixRounds], [fixer, 2 * fixRounds], [gate.fold, 2 * fixRounds], [gate.gate, 1 + 2 * fixRounds]] as const) {
+      nodes.find(node => node.id === id)!.maxVisits = automatic + manualRounds;
+    }
 
     if (checkpoint) {
       nodes.push({
@@ -830,6 +904,12 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
     ...finalGate.edges,
   );
 
+  const finalManualRounds = needsYou(nodes, edges, finalGate.ask, "final-fix", source =>
+    source.id === finalGate.gate ? afterFinal : finalGate.fold);
+  for (const id of ["final-fix", finalGate.gate, finalGate.fold]) nodes.find(node => node.id === id)!.maxVisits = 1 + finalRounds + finalManualRounds;
+  const preflightManualRounds = needsYou(nodes, edges, "preflight-ask", "preflight", () => "preflight");
+  nodes.find(node => node.id === "preflight")!.maxVisits = 1 + preflightManualRounds;
+
   /* ── layer gates and submit ── */
   if (!spec.dryRun) {
     const layerGates = spec.layers
@@ -839,12 +919,13 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         ),
       )
       .join(" && ");
+    const topLayerCheck = `extra=$(git -C ${shellQuote(stack)} rev-list ${shellQuote(`${spec.layers[spec.layers.length - 1]!.branch}..HEAD`)}) || { printf '%s\\n' '{"ok":false,"kind":"error","error":"Cannot inspect the top layer"}'; exit 2; }; if [ -n "$extra" ]; then printf '%s\\n' '{"ok":false,"kind":"error","error":"Commits above the top layer would be omitted from the PRs; fold them into the owning layer"}'; exit 2; fi; `;
     nodes.push(
       {
         id: "layers",
         label: `Layer gates (${spec.layers.length})`,
         kind: "command",
-        command: `extra=$(git -C ${shellQuote(stack)} rev-list ${shellQuote(`${spec.layers[spec.layers.length - 1]!.branch}..HEAD`)}) || { printf '%s\\n' '{"ok":false,"kind":"error","error":"Cannot inspect the top layer"}'; exit 2; }; if [ -n "$extra" ]; then printf '%s\\n' '{"ok":false,"error":"Commits above the top layer would be omitted from the PRs; fold them into the owning layer"}'; exit 1; fi; ${layerGates}`,
+        command: topLayerCheck + layerGates,
         failOnExit: false,
         timeoutMinutes: 240,
         maxVisits: 5,
@@ -865,7 +946,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         fields: [field("ok", "", "boolean"), helperKind()],
         label: "Submit stacked PRs",
         kind: "command",
-        command: `${H} submit ${shellQuote(stack)} ${spec.layers.map((layer) => shellQuote(layer.branch)).join(" ")}`,
+        command: topLayerCheck + `${H} submit ${shellQuote(stack)} ${spec.layers.map((layer) => shellQuote(layer.branch)).join(" ")}`,
         timeoutMinutes: 30,
         maxAttempts: 1,
       },
@@ -880,6 +961,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: "submit", to: "layers-ask", when: isValue("submit.kind", "error"), label: "helper error" },
       { from: "submit", to: END_NODE },
     );
+    const manualRounds = needsYou(nodes, edges, "layers-ask", "layers", () => "submit");
+    for (const id of ["layers", "submit"]) nodes.find(node => node.id === id)!.maxVisits = 1 + manualRounds;
   }
 
   const graph = graphSchema.parse({

@@ -614,3 +614,13 @@ pick-conflict repairs have separate counters. Every committed repair passes
 the gate again, including the last allowed round; exhausted automatic rounds
 go to the stage’s "needs you" node. Guidance authorizes another repair without
 restarting the run.
+
+Task-dev "needs you" steps are dialogs with a human decision: `GUIDE` sends
+guidance back to the repair worker, while `ACCEPT` advances the current state.
+Each reason has its own dialog and shows only its current question or result.
+Setup, integration and folding still have to complete, and a helper error
+always retries the failed deterministic step. Acceptance cannot bypass the
+submission check for commits outside PR layers. Track skipping is unsupported
+because every declared layer must retain its planned tracks.
+When the human assistance budget is exhausted, the run stops with an explicit
+error instead of falling through to a fixer or ending as if it succeeded.
