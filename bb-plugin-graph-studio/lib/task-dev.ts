@@ -763,7 +763,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       prompt: sections(
         `Address the final review of ticket ${ticket}. Your working directory is the stack worktree ${stack}.`,
         `Findings:\n{{final-critic}}`,
-        `Verify each finding in the code first; decline the ones that are wrong, with the reason. ${FIXUP_RULE} A fix that belongs to no single sub-task goes into one plain commit on top, message \`fix: ${ticket} review fixes\`.`,
+        `Verify each finding in the code first; decline the ones that are wrong, with the reason. ${FIXUP_RULE} A cross-cutting fix belongs to the top layer’s last sub-task (${sequence[sequence.length - 1]}): make a fixup of that commit too.`,
         `The final gate's result — empty until it has run; when it is not empty, the gate went red after your fixes and making it green is your task now:\n{{${finalGate.gate}}}`,
         `Maintainer guidance, if any: {{${finalGate.ask}}}`,
         `- ${READABLE_CODE}\n- ${SANDBOX}`,
@@ -806,7 +806,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         id: "layers",
         label: `Layer gates (${spec.layers.length})`,
         kind: "command",
-        command: layerGates,
+        command: `extra=$(git -C ${shellQuote(stack)} rev-list ${shellQuote(`${spec.layers[spec.layers.length - 1]!.branch}..HEAD`)}) || { printf '%s\\n' '{"ok":false,"error":"Cannot inspect the top layer"}'; exit 2; }; if [ -n "$extra" ]; then printf '%s\\n' '{"ok":false,"error":"Commits above the top layer would be omitted from the PRs; fold them into the owning layer"}'; exit 1; fi; ${layerGates}`,
         failOnExit: false,
         timeoutMinutes: 240,
         maxVisits: 5,
