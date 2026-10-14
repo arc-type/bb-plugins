@@ -40,3 +40,36 @@ it.each([false, true])("checks for unlayered commits before submit (extra=%s)", 
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+it.each(["error", "red", "conflict", ""])("routes helper kind %s without changing legacy routing", kind => {
+  const { graph, children } = run();
+  for (const [g, id, ask, normal] of [
+    [graph, "preflight", "preflight-ask", "a-fork"],
+    [graph, "a-int", "a-ask", "a-fix"],
+    [graph, "a-gate", "a-ask", "a-fix"],
+    [graph, "a-fold", "a-ask", "a-ask"],
+    [graph, "final-gate", "final-ask", "final-fix"],
+    [graph, "final-fold", "final-ask", "final-ask"],
+    [graph, "layers", "layers-ask", "layers-ask"],
+    [graph, "submit", "layers-ask", "__end__"],
+    [children[0]!, "demo-2-wt", "demo-2-ask", "demo-2-impl"],
+    [children[0]!, "demo-2-gate", "demo-2-ask", "demo-2-gatefix"],
+    [children[0]!, "demo-2-squash", "demo-2-ask", "__end__"],
+  ] as const) {
+    const state = emptyRunState("");
+    state.fields[id] = { ok: false, kind };
+    expect(node(g, id).fields.find(f => f.name === "kind")).toMatchObject({ optional: true, type: "string" });
+    expect(resolveNext(g, id, state)).toBe(kind === "error" ? ask : normal);
+  }
+});
+
+it.each([undefined, ["tools"], ["web2"]])("validates apps only with an allow-list: %j", apps => {
+  const input = spec();
+  input.apps = apps;
+  expect(compileRunSpec(input).ok).toBe(!apps || apps.includes("tools"));
+});
+
+it("lets the CLI allow-list override the spec", () => {
+  expect(compileRunSpec({ ...spec(), apps: ["web2"] }, { apps: ["tools"] }).ok).toBe(true);
+  expect(compileRunSpec(spec(), { apps: [] }).ok).toBe(false);
+});

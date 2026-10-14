@@ -101,9 +101,9 @@ describe("compileRunSpec on the ARC-4 spec", () => {
 });
 
 describe("what keeps a compiled run legible and cheap", () => {
-  it("draws the parent in 53 nodes for ARC-4 and 29 for the demo (64 and 36 before)", () => {
-    expect(compiled(arc4()).graph.nodes).toHaveLength(53);
-    expect(compiled(demo()).graph.nodes).toHaveLength(29);
+  it("draws the parent with an environment recovery node", () => {
+    expect(compiled(arc4()).graph.nodes).toHaveLength(54);
+    expect(compiled(demo()).graph.nodes).toHaveLength(30);
     expect(compiled(demo()).children[0]!.nodes).toHaveLength(9);
   });
 
@@ -136,7 +136,7 @@ describe("what keeps a compiled run legible and cheap", () => {
     // Each group's "needs you", A's checkpoint, the final review's and the layers'.
     const groups = run.plan.map((group) => group.group.toLowerCase());
     expect(approvals.sort()).toEqual(
-      [...groups.map((g) => `${g}-ask`), "a-check", "final-ask", "layers-ask"].sort(),
+      [...groups.map((g) => `${g}-ask`), "a-check", "final-ask", "layers-ask", "preflight-ask"].sort(),
     );
   });
 

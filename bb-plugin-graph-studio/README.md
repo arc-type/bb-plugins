@@ -596,3 +596,11 @@ Requires BB >= 0.42 and Plugin SDK >= 0.4.47.
 ## License
 
 MIT
+
+Task-dev specs can set `apps` to the gate helper’s supported app names;
+`bb graph-studio compile <spec.json> --apps tools,web2` overrides that list.
+Unknown track apps then fail compilation. Without a list, app validation is
+left to the helper. Helper failures with `kind: "error"` go straight to the
+stage’s "needs you" node; older helpers without `kind` keep the usual routing.
+Final fixes are fixups into PR layers, including cross-cutting fixes into the
+top layer’s last commit. Layer gates refuse commits above that layer before submit.

@@ -78,6 +78,7 @@ export const runSpecSchema = z.object({
   acceptance: z.string().default(""),
   maxParallel: z.number().int().min(1).max(6).default(3),
   dryRun: z.boolean().default(false),
+  apps: z.array(z.string().trim().min(1)).optional(),
   groups: z
     .array(z.object({ letter: z.string().trim().min(1).max(3), tracks: z.array(trackSchema).min(1) }))
     .min(1),
@@ -97,6 +98,7 @@ type Track = RunSpec["groups"][number]["tracks"][number] & { group: string };
 export type CompileOptions = {
   /** The helper script, relative to the environment root. */
   helper?: string;
+  apps?: string[];
 };
 
 export type CompiledRun = {
@@ -160,6 +162,11 @@ const ACCEPTANCE_CHARS = 1500;
 
 export function specErrors(spec: RunSpec): string[] {
   const errors: string[] = [];
+  if (spec.apps) {
+    for (const track of spec.groups.flatMap(group => group.tracks)) {
+      if (!spec.apps.includes(track.app)) errors.push(`unknown app "${track.app}" for ${track.key}; allowed: ${spec.apps.join(", ")}`);
+    }
+  }
   const keys = spec.groups.flatMap((group) => group.tracks.map((track) => track.key));
   const duplicates = keys.filter((key, index) => keys.indexOf(key) !== index);
   if (duplicates.length) errors.push(`duplicate track keys: ${[...new Set(duplicates)].join(", ")}`);
@@ -223,6 +230,7 @@ const field = (name: string, description = "", type = "string", options: string[
  * optional because a worker reporting DONE reasonably leaves it out — which
  * used to fail the attempt with "Field \"question\" is missing".
  */
+const helperKind = () => ({ ...field("kind", "red, conflict, or error; absent on success and older helpers"), optional: true });
 const question = (description: string) => ({ ...field("question", description), optional: true });
 /** Every compiled graph is for one ticket: kept out of the library listings. */
 const tagsFor = (ticket: string) => [DYNAMIC_TAG, `ticket:${slug(ticket)}`.slice(0, 40)];
@@ -279,7 +287,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       errors: parsed.error.issues.map((issue) => `${issue.path.join(".") || "spec"}: ${issue.message}`),
     };
   }
-  const spec = parsed.data;
+  const spec = { ...parsed.data, ...(options.apps ? { apps: options.apps } : {}) };
   const errors = specErrors(spec);
   if (errors.length) return { ok: false, errors };
 
@@ -338,7 +346,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         kind: "command",
         command: `${H} worktree ${shellQuote(ticket)} ${shellQuote(track.key)} ${headOf(base)}`,
         timeoutMinutes: 20,
-        fields: [field("path", "absolute worktree path"), field("branch"), field("base", "base commit")],
+        failOnExit: false,
+        fields: [field("ok", "", "boolean"), helperKind(), ...["path", "branch", "base"].map(name => ({ ...field(name), optional: true }))],
         maxAttempts: 2,
       },
       {
@@ -379,7 +388,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         timeoutMinutes: 60,
         maxVisits: Math.min(50, 2 * rounds + 12),
         maxAttempts: 1,
-        fields: [field("ok", "every gate step passed", "boolean")],
+        fields: [field("ok", "every gate step passed", "boolean"), helperKind()],
       },
       {
         id: id("gatefix"),
@@ -472,16 +481,27 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         kind: "command",
         command: `${H} squash {{${wt}.path}} {{${wt}.base}} ${shellQuote(commit)}`,
         maxAttempts: 2,
-        fields: [field("sha", "the squashed commit")],
+        failOnExit: false,
+        fields: [field("ok", "", "boolean"), helperKind(), { ...field("sha", "the squashed commit"), optional: true }],
       },
     ];
 
+    const ask = nodes.find(node => node.id === id("ask"))!;
+    ask.prompt = sections(String(ask.prompt),
+      `Worktree result: {{${wt}}}\nSquash result: {{${id("squash")}}}`,
+      "Correct helper configuration errors before answering; the failed helper step will be retried.");
+
     const edges: DraftEdge[] = [
       { from: START_NODE, to: wt },
+      { from: wt, to: id("ask"), when: isValue(`${wt}.kind`, "error"), label: "helper error" },
       { from: wt, to: id("impl") },
       { from: id("impl"), to: id("gate"), when: isValue(`${id("impl")}.status`, "DONE"), label: "done" },
       { from: id("impl"), to: id("ask"), label: "question" },
+      { from: id("ask"), to: wt, when: isValue(`${wt}.kind`, "error"), label: "retry worktree" },
+      { from: id("ask"), to: id("squash"), when: isValue(`${id("squash")}.kind`, "error"), label: "retry squash" },
+      { from: id("ask"), to: id("gate"), when: isValue(`${id("gate")}.kind`, "error"), label: "retry gate" },
       { from: id("ask"), to: id("impl") },
+      { from: id("gate"), to: id("ask"), when: isValue(`${id("gate")}.kind`, "error"), label: "helper error" },
       { from: id("gate"), to: id("lenses"), when: isTrue(`${id("gate")}.ok`), label: "green" },
       { from: id("gate"), to: id("gatefix"), when: visitsBelow(id("gatefix"), rounds + 1), label: "red" },
       { from: id("gate"), to: id("ask"), label: "red, rounds spent" },
@@ -493,6 +513,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: id("fix"), to: id("ask"), when: isValue(`${id("fix")}.status`, "NEEDS_HUMAN"), label: "question" },
       { from: id("fix"), to: id("gate"), when: visitsBelow(id("critic"), rounds + 1), label: "fixed" },
       { from: id("fix"), to: id("ask"), label: "rounds spent" },
+      { from: id("squash"), to: id("ask"), when: isValue(`${id("squash")}.kind`, "error"), label: "helper error" },
       { from: id("squash"), to: END_NODE },
     ];
 
@@ -540,7 +561,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         timeoutMinutes: 90,
         maxVisits: 12,
         maxAttempts: 1,
-        fields: [field("ok", "every gate step passed", "boolean")],
+        fields: [field("ok", "every gate step passed", "boolean"), helperKind()],
       },
       {
         id: fold,
@@ -551,15 +572,19 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         failOnExit: false,
         maxVisits: 8,
         maxAttempts: 1,
-        fields: [field("ok", "", "boolean")],
+        fields: [field("ok", "", "boolean"), helperKind()],
       },
     ];
     const edges: DraftEdge[] = [
+      { from: gate, to: ask, when: isValue(`${gate}.kind`, "error"), label: "helper error" },
       { from: gate, to: next, when: isTrue(`${gate}.ok`), label: "green" },
       { from: gate, to: fixer.id, when: visitsBelow(fixer.id, fixer.rounds), label: "red" },
       { from: gate, to: ask, label: "red, rounds spent" },
+      { from: fold, to: ask, when: isValue(`${fold}.kind`, "error"), label: "helper error" },
       { from: fold, to: gate, when: isTrue(`${fold}.ok`), label: "folded" },
       { from: fold, to: ask, label: "conflict" },
+      { from: ask, to: gate, when: isValue(`${gate}.kind`, "error"), label: "retry gate" },
+      { from: ask, to: fold, when: isValue(`${fold}.kind`, "error"), label: "retry fold" },
       { from: ask, to: fixer.id },
     ];
     return { entry: gate, gate, fold, ask, nodes, edges };
@@ -579,10 +604,16 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       command: `${H} preflight ${shellQuote(ticket)}`,
       timeoutMinutes: 30,
       maxAttempts: 1,
-      fields: [field("stack", "stack worktree"), field("base", "merge base with origin/main")],
+      failOnExit: false,
+      fields: [field("ok", "", "boolean"), helperKind(), ...["stack", "base"].map(name => ({ ...field(name), optional: true }))],
     },
   ];
-  const edges: DraftEdge[] = [{ from: START_NODE, to: "preflight" }];
+  nodes.push({ id: "preflight-ask", label: "Preflight · needs you", kind: "human", path: "fallback", maxVisits: 6,
+    prompt: "Preflight failed: {{preflight}}. Resolve the environment problem and answer to retry." });
+  const edges: DraftEdge[] = [{ from: START_NODE, to: "preflight" },
+    { from: "preflight", to: "preflight-ask", when: isValue("preflight.kind", "error"), label: "helper error" },
+    { from: "preflight-ask", to: "preflight" }];
+  nodes[0]!.maxVisits = 7;
   let previous = "preflight";
 
   for (const group of spec.groups) {
@@ -644,7 +675,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         failOnExit: false,
         maxVisits: 8,
         maxAttempts: 1,
-        fields: [field("ok", "every commit is on the stack", "boolean")],
+        fields: [field("ok", "every commit is on the stack", "boolean"), helperKind()],
       },
       {
         // One fixer for the stack: a pick that stopped on a conflict and a
@@ -685,7 +716,9 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       },
     );
     edges.push(
+      { from: gate.ask, to: integrate, when: isValue(`${integrate}.kind`, "error"), label: "retry integrate" },
       { from: join, to: integrate },
+      { from: integrate, to: gate.ask, when: isValue(`${integrate}.kind`, "error"), label: "helper error" },
       { from: integrate, to: gate.entry, when: isTrue(`${integrate}.ok`), label: "picked" },
       { from: integrate, to: fixer, when: visitsBelow(fixer, fixRounds), label: "conflict" },
       { from: integrate, to: gate.ask, label: "conflict, rounds spent" },
@@ -806,12 +839,12 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         id: "layers",
         label: `Layer gates (${spec.layers.length})`,
         kind: "command",
-        command: `extra=$(git -C ${shellQuote(stack)} rev-list ${shellQuote(`${spec.layers[spec.layers.length - 1]!.branch}..HEAD`)}) || { printf '%s\\n' '{"ok":false,"error":"Cannot inspect the top layer"}'; exit 2; }; if [ -n "$extra" ]; then printf '%s\\n' '{"ok":false,"error":"Commits above the top layer would be omitted from the PRs; fold them into the owning layer"}'; exit 1; fi; ${layerGates}`,
+        command: `extra=$(git -C ${shellQuote(stack)} rev-list ${shellQuote(`${spec.layers[spec.layers.length - 1]!.branch}..HEAD`)}) || { printf '%s\\n' '{"ok":false,"kind":"error","error":"Cannot inspect the top layer"}'; exit 2; }; if [ -n "$extra" ]; then printf '%s\\n' '{"ok":false,"error":"Commits above the top layer would be omitted from the PRs; fold them into the owning layer"}'; exit 1; fi; ${layerGates}`,
         failOnExit: false,
         timeoutMinutes: 240,
         maxVisits: 5,
         maxAttempts: 1,
-        fields: [field("ok", "", "boolean")],
+        fields: [field("ok", "", "boolean"), helperKind()],
       },
       {
         id: "layers-ask",
@@ -823,6 +856,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       },
       {
         id: "submit",
+        failOnExit: false,
+        fields: [field("ok", "", "boolean"), helperKind()],
         label: "Submit stacked PRs",
         kind: "command",
         command: `${H} submit ${shellQuote(stack)} ${spec.layers.map((layer) => shellQuote(layer.branch)).join(" ")}`,
@@ -831,9 +866,13 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       },
     );
     edges.push(
+      { from: "layers", to: "layers-ask", when: isValue("layers.kind", "error"), label: "helper error" },
       { from: "layers", to: "submit", when: isTrue("layers.ok"), label: "green" },
       { from: "layers", to: "layers-ask", label: "red" },
+      { from: "layers-ask", to: "layers", when: isValue("layers.kind", "error"), label: "retry layer gates" },
+      { from: "layers-ask", to: "layers", when: isValue("submit.kind", "error"), label: "retry submit preparation" },
       { from: "layers-ask", to: "layers" },
+      { from: "submit", to: "layers-ask", when: isValue("submit.kind", "error"), label: "helper error" },
       { from: "submit", to: END_NODE },
     );
   }
@@ -850,5 +889,14 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
     tags: tagsFor(ticket),
     workerVisibility: "hidden",
   });
+  for (const compiled of [graph, ...children]) {
+    for (const node of compiled.nodes) {
+      if (node.kind !== "command" || !(node.id === "preflight" || node.id === "submit" || node.id.endsWith("-wt") || node.id.endsWith("-squash"))) continue;
+      // These steps used to stop on any non-zero exit. Only a classified
+      // environment error may now survive long enough to reach a human.
+      node.failOnExit = true;
+      node.command = `result=$(${node.command}); code=$?; printf '%s\\n' "$result"; if [ "$code" -ne 0 ] && [ "$(printf '%s\\n' "$result" | tail -n 1 | jq -r '.kind // empty' 2>/dev/null)" != error ]; then exit "$code"; fi`;
+    }
+  }
   return { ok: true, run: { graph, children, plan } };
 }

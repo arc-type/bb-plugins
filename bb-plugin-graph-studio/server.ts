@@ -2142,7 +2142,7 @@ export default function graphStudio(bb: BbPluginApi) {
       {
         name: "compile",
         summary: "Turn a task-dev run spec into graphs (--save stores them)",
-        usage: "bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>]",
+        usage: "bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>] [--apps <app,...>]",
       },
   ];
 
@@ -2374,10 +2374,10 @@ export default function graphStudio(bb: BbPluginApi) {
             return index === -1 ? null : (rest[index + 1] ?? "");
           };
           const helper = flag("--helper") ?? DEFAULT_HELPER;
-          const file = rest.find((arg, index) => !arg.startsWith("--") && rest[index - 1] !== "--helper");
+          const file = rest.find((arg, index) => !arg.startsWith("--") && !["--helper", "--apps"].includes(rest[index - 1] ?? ""));
           if (!file) {
             return fail(
-              "Usage: bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>]",
+              "Usage: bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>] [--apps <app,...>]",
             );
           }
           let spec: unknown;
@@ -2388,7 +2388,7 @@ export default function graphStudio(bb: BbPluginApi) {
               `Run spec unreadable: ${cause instanceof Error ? cause.message : String(cause)}`,
             );
           }
-          const compiled = compileRunSpec(spec, { helper });
+          const compiled = compileRunSpec(spec, { helper, apps: flag("--apps")?.split(",").map(app => app.trim()) });
           if (!compiled.ok) {
             return fail(`The run spec is not valid:\n${compiled.errors.map((e) => `  - ${e}`).join("\n")}`);
           }
