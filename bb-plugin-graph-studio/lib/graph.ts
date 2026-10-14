@@ -1359,6 +1359,15 @@ export function validateGraph(
         }
         continue;
       }
+      if (name.startsWith("visits.")) {
+        const sourceId = name.slice("visits.".length);
+        if (!knownNodeIds.has(sourceId)) {
+          problems.push({ level: "error", message: `"${node.label}" reads {{${name}}}, but there is no node "${sourceId}".` });
+        } else if (fanOutTargets.has(sourceId)) {
+          problems.push({ level: "error", message: `"${node.label}" reads {{${name}}} from a node that runs fanned out; count rounds on a node outside the fan-out.` });
+        }
+        continue;
+      }
       // `{{node.field}}` reads a declared result field instead of the whole
       // text. Same trap as everywhere else in this file: an undeclared field
       // renders empty, the prompt looks complete, and the context the author
@@ -2427,6 +2436,7 @@ export function renderPrompt(
   return template.replace(PLACEHOLDER, (whole, name: string) => {
     if (name === "input") return state.input;
     if (name === "item") return state.item;
+    if (name.startsWith("visits.")) return String(state.visits[name.slice("visits.".length)] ?? 0);
     const dot = name.indexOf(".");
     if (dot !== -1) {
       const owner = name.slice(0, dot);

@@ -604,3 +604,7 @@ left to the helper. Helper failures with `kind: "error"` go straight to the
 stage’s "needs you" node; older helpers without `kind` keep the usual routing.
 Final fixes are fixups into PR layers, including cross-cutting fixes into the
 top layer’s last commit. Layer gates refuse commits above that layer before submit.
+
+Prompts may read `{{visits.node-id}}` for a node’s visit count (zero before it
+runs, the current visit when reading the worker’s own count). Unknown nodes
+and fan-out targets are rejected; count rounds outside the fan-out.

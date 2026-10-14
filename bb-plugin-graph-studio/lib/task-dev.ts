@@ -405,7 +405,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         ],
         prompt: sections(
           `You implemented sub-task ${track.key} (${track.title}) of ticket ${ticket}. ${where}`,
-          `The deterministic gate is red. Make it green. Its result (JSON; each failed step names its log file and the tail of it):\n{{${id("gate")}}}`,
+          `Gate repair round {{visits.${id("gatefix")}}} of ${rounds + 1}. The deterministic gate is red. Make it green. Its result (JSON; each failed step names its log file and the tail of it):\n{{${id("gate")}}}`,
           subTask(track, "Sub-task spec, for reference:"),
           decision(track.key),
           `- ${READABLE_CODE}\n- Re-run the failing command; commit your fixes in the worktree.\n- ${SANDBOX}`,
@@ -456,7 +456,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         ],
         prompt: sections(
           `You implemented sub-task ${track.key} (${track.title}) of ticket ${ticket}. ${where} The gate is green.`,
-          `The reviewers' findings (they share your goal; their fixes are suggestions you may improve on):\n{{${id("critic")}}}`,
+          `Review repair round {{visits.${id("fix")}}} of ${rounds}. The reviewers' findings (they share your goal; their fixes are suggestions you may improve on):\n{{${id("critic")}}}`,
           `Must fix: every blocking finding${rounds > 1 ? ", and should-fix findings in the first two rounds" : ""}. For every finding, either fix it or decline it with a concrete reason. Effort alone is not a reason.`,
           subTask(track, "Sub-task spec, for reference:"),
           decision(track.key),
@@ -473,7 +473,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         kind: "human",
         path: "fallback",
         maxVisits: 10,
-        prompt: `${track.key} (${track.title}) needs you: the implementer has a question, the gate stays red, or the review rounds (${rounds}) are spent.\n\nGate passed: {{${id("gate")}.ok}}\nQuestion: {{${id("impl")}.question}} {{${id("gatefix")}.question}} {{${id("fix")}.question}}\nLast summary: {{${id("fix")}.summary}}\n\nAnswer with a decision or guidance; the implementer goes on with it and the gate runs again. Stop the run to give up.`,
+        prompt: `${track.key} (${track.title}) needs you (review round {{visits.${id("fix")}}} of ${rounds}; gate repair round {{visits.${id("gatefix")}}} of ${rounds + 1}): the implementer has a question, the gate stays red, or the review rounds (${rounds}) are spent.\n\nGate passed: {{${id("gate")}.ok}}\nQuestion: {{${id("impl")}.question}} {{${id("gatefix")}.question}} {{${id("fix")}.question}}\nLast summary: {{${id("fix")}.summary}}\n\nAnswer with a decision or guidance; the implementer goes on with it and the gate runs again. Stop the run to give up.`,
       },
       {
         id: id("squash"),
@@ -695,7 +695,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
           question("for NEEDS_HUMAN: one precise question"),
         ],
         prompt: sections(
-          `You keep the stack of ticket ${ticket} green while group ${group.letter} is integrated. Your working directory is the stack worktree ${stack}.`,
+          `Stack repair round {{visits.${fixer}}} of ${fixRounds}. You keep the stack of ticket ${ticket} green while group ${group.letter} is integrated. Your working directory is the stack worktree ${stack}.`,
           `The stack is linear: one commit per sub-task, bottom to top: ${sequence.map(describeTrack).join("; ")}.`,
           "Find out which of two situations you are in, then handle that one:",
           `1. A cherry-pick stopped on a conflict — \`git status\` says a cherry-pick is in progress. The pick result (JSON: the conflicting commit, its layer branch and files):\n{{${integrate}}}\nKeep the intent of both sides. Then \`git add\` the files and run \`git -c core.editor=true cherry-pick --continue\`; when the result names a layer, \`git branch -f <layer> HEAD\`. Keep the commit message. Return RESOLVED.`,
@@ -712,7 +712,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         kind: "human",
         path: "fallback",
         maxVisits: 6,
-        prompt: `Group ${group.letter} needs you: a pick conflict or a red gate the fixer could not settle, or folding the fixups stopped on a conflict.\n\nPick: {{${integrate}}}\nGate: {{${gate.gate}}}\nFold: {{${gate.fold}}}\nQuestion: {{${fixer}.question}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
+        prompt: `Group ${group.letter} needs you (repair round {{visits.${fixer}}} of ${fixRounds}): a pick conflict or a red gate the fixer could not settle, or folding the fixups stopped on a conflict.\n\nPick: {{${integrate}}}\nGate: {{${gate.gate}}}\nFold: {{${gate.fold}}}\nQuestion: {{${fixer}.question}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
       },
     );
     edges.push(
@@ -794,7 +794,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         question("for NEEDS_HUMAN: one precise question"),
       ],
       prompt: sections(
-        `Address the final review of ticket ${ticket}. Your working directory is the stack worktree ${stack}.`,
+        `Final repair round {{visits.final-fix}} of ${finalRounds}. Address the final review of ticket ${ticket}. Your working directory is the stack worktree ${stack}.`,
         `Findings:\n{{final-critic}}`,
         `Verify each finding in the code first; decline the ones that are wrong, with the reason. ${FIXUP_RULE} A cross-cutting fix belongs to the top layer’s last sub-task (${sequence[sequence.length - 1]}): make a fixup of that commit too.`,
         `The final gate's result — empty until it has run; when it is not empty, the gate went red after your fixes and making it green is your task now:\n{{${finalGate.gate}}}`,
@@ -810,7 +810,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       kind: "human",
       path: "fallback",
       maxVisits: 6,
-      prompt: `The final review needs you: a question from the fixer, a gate that stays red, or folding the fixups stopped on a conflict.\n\nQuestion: {{final-fix.question}}\nSummary: {{final-fix.summary}}\nGate: {{${finalGate.gate}}}\nFold: {{${finalGate.fold}}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
+      prompt: `The final review needs you (repair round {{visits.final-fix}} of ${finalRounds}): a question from the fixer, a gate that stays red, or folding the fixups stopped on a conflict.\n\nQuestion: {{final-fix.question}}\nSummary: {{final-fix.summary}}\nGate: {{${finalGate.gate}}}\nFold: {{${finalGate.fold}}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
     },
   );
   edges.push(
