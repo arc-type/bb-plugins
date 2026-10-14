@@ -402,8 +402,9 @@ export function compileGraph(
 
     let commandAttempt = 0;
     builder.addNode(node.id, async (state: State) => {
-      const runState = asRunState(state);
       const visits = (state.visits[node.id] ?? 0) + 1;
+      // Prompts describe the visit being started, including after a resume.
+      const runState = { ...asRunState(state), visits: { ...state.visits, [node.id]: visits } };
       const steps = state.steps + 1;
 
       if (visits > node.maxVisits) {

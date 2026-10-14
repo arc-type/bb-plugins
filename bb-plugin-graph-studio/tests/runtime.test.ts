@@ -986,3 +986,16 @@ describe("subgraphs", () => {
     );
   });
 });
+
+it("renders the current worker visit rather than the completed visit", async () => {
+  const { host } = fakeHost({ a: "done" });
+  const prompts: string[] = [];
+  const spawn = host.spawn;
+  host.spawn = async args => { prompts.push(args.prompt); return spawn(args); };
+  const graph = graphSchema.parse({ id: "visit-prompt", name: "Visits", example: "Count rounds",
+    nodes: [{ id: "a", label: "A", prompt: "round {{visits.a}}", maxVisits: 2 }],
+    edges: [{ from: START_NODE, to: "a" }, { from: "a", to: END_NODE }] });
+  await compileGraph(graph, host).invoke({ ...emptyRunState(""), visits: { a: 1 } });
+  expect(prompts[0]).toContain("round 2");
+  expect(prompts[0]).not.toContain("round 1");
+});

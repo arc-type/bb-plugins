@@ -31,6 +31,8 @@ studio (panel → Edit, full screen) is where they review and fine-tune.
 3. **Write the graph.** Keep it small: every node is a thread that costs time.
    - Give each node one job and a prompt that says what to produce.
      `{{input}}` is the task, `{{node_id}}` an earlier node's result.
+     `{{visits.node_id}}` is its visit count (current visit for the worker
+     itself, zero before it runs); count rounds outside fan-out nodes.
    - Route on **result fields** (`fields` + an edge `when` with
      `source: "field"`), not on words in prose.
    - A loop needs an exit: a condition that ends it and a `maxVisits` on the
