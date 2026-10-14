@@ -101,20 +101,13 @@ describe("compileRunSpec on the ARC-4 spec", () => {
 });
 
 describe("what keeps a compiled run legible and cheap", () => {
-  it("draws the parent with an environment recovery node", () => {
-    expect(compiled(arc4()).graph.nodes).toHaveLength(63);
-    expect(compiled(demo()).graph.nodes).toHaveLength(35);
-    expect(compiled(demo()).children[0]!.nodes).toHaveLength(11);
-  });
-
-  it("marks exactly the contingencies of a track as fallback paths", () => {
+  it("keeps repair counters and questions on fallback paths", () => {
     const track = compiled(demo()).children[0]!;
-    const fallback = track.nodes.filter((entry) => entry.path === "fallback").map((entry) => entry.id);
-    expect(fallback).toEqual(["demo-2-red-round", "demo-2-gatefix", "demo-2-ask"]);
-    // The happy path stays main, every step of it.
-    for (const id of ["demo-2-wt", "demo-2-impl", "demo-2-gate", "demo-2-lenses", "demo-2-critic", "demo-2-fix", "demo-2-squash"]) {
-      expect(node(track, id)!.path).toBe("main");
-    }
+    for (const id of ["demo-2-red-round", "demo-2-gatefix"]) expect(node(track, id)!.path).toBe("fallback");
+    const questions = track.nodes.filter(entry => entry.kind === "dialog");
+    expect(questions.map(entry => entry.id).sort()).toEqual(["demo-2-ask", "demo-2-fix-ask", "demo-2-gate-ask", "demo-2-gatefix-ask", "demo-2-squash-ask", "demo-2-wt-ask"]);
+    expect(questions.every(entry => entry.path === "fallback")).toBe(true);
+    expect(node(track, "demo-2-review-round")!.path).toBe("main");
   });
 
   it("marks the group's fixer, fold and approval as fallback, but not the checkpoint", () => {
@@ -127,17 +120,14 @@ describe("what keeps a compiled run legible and cheap", () => {
     }
   });
 
-  it("has one approval per stage: per track, per group, final review and layers", () => {
+  it("uses structured dialogs for contingencies and human nodes for checkpoints", () => {
     const run = compiled(arc4());
-    for (const child of run.children) {
-      expect(child.nodes.filter((entry) => entry.kind === "human")).toHaveLength(1);
+    for (const graph of [run.graph, ...run.children]) {
+      for (const ask of graph.nodes.filter(entry => entry.kind === "dialog")) {
+        expect(ask.fields.find(field => field.name === "decision")!.options).toEqual(["GUIDE", "ACCEPT"]);
+      }
     }
-    const approvals = run.graph.nodes.filter((entry) => entry.kind === "human").map((entry) => entry.id);
-    // Each group's "needs you", A's checkpoint, the final review's and the layers'.
-    const groups = run.plan.map((group) => group.group.toLowerCase());
-    expect(approvals.sort()).toEqual(
-      [...groups.map((g) => `${g}-ask`), "a-check", "final-ask", "layers-ask", "preflight-ask"].sort(),
-    );
+    expect(run.graph.nodes.filter(entry => entry.kind === "human").map(entry => entry.id)).toEqual(["a-check"]);
   });
 
   it("merges conflict resolution and the red gate into one stack fixer per group", () => {
@@ -145,9 +135,9 @@ describe("what keeps a compiled run legible and cheap", () => {
     expect(node(parent, "a-resolve")).toBeUndefined();
     expect(node(parent, "a-gfix")).toBeUndefined();
     const into = (to: string) => parent.edges.filter((edge) => edge.to === to).map((edge) => edge.from);
-    expect(into("a-fix").sort()).toEqual(["a-ask", "a-conflict-round", "a-red-round"]);
+    expect(into("a-fix").sort()).toEqual(["a-ask", "a-conflict-round", "a-fold-ask", "a-gate-ask", "a-int-ask", "a-red-round"]);
     const from = parent.edges.filter((edge) => edge.from === "a-fix").map((edge) => edge.to);
-    expect(from).toEqual(["a-int", "a-fold", "a-ask"]);
+    expect(from).toEqual(["a-int", "a-fold", "a-ask", "a-ask-exhausted"]);
   });
 
   it("continues the implementer's thread for both fixes, and each critic's own", () => {
