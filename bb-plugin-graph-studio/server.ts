@@ -53,6 +53,8 @@ import { RENAMED_TEMPLATES, TEMPLATES, searchGraphs } from "./lib/templates";
 import { whileWorkspaceBusy } from "./lib/workspace";
 import { DEFAULT_HELPER, compileRunSpec } from "./lib/task-dev";
 import { resolveIn, runShell } from "./lib/shell";
+import { hostContract } from "./contract";
+import { commandJobId, hostCommandError, hostEntryUnavailable, runRemoteCommand } from "./lib/remote-command";
 import { canvasPageLayer } from "./lib/canvas-layer";
 import { ACTIVITY_EVENT_TYPES, describeActivity } from "./lib/activity";
 import {
@@ -564,6 +566,7 @@ export default function graphStudio(bb: BbPluginApi) {
   const reattach = new Map<string, Map<string, Array<{ nodeRunId: string; threadId: string }>>>();
   /** Attempts handed an adopted worker, waiting for `adoptedThread` to collect it. */
   const adopted = new Map<string, string>();
+  const commandReattach = new Map<string, Map<string, string[]>>();
   const halted = (runId: string) => stopping.has(runId) || lost.has(runId);
 
   /** Take the run, or say who has it. Synchronous from check to claim. */
@@ -883,35 +886,48 @@ export default function graphStudio(bb: BbPluginApi) {
     return { parent, hostId: environment.hostId, root: environment.path };
   }
 
+  const commandHost = bb.hosts.experimental_client({ contract: hostContract });
+
   function makeHost(
     runId: string,
     parentThreadId: string | null,
     projectId: string | null,
   ): RuntimeHost {
     return {
-      async runCommand({ command, cwd, timeoutMs }) {
+      async runCommand({ nodeId, visit, attempt, command, cwd, timeoutMs }) {
         if (halted(runId)) throw new GuardStop("The run was stopped.");
         const { hostId, root } = await parentEnvironment(parentThreadId);
-        // The command runs in this process, so only where this process is.
-        // Running it against a remote environment's path would hit a
-        // directory that does not exist here — or, worse, one that does.
-        const local = (await bb.sdk.system.config()).primaryHostId;
-        if (local === null || hostId !== local) {
-          throw new Error(
-            `Command nodes run on the BB server's own machine; this run's environment is on host ${hostId}.`,
-          );
-        }
         const controller = trackStop(runId);
+        if (halted(runId)) controller.abort();
+        const jobId = commandJobId(runId, nodeId, visit, attempt, store.rerunGeneration(runId));
+        const jobKey = `command-job:${runId}:${jobId}`;
         try {
-          return await runShell({
-            command,
-            cwd: resolveIn(root, cwd),
-            timeoutMs,
-            signal: controller.signal,
-          });
+          // Save before dispatch: a stop resumed after reload must find work
+          // even when the original start response never reached this driver.
+          await bb.storage.kv.set(jobKey, { jobId, hostId });
+          try {
+            const result = await runRemoteCommand({
+              client: commandHost,
+              hostId,
+              jobId,
+              command, cwd: resolveIn(root, cwd), timeoutMs,
+              signal: controller.signal,
+              shouldStop: () => stopping.has(runId),
+            });
+            if (!halted(runId)) await bb.storage.kv.delete(jobKey);
+            return result;
+          } catch (cause) {
+            if (!hostEntryUnavailable(cause)) throw cause;
+            const local = (await bb.sdk.system.config()).primaryHostId;
+            // Only a missing host entry on this machine permits local work.
+            // Offline hosts and execution errors must never run a remote path here.
+            if (local === null || hostId !== local) throw hostCommandError(hostId, cause);
+            await bb.storage.kv.delete(jobKey);
+            return await runShell({ command, cwd: resolveIn(root, cwd), timeoutMs, signal: controller.signal });
+          }
         } catch (cause) {
           if (controller.signal.aborted || halted(runId)) {
-            throw new GuardStop("The run was stopped.");
+            throw new GuardStop(stopping.has(runId) ? "The run was stopped." : "The run is driven elsewhere.");
           }
           throw cause;
         } finally {
@@ -1197,6 +1213,10 @@ export default function graphStudio(bb: BbPluginApi) {
         // it is one conversation. Reuse the open row, or the run history would
         // count each answered question as another attempt.
         const graph = store.getRun(runId)?.graph;
+        // Only takeover may reuse an open command row. Live fan-out tasks
+        // with the same node id each need their own attempt and remote job.
+        const restoredCommand = commandReattach.get(runId)?.get(nodeId)?.shift();
+        if (restoredCommand) return restoredCommand;
         const kind = graph?.nodes.find((node) => node.id === nodeId)?.kind;
         // A member node reuses the row a crash left open, too: after the
         // resume it is the same delivery, not a second attempt.
@@ -1232,6 +1252,11 @@ export default function graphStudio(bb: BbPluginApi) {
         });
         publish();
         return id;
+      },
+      nodeAttempt(nodeRunId: string) {
+        const row = store.listNodeRuns(runId).find((entry) => entry.id === nodeRunId);
+        if (!row) throw new Error(`Command attempt ${nodeRunId} is missing.`);
+        return row.attempt;
       },
       adoptedThread(nodeRunId: string) {
         const threadId = adopted.get(nodeRunId) ?? null;
@@ -1350,7 +1375,7 @@ export default function graphStudio(bb: BbPluginApi) {
       await settleAbandonedAttempts(row);
     }
     try {
-      await driveClaimed(row, resume, fromCheckpointId);
+      await driveClaimed(row, resume, fromCheckpointId, claimedNote !== undefined);
     } finally {
       await releaseUnclaimedWorkers(runId);
       unclaim(runId);
@@ -1373,14 +1398,22 @@ export default function graphStudio(bb: BbPluginApi) {
    */
   async function settleAbandonedAttempts(row: RunRow) {
     const members = memberIdsOf(row.graph);
-    const dialogs = new Set(
-      row.graph.nodes.filter((node) => node.kind === "dialog").map((node) => node.id),
-    );
+    const executionNodes = [row.graph, ...embeddedGraphs(row.graph)].flatMap((graph) => graph.nodes);
+    const dialogs = new Set(executionNodes.filter((node) => node.kind === "dialog").map((node) => node.id));
+    const commands = new Set(executionNodes.filter((node) => node.kind === "command").map((node) => node.id));
+    const resumedCommands = new Map<string, string[]>();
+    for (const entry of store.listNodeRuns(row.id)) {
+      if (entry.status !== "running" || !commands.has(entry.nodeId)) continue;
+      const list = resumedCommands.get(entry.nodeId) ?? [];
+      list.push(entry.id);
+      resumedCommands.set(entry.nodeId, list);
+    }
+    commandReattach.set(row.id, resumedCommands);
     const open = store
       .listNodeRuns(row.id)
       .filter(
         (entry) =>
-          entry.status === "running" && !members.has(entry.nodeId) && !dialogs.has(entry.nodeId),
+          entry.status === "running" && !members.has(entry.nodeId) && !dialogs.has(entry.nodeId) && !commands.has(entry.nodeId),
       )
       .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
     const kept = new Map<string, Array<{ nodeRunId: string; threadId: string }>>();
@@ -1459,6 +1492,7 @@ export default function graphStudio(bb: BbPluginApi) {
    * when this driver lost the run: the successor owns those rows now.
    */
   async function releaseUnclaimedWorkers(runId: string) {
+    commandReattach.delete(runId);
     const left = reattach.get(runId);
     reattach.delete(runId);
     if (!left || lost.has(runId) || disposed) return;
@@ -1480,6 +1514,7 @@ export default function graphStudio(bb: BbPluginApi) {
     row: RunRow,
     resume?: string,
     fromCheckpointId?: string,
+    takeover = false,
   ) {
     const runId = row.id;
     const host = makeHost(runId, row.threadId, row.projectId);
@@ -1525,8 +1560,13 @@ export default function graphStudio(bb: BbPluginApi) {
     try {
       // `null` means "continue from the checkpoint named in the config" —
       // LangGraph replays the pending nodes and leaves finished ones alone.
+      // A takeover must resume pending checkpoint tasks, including each
+      // fan-out item, rather than starting again at the graph entry with a
+      // copy of its last published state (which repeats completed commands).
+      const saved = takeover ? await app.getState(config) : null;
+      const hasCheckpoint = saved?.config.configurable?.checkpoint_id !== undefined;
       const input =
-        fromCheckpointId !== undefined
+        fromCheckpointId !== undefined || (takeover && hasCheckpoint)
           ? null
           : resume === undefined
             ? { ...emptyRunState(row.input), ...(row.state as RunState) }
@@ -1583,6 +1623,16 @@ export default function graphStudio(bb: BbPluginApi) {
       );
     } catch (cause) {
       if (lost.has(runId)) return;
+      if (stopping.has(runId)) {
+        try {
+          await stopCommandJobs(runId);
+        } catch (stopCause) {
+          const error = stopCause instanceof Error ? stopCause.message : String(stopCause);
+          store.updateRun(runId, { status: "stopping", state: store.getRun(runId)?.state ?? {}, error }, Date.now());
+          bb.log.warn(error);
+          return;
+        }
+      }
       const message = cause instanceof Error ? cause.message : String(cause);
       const status: RunStatus =
         cause instanceof GuardStop || stopping.has(runId) ? "stopped" : "failed";
@@ -1735,6 +1785,21 @@ export default function graphStudio(bb: BbPluginApi) {
     void drive(runId, undefined, checkpointId);
   }
 
+  async function stopCommandJobs(runId: string) {
+    const keys = await bb.storage.kv.list(`command-job:${runId}:`);
+    for (const key of keys) {
+      const job = await bb.storage.kv.get<{ jobId: string; hostId: string }>(key);
+      if (!job) continue;
+      try {
+        await commandHost.call("stop", { jobId: job.jobId }, { hostId: job.hostId, timeoutMs: 15_000 });
+        await bb.storage.kv.delete(key);
+      } catch (cause) {
+        throw hostCommandError(job.hostId, cause);
+      }
+    }
+  }
+
+
   /**
    * The user's stop, made effective immediately.
    *
@@ -1748,6 +1813,7 @@ export default function graphStudio(bb: BbPluginApi) {
    * themselves. What is still in flight then ends as a failed node, and
    * `drive`'s catch settles the run as `stopped`.
    */
+
   function requestStop(runId: string) {
     stopping.add(runId);
     for (const controller of stopWaiters.get(runId) ?? []) controller.abort();
@@ -2069,6 +2135,11 @@ export default function graphStudio(bb: BbPluginApi) {
         usage: "bb graph-studio import <file.json> [--overwrite]",
       },
       {
+        name: "host-ping",
+        summary: "Check the command worker and tools on a host",
+        usage: "bb graph-studio host-ping <host-id>",
+      },
+      {
         name: "compile",
         summary: "Turn a task-dev run spec into graphs (--save stores them)",
         usage: "bb graph-studio compile <run-spec.json> [--save] [--overwrite] [--helper <path>]",
@@ -2116,6 +2187,14 @@ export default function graphStudio(bb: BbPluginApi) {
         case "--help":
         case "-h": {
           return ok(usageText);
+        }
+        case "host-ping": {
+          if (rest.length !== 1) return fail("Usage: bb graph-studio host-ping <host-id>");
+          try {
+            return ok(JSON.stringify(await commandHost.call("ping", {}, { hostId: rest[0], timeoutMs: 15_000 }), null, 2));
+          } catch (cause) {
+            return fail(hostCommandError(rest[0], cause).message);
+          }
         }
         case "graphs": {
           // Generated graphs (tag `dynamic`) only on request: a compiled run
@@ -2599,6 +2678,7 @@ export default function graphStudio(bb: BbPluginApi) {
   // — the wish is honoured by settling them as `stopped` and interrupting
   // whatever of their workers survived the reload. The checkpoint stays, so
   // `rerunFrom` remains possible afterwards.
+  const settlingStops = new Set<string>();
   bb.background.service("resume-orphans", {
     // Sweeps once on load, then every heartbeat until the host aborts. The
     // repeat is what lets a run whose claim is still held by a dying driver
@@ -2611,18 +2691,25 @@ export default function graphStudio(bb: BbPluginApi) {
         if (disposed || signal.aborted) return;
         for (const row of store.listRunsByStatus("stopping")) {
           if (!store.claimRun(row.id, driverId, Date.now(), CLAIM_EXPIRY_MS)) continue;
-          if (driving.has(row.id)) continue;
-          bb.log.info(`Settling stopped run ${row.id} after reload.`);
-          store.updateRun(
-            row.id,
-            { status: "stopped", state: row.state, error: row.error },
-            Date.now(),
-          );
-          store.releaseRun(row.id, driverId);
-          publish();
-          void interruptWorkers(row.id).then(() =>
-            farewellWorkers(row.id, "stopped", row.error),
-          );
+          if (driving.has(row.id) || settlingStops.has(row.id)) continue;
+          settlingStops.add(row.id);
+          // Keep the durable stopping state until the remote daemon accepts
+          // cancellation; an offline host must not leave an invisible gate.
+          void (async () => {
+            try {
+              await stopCommandJobs(row.id);
+              if (disposed) return;
+              store.updateRun(row.id, { status: "stopped", state: row.state, error: row.error }, Date.now());
+              publish();
+              await interruptWorkers(row.id);
+              await farewellWorkers(row.id, "stopped", row.error);
+            } catch (cause) {
+              bb.log.warn(`Could not stop command jobs: ${cause instanceof Error ? cause.message : String(cause)}`);
+            } finally {
+              settlingStops.delete(row.id);
+              if (!disposed) store.releaseRun(row.id, driverId);
+            }
+          })();
         }
         for (const row of store.listRunsByStatus("running")) {
           if (driving.has(row.id)) continue;

@@ -19,6 +19,7 @@ import {
   type CompiledStateGraph,
 } from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
+import { CommandJobUncertain } from "./shell";
 import {
   END_NODE,
   START_NODE,
@@ -83,6 +84,8 @@ export type RuntimeHost = {
    */
   runCommand?(args: {
     nodeId: string;
+    visit: number;
+    attempt: number;
     command: string;
     /** Rendered working directory; null = the run's environment. */
     cwd: string | null;
@@ -136,6 +139,8 @@ export type RuntimeHost = {
   }): Promise<{ text: string; threadId: string | null }>;
   /** Record-keeping hooks; all persistence lives outside the runtime. */
   onNodeStart(nodeId: string): Promise<string>;
+  /** Durable attempt identity, reused when a command driver reattaches. */
+  nodeAttempt?(nodeRunId: string): number;
   /**
    * Agent nodes: the worker thread already attached to this attempt, when a
    * new driver took the run over while that worker was still alive (BBP-20).
@@ -327,12 +332,16 @@ export function compileGraph(
   const runCommandNode = async (
     node: Graph["nodes"][number],
     state: RunState,
+    visit: number,
+    attempt: number,
   ): Promise<string> => {
     if (!host.runCommand) {
       throw new Error(`"${node.label}" is a command node, but this host cannot run commands.`);
     }
     const result = await host.runCommand({
       nodeId: node.id,
+      visit,
+      attempt,
       command: renderCommand(node.command, state, knownNodes),
       cwd: renderCwd(node.cwd, state, knownNodes),
       timeoutMs: node.timeoutMinutes * 60_000,
@@ -387,10 +396,11 @@ export function compileGraph(
             maxAttempts: node.maxAttempts,
             initialInterval: 1_000,
             jitter: true,
-            retryOn: (cause: unknown) => !(cause instanceof GuardStop),
+            retryOn: (cause: unknown) => !(cause instanceof GuardStop || cause instanceof CommandJobUncertain),
           }
         : undefined;
 
+    let commandAttempt = 0;
     builder.addNode(node.id, async (state: State) => {
       const runState = asRunState(state);
       const visits = (state.visits[node.id] ?? 0) + 1;
@@ -680,7 +690,7 @@ export function compileGraph(
         try {
           let output: string;
           if (node.kind === "command") {
-            output = await runCommandNode(node, runState);
+            output = await runCommandNode(node, runState, visits, host.nodeAttempt?.(nodeRunId) ?? ++commandAttempt);
           } else {
             // A takeover hands back the previous driver's still-living worker
             // for this attempt; waiting on it is the same wait as below, so the
@@ -806,7 +816,7 @@ export function compileGraph(
           if (isGraphBubbleUp(cause)) throw cause;
           // Same as in the dialogue node above: a stop ends the run, it is not
           // a failure this node may retry or route around.
-          if (cause instanceof GuardStop) throw cause;
+          if (cause instanceof GuardStop || cause instanceof CommandJobUncertain) throw cause;
           const message = cause instanceof Error ? cause.message : String(cause);
           // The empty string is how this state says "did not fail", so a
           // failure without a message must not be recorded as one.

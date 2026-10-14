@@ -14,7 +14,7 @@ import {
   type Graph,
 } from "../lib/graph";
 import { compileGraph, type RuntimeHost } from "../lib/runtime";
-import { TIMEOUT_EXIT, resolveIn, runShell } from "../lib/shell";
+import { CommandJobUncertain, TIMEOUT_EXIT, resolveIn, runShell } from "../lib/shell";
 
 type Ran = { nodeId: string; command: string; cwd: string | null };
 
@@ -23,6 +23,7 @@ function host(
   options: { withoutCommands?: boolean } = {},
 ) {
   const ran: Ran[] = [];
+  const identities: Array<{ visit: number; attempt: number }> = [];
   const spawned: Array<{ nodeId: string; cwd: string | null; prompt: string }> = [];
   const finished: Array<{ status: string; error: string | null }> = [];
   const runtimeHost: RuntimeHost = {
@@ -51,14 +52,15 @@ function host(
     ...(options.withoutCommands
       ? {}
       : {
-          async runCommand({ nodeId, command, cwd }) {
+          async runCommand({ nodeId, command, cwd, visit, attempt }) {
+            identities.push({ visit, attempt });
             const entry = { nodeId, command, cwd };
             ran.push(entry);
             return { stderr: "", ...answer(entry) };
           },
         }),
   };
-  return { runtimeHost, ran, spawned, finished };
+  return { runtimeHost, ran, spawned, finished, identities };
 }
 
 const graph = (nodes: unknown[], edges: unknown[]): Graph =>
@@ -125,6 +127,32 @@ describe("command nodes in the runtime", () => {
         { from: "red", to: END_NODE },
       ],
     );
+
+  it("passes a visit and a new attempt for a command retry", async () => {
+    let calls = 0;
+    const fake = host(() => ({ exitCode: ++calls === 1 ? 1 : 0, stdout: '{"ok":true}' }));
+    const g = gateGraph(true);
+    g.nodes[0].maxAttempts = 2;
+    g.nodes[0].onError = "route";
+    await compileGraph(g, fake.runtimeHost).invoke(emptyRunState("task"));
+    expect(fake.identities).toEqual([{ visit: 1, attempt: 1 }, { visit: 1, attempt: 2 }]);
+  });
+
+  it("uses the persisted attempt on reattachment instead of resetting to one", async () => {
+    const fake = host(() => ({ exitCode: 0, stdout: '{"ok":true}' }));
+    fake.runtimeHost.nodeAttempt = () => 7;
+    await compileGraph(gateGraph(true), fake.runtimeHost).invoke(emptyRunState("task"));
+    expect(fake.identities).toEqual([{ visit: 1, attempt: 7 }]);
+  });
+
+  it.each(["stop", "route"] as const)("does not retry uncertain remote side effects with onError=%s", async (onError) => {
+    const fake = host(() => { throw new CommandJobUncertain("Host vm: connection lost"); });
+    const g = gateGraph(true);
+    g.nodes[0].maxAttempts = 3;
+    g.nodes[0].onError = onError;
+    await expect(compileGraph(g, fake.runtimeHost).invoke(emptyRunState("task"))).rejects.toThrow(/connection lost/);
+    expect(fake.identities).toHaveLength(1);
+  });
 
   it("routes on the JSON the command printed, without spawning a worker for it", async () => {
     const fake = host(() => ({ exitCode: 1, stdout: 'building…\n{"ok": false}' }));

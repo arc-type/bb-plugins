@@ -96,3 +96,25 @@ bb graph-studio run <graph-id> "<task>"
 bb graph-studio export <graph-id> > flow.json
 bb graph-studio import flow.json
 ```
+
+## Command nodes on enrolled machines
+
+Command nodes execute on the parent thread environment's host. Relative `cwd`
+paths resolve against that environment. `bb graph-studio host-ping <host-id>`
+checks the deployed host worker and reports bash, jq, git, bun and gh availability.
+
+Jobs persist under the host plugin data directory's `jobs/<job-id>/`. Each job
+has a saved request, bounded output snapshot and detached supervisor. The job
+identity includes the run, node, visit, attempt and checkpoint rerun generation;
+a replacement driver reattaches to the same command. A command timeout is
+enforced on the host and returns exit code 124. Stop cancels the process group.
+If a stopped host is offline, the run stays stopping until cancellation succeeds.
+A transport failure with an uncertain outcome ends the run without automatically
+launching another attempt; inspect the saved job before explicitly retrying.
+
+The server uses an in-process fallback only for its own host when the host
+entry is explicitly missing. Other host failures are reported with the host id.
+Use `bb plugin build` and reload when no run is running to deploy a host entry.
+Check `host-ping` on each machine afterwards; do not reinstall to work around
+a failed deployment without the user's approval. Saved jobs are retained for
+inspection; remove them only after confirming their runs no longer need them.

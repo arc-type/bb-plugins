@@ -1,14 +1,11 @@
-// Running a command node's shell command.
-//
-// The plugin server runs on the machine BB itself runs on, so a command for a
-// local environment can be spawned right here. A command for an environment
-// on another host has nowhere to run yet — that needs a `bb.host` entry on
-// that host — and is refused by the caller instead of running against a path
-// that does not exist on this machine.
+// Shell execution for a same-host fallback and isolated test hosts.
 import { spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
 export type ShellResult = { exitCode: number; stdout: string; stderr: string };
+
+/** A transport failure cannot prove that a side effect did not happen. */
+export class CommandJobUncertain extends Error {}
 
 /**
  * What one stream may hold. A Turbo gate can print megabytes; the node only
