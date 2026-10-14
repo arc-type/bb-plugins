@@ -152,6 +152,9 @@ describe("a compiled demo run on a real repository", () => {
   it("builds the stack track by track, pauses at the checkpoint, and submits", async () => {
     process.env.FAKE_DELAY = "0";
     const spec = JSON.parse(readFileSync(join(repo, "demo.run-spec.json"), "utf8"));
+    // This scenario deliberately fixes and re-reviews DEMO-2; request two
+    // review rounds rather than relying on the old off-by-one allowance.
+    spec.groups[0].tracks[0].maxRounds = 2;
     const result = compileRunSpec(spec);
     if (!result.ok) throw new Error(result.errors.join("\n"));
     const graphs = new Map<string, Graph>(

@@ -236,13 +236,7 @@ const question = (description: string) => ({ ...field("question", description), 
 const tagsFor = (ticket: string) => [DYNAMIC_TAG, `ticket:${slug(ticket)}`.slice(0, 40)];
 const isTrue = (key: string) => ({ source: "field", key, op: "equals", value: "true" });
 const isValue = (key: string, value: string) => ({ source: "field", key, op: "equals", value });
-const visitsBelow = (nodeId: string, value: number) => ({
-  source: "output",
-  key: nodeId,
-  op: "visitsBelow",
-  value: String(value),
-});
-
+const visitsBelow = (key: string, value: number) => ({ source: "output", key, op: "visitsBelow", value: String(value) });
 /** A literal list printed as the `lenses` field of a command node. */
 function listCommand(name: string, values: string[]): string {
   return `printf '%s\\n' ${shellQuote(JSON.stringify({ [name]: values }))}`;
@@ -340,6 +334,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
     const commit = `${track.commitType}(${track.app}): ${track.key} ${track.title}\n\nPart of ${ticket}.`;
 
     const nodes: Draft[] = [
+      { id: id("review-round"), label: `${track.key} · review round`, kind: "note", maxVisits: rounds },
+      { id: id("red-round"), label: `${track.key} · gate repair round`, kind: "note", path: "fallback", maxVisits: rounds + 1 },
       {
         id: wt,
         label: `${track.key} · worktree`,
@@ -386,7 +382,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         command: `${H} gate {{${wt}.path}} ${shellQuote(track.app)} track`,
         failOnExit: false,
         timeoutMinutes: 60,
-        maxVisits: Math.min(50, 2 * rounds + 12),
+        maxVisits: 2 * rounds + 12,
         maxAttempts: 1,
         fields: [field("ok", "every gate step passed", "boolean"), helperKind()],
       },
@@ -397,7 +393,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         cwd: `{{${wt}.path}}`,
         ...model("implementer"),
         continueThread: id("impl"),
-        maxVisits: rounds + 10,
+        maxVisits: rounds + 11,
         fields: [
           field("status", "FIXED when committed", "enum", ["FIXED", "NEEDS_HUMAN"]),
           field("summary"),
@@ -405,7 +401,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         ],
         prompt: sections(
           `You implemented sub-task ${track.key} (${track.title}) of ticket ${ticket}. ${where}`,
-          `Gate repair round {{visits.${id("gatefix")}}} of ${rounds + 1}. The deterministic gate is red. Make it green. Its result (JSON; each failed step names its log file and the tail of it):\n{{${id("gate")}}}`,
+          `Gate repair round {{visits.${id("red-round")}}} of ${rounds + 1}. The deterministic gate is red. Make it green. Its result (JSON; each failed step names its log file and the tail of it):\n{{${id("gate")}}}`,
           subTask(track, "Sub-task spec, for reference:"),
           decision(track.key),
           `- ${READABLE_CODE}\n- Re-run the failing command; commit your fixes in the worktree.\n- ${SANDBOX}`,
@@ -417,7 +413,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         label: `${track.key} · critique (${lenses.length})`,
         kind: "command",
         command: listCommand("lenses", lenses),
-        maxVisits: rounds + 10,
+        maxVisits: rounds,
         maxAttempts: 1,
         fields: [field("lenses", "one critic per lens", "list")],
       },
@@ -429,7 +425,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         // One thread per lens, round after round: a re-review in the thread
         // that holds the first review knows which findings were its own.
         continueThread: id("critic"),
-        maxVisits: rounds + 10,
+        maxVisits: rounds,
         prompt: sections(
           `Review one sub-task of ticket ${ticket}, through one lens: {{item}}.`,
           COLLABORATION,
@@ -448,7 +444,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         cwd: `{{${wt}.path}}`,
         ...model("implementer"),
         continueThread: id("impl"),
-        maxVisits: rounds + 10,
+        maxVisits: rounds + 11,
         fields: [
           field("status", "CLEAN: nothing must be fixed; FIXED: fixes committed", "enum", ["CLEAN", "FIXED", "NEEDS_HUMAN"]),
           field("summary", "one response per finding id: fixed or declined, with the reason"),
@@ -456,7 +452,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         ],
         prompt: sections(
           `You implemented sub-task ${track.key} (${track.title}) of ticket ${ticket}. ${where} The gate is green.`,
-          `Review repair round {{visits.${id("fix")}}} of ${rounds}. The reviewers' findings (they share your goal; their fixes are suggestions you may improve on):\n{{${id("critic")}}}`,
+          `Review repair round {{visits.${id("review-round")}}} of ${rounds}. The reviewers' findings (they share your goal; their fixes are suggestions you may improve on):\n{{${id("critic")}}}`,
           `Must fix: every blocking finding${rounds > 1 ? ", and should-fix findings in the first two rounds" : ""}. For every finding, either fix it or decline it with a concrete reason. Effort alone is not a reason.`,
           subTask(track, "Sub-task spec, for reference:"),
           decision(track.key),
@@ -473,7 +469,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         kind: "human",
         path: "fallback",
         maxVisits: 10,
-        prompt: `${track.key} (${track.title}) needs you (review round {{visits.${id("fix")}}} of ${rounds}; gate repair round {{visits.${id("gatefix")}}} of ${rounds + 1}): the implementer has a question, the gate stays red, or the review rounds (${rounds}) are spent.\n\nGate passed: {{${id("gate")}.ok}}\nQuestion: {{${id("impl")}.question}} {{${id("gatefix")}.question}} {{${id("fix")}.question}}\nLast summary: {{${id("fix")}.summary}}\n\nAnswer with a decision or guidance; the implementer goes on with it and the gate runs again. Stop the run to give up.`,
+        prompt: `${track.key} (${track.title}) needs you (review round {{visits.${id("review-round")}}} of ${rounds}; gate repair round {{visits.${id("red-round")}}} of ${rounds + 1}): the implementer has a question, the gate stays red, or the review rounds (${rounds}) are spent.\n\nGate passed: {{${id("gate")}.ok}}\nQuestion: {{${id("impl")}.question}} {{${id("gatefix")}.question}} {{${id("fix")}.question}}\nLast summary: {{${id("fix")}.summary}}\n\nAnswer with a decision or guidance; the implementer goes on with it and the gate runs again. Stop the run to give up.`,
       },
       {
         id: id("squash"),
@@ -502,8 +498,11 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: id("ask"), to: id("gate"), when: isValue(`${id("gate")}.kind`, "error"), label: "retry gate" },
       { from: id("ask"), to: id("impl") },
       { from: id("gate"), to: id("ask"), when: isValue(`${id("gate")}.kind`, "error"), label: "helper error" },
-      { from: id("gate"), to: id("lenses"), when: isTrue(`${id("gate")}.ok`), label: "green" },
-      { from: id("gate"), to: id("gatefix"), when: visitsBelow(id("gatefix"), rounds + 1), label: "red" },
+      { from: id("gate"), to: id("review-round"), when: isTrue(`${id("gate")}.ok`), label: "green" },
+      { from: id("gate"), to: id("ask"), when: isTrue(`${id("gate")}.ok`), label: "review rounds spent" },
+      { from: id("review-round"), to: id("lenses") },
+      { from: id("gate"), to: id("red-round"), when: visitsBelow(id("red-round"), rounds + 1), label: "red" },
+      { from: id("red-round"), to: id("gatefix") },
       { from: id("gate"), to: id("ask"), label: "red, rounds spent" },
       { from: id("gatefix"), to: id("gate"), when: isValue(`${id("gatefix")}.status`, "FIXED"), label: "fixed" },
       { from: id("gatefix"), to: id("ask"), label: "question" },
@@ -511,7 +510,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: id("critic"), to: id("fix") },
       { from: id("fix"), to: id("squash"), when: isValue(`${id("fix")}.status`, "CLEAN"), label: "clean" },
       { from: id("fix"), to: id("ask"), when: isValue(`${id("fix")}.status`, "NEEDS_HUMAN"), label: "question" },
-      { from: id("fix"), to: id("gate"), when: visitsBelow(id("critic"), rounds + 1), label: "fixed" },
+      { from: id("fix"), to: id("gate"), when: isValue(`${id("fix")}.status`, "FIXED"), label: "fixed" },
       { from: id("fix"), to: id("ask"), label: "rounds spent" },
       { from: id("squash"), to: id("ask"), when: isValue(`${id("squash")}.kind`, "error"), label: "helper error" },
       { from: id("squash"), to: END_NODE },
@@ -551,7 +550,9 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
     const gate = `${prefix}-gate`;
     const fold = `${prefix}-fold`;
     const ask = `${prefix}-ask`;
+    const redRound = `${prefix}-red-round`;
     const nodes: Draft[] = [
+      { id: redRound, label: `${label} · gate repair round`, kind: "note", path: "fallback", maxVisits: fixer.rounds },
       {
         id: gate,
         label: `${label} · gate`,
@@ -570,7 +571,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         path: foldPath,
         command: `${H} autosquash ${shellQuote(stack)} {{preflight.base}}`,
         failOnExit: false,
-        maxVisits: 8,
+        maxVisits: 14,
         maxAttempts: 1,
         fields: [field("ok", "", "boolean"), helperKind()],
       },
@@ -578,7 +579,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
     const edges: DraftEdge[] = [
       { from: gate, to: ask, when: isValue(`${gate}.kind`, "error"), label: "helper error" },
       { from: gate, to: next, when: isTrue(`${gate}.ok`), label: "green" },
-      { from: gate, to: fixer.id, when: visitsBelow(fixer.id, fixer.rounds), label: "red" },
+      { from: gate, to: redRound, when: visitsBelow(redRound, fixer.rounds), label: "red" },
+      { from: redRound, to: fixer.id },
       { from: gate, to: ask, label: "red, rounds spent" },
       { from: fold, to: ask, when: isValue(`${fold}.kind`, "error"), label: "helper error" },
       { from: fold, to: gate, when: isTrue(`${fold}.ok`), label: "folded" },
@@ -666,14 +668,16 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { id: fixer, rounds: fixRounds },
       "fallback",
     );
+    const conflictRound = `${g}-conflict-round`;
     nodes.push(
+      { id: conflictRound, label: `Group ${group.letter} · conflict round`, kind: "note", path: "fallback", maxVisits: fixRounds },
       {
         id: integrate,
         label: `Group ${group.letter} · integrate`,
         kind: "command",
         command: `${H} pick ${shellQuote(stack)} ${picks.join(" ")}`,
         failOnExit: false,
-        maxVisits: 8,
+        maxVisits: 11,
         maxAttempts: 1,
         fields: [field("ok", "every commit is on the stack", "boolean"), helperKind()],
       },
@@ -688,14 +692,14 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         cwd: stack,
         ...model("implementer"),
         continueThread: fixer,
-        maxVisits: 10,
+        maxVisits: 14,
         fields: [
           field("status", "RESOLVED: pick conflict resolved; FIXED: gate fixes committed", "enum", ["RESOLVED", "FIXED", "NEEDS_HUMAN"]),
           field("summary"),
           question("for NEEDS_HUMAN: one precise question"),
         ],
         prompt: sections(
-          `Stack repair round {{visits.${fixer}}} of ${fixRounds}. You keep the stack of ticket ${ticket} green while group ${group.letter} is integrated. Your working directory is the stack worktree ${stack}.`,
+          `Conflict repair round {{visits.${conflictRound}}} of ${fixRounds}; gate repair round {{visits.${g}-red-round}} of ${fixRounds}. You keep the stack of ticket ${ticket} green while group ${group.letter} is integrated. Your working directory is the stack worktree ${stack}.`,
           `The stack is linear: one commit per sub-task, bottom to top: ${sequence.map(describeTrack).join("; ")}.`,
           "Find out which of two situations you are in, then handle that one:",
           `1. A cherry-pick stopped on a conflict — \`git status\` says a cherry-pick is in progress. The pick result (JSON: the conflicting commit, its layer branch and files):\n{{${integrate}}}\nKeep the intent of both sides. Then \`git add\` the files and run \`git -c core.editor=true cherry-pick --continue\`; when the result names a layer, \`git branch -f <layer> HEAD\`. Keep the commit message. Return RESOLVED.`,
@@ -712,7 +716,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
         kind: "human",
         path: "fallback",
         maxVisits: 6,
-        prompt: `Group ${group.letter} needs you (repair round {{visits.${fixer}}} of ${fixRounds}): a pick conflict or a red gate the fixer could not settle, or folding the fixups stopped on a conflict.\n\nPick: {{${integrate}}}\nGate: {{${gate.gate}}}\nFold: {{${gate.fold}}}\nQuestion: {{${fixer}.question}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
+        prompt: `Group ${group.letter} needs you (conflict round {{visits.${conflictRound}}} of ${fixRounds}; gate repair round {{visits.${g}-red-round}} of ${fixRounds}): a pick conflict or a red gate the fixer could not settle, or folding the fixups stopped on a conflict.\n\nPick: {{${integrate}}}\nGate: {{${gate.gate}}}\nFold: {{${gate.fold}}}\nQuestion: {{${fixer}.question}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
       },
     );
     edges.push(
@@ -720,7 +724,8 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       { from: join, to: integrate },
       { from: integrate, to: gate.ask, when: isValue(`${integrate}.kind`, "error"), label: "helper error" },
       { from: integrate, to: gate.entry, when: isTrue(`${integrate}.ok`), label: "picked" },
-      { from: integrate, to: fixer, when: visitsBelow(fixer, fixRounds), label: "conflict" },
+      { from: integrate, to: conflictRound, when: visitsBelow(conflictRound, fixRounds), label: "conflict" },
+      { from: conflictRound, to: fixer },
       { from: integrate, to: gate.ask, label: "conflict, rounds spent" },
       { from: fixer, to: integrate, when: isValue(`${fixer}.status`, "RESOLVED"), label: "resolved" },
       { from: fixer, to: gate.fold, when: isValue(`${fixer}.status`, "FIXED"), label: "fixed" },
@@ -787,14 +792,14 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       cwd: stack,
       ...model("implementer"),
       continueThread: "final-fix",
-      maxVisits: 8,
+      maxVisits: 11,
       fields: [
         field("status", "CLEAN: nothing had to change; FIXED: fixes committed", "enum", ["CLEAN", "FIXED", "NEEDS_HUMAN"]),
         field("summary", "one response per finding id, or what you changed for the gate"),
         question("for NEEDS_HUMAN: one precise question"),
       ],
       prompt: sections(
-        `Final repair round {{visits.final-fix}} of ${finalRounds}. Address the final review of ticket ${ticket}. Your working directory is the stack worktree ${stack}.`,
+        `Final gate repair round {{visits.final-red-round}} of ${finalRounds}. Address the final review of ticket ${ticket}. Your working directory is the stack worktree ${stack}.`,
         `Findings:\n{{final-critic}}`,
         `Verify each finding in the code first; decline the ones that are wrong, with the reason. ${FIXUP_RULE} A cross-cutting fix belongs to the top layer’s last sub-task (${sequence[sequence.length - 1]}): make a fixup of that commit too.`,
         `The final gate's result — empty until it has run; when it is not empty, the gate went red after your fixes and making it green is your task now:\n{{${finalGate.gate}}}`,
@@ -810,7 +815,7 @@ export function compileRunSpec(input: unknown, options: CompileOptions = {}): Co
       kind: "human",
       path: "fallback",
       maxVisits: 6,
-      prompt: `The final review needs you (repair round {{visits.final-fix}} of ${finalRounds}): a question from the fixer, a gate that stays red, or folding the fixups stopped on a conflict.\n\nQuestion: {{final-fix.question}}\nSummary: {{final-fix.summary}}\nGate: {{${finalGate.gate}}}\nFold: {{${finalGate.fold}}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
+      prompt: `The final review needs you (gate repair round {{visits.final-red-round}} of ${finalRounds}): a question from the fixer, a gate that stays red, or folding the fixups stopped on a conflict.\n\nQuestion: {{final-fix.question}}\nSummary: {{final-fix.summary}}\nGate: {{${finalGate.gate}}}\nFold: {{${finalGate.fold}}}\n\nResolve it in ${stack} or answer with guidance; the fixer goes on with it.`,
     },
   );
   edges.push(

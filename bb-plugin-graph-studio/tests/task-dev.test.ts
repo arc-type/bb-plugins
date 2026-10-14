@@ -102,15 +102,15 @@ describe("compileRunSpec on the ARC-4 spec", () => {
 
 describe("what keeps a compiled run legible and cheap", () => {
   it("draws the parent with an environment recovery node", () => {
-    expect(compiled(arc4()).graph.nodes).toHaveLength(54);
-    expect(compiled(demo()).graph.nodes).toHaveLength(30);
-    expect(compiled(demo()).children[0]!.nodes).toHaveLength(9);
+    expect(compiled(arc4()).graph.nodes).toHaveLength(63);
+    expect(compiled(demo()).graph.nodes).toHaveLength(35);
+    expect(compiled(demo()).children[0]!.nodes).toHaveLength(11);
   });
 
   it("marks exactly the contingencies of a track as fallback paths", () => {
     const track = compiled(demo()).children[0]!;
     const fallback = track.nodes.filter((entry) => entry.path === "fallback").map((entry) => entry.id);
-    expect(fallback).toEqual(["demo-2-gatefix", "demo-2-ask"]);
+    expect(fallback).toEqual(["demo-2-red-round", "demo-2-gatefix", "demo-2-ask"]);
     // The happy path stays main, every step of it.
     for (const id of ["demo-2-wt", "demo-2-impl", "demo-2-gate", "demo-2-lenses", "demo-2-critic", "demo-2-fix", "demo-2-squash"]) {
       expect(node(track, id)!.path).toBe("main");
@@ -145,7 +145,7 @@ describe("what keeps a compiled run legible and cheap", () => {
     expect(node(parent, "a-resolve")).toBeUndefined();
     expect(node(parent, "a-gfix")).toBeUndefined();
     const into = (to: string) => parent.edges.filter((edge) => edge.to === to).map((edge) => edge.from);
-    expect(into("a-fix").sort()).toEqual(["a-ask", "a-gate", "a-int"]);
+    expect(into("a-fix").sort()).toEqual(["a-ask", "a-conflict-round", "a-red-round"]);
     const from = parent.edges.filter((edge) => edge.from === "a-fix").map((edge) => edge.to);
     expect(from).toEqual(["a-int", "a-fold", "a-ask"]);
   });
