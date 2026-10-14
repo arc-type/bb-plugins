@@ -263,3 +263,11 @@ it("does not fall through to fixers or silently end when assistance runs out", (
   state.visits["demo-2-gate-ask"] = node(child, "demo-2-gate-ask").maxVisits;
   expect(resolveNext(child, "demo-2-gate", state)).toBe("demo-2-ask-exhausted");
 });
+
+it.each([false, true])("passes --dry-run to preflight only for a dry-run spec (dryRun=%s)", dryRun => {
+  const result = compileRunSpec({ ...spec(), dryRun }, { helper: "/usr/bin/true" });
+  if (!result.ok) throw new Error(result.errors.join());
+  const command = node(result.run.graph, "preflight").command;
+  if (dryRun) expect(command).toContain("preflight 'DEMO-1' --dry-run)");
+  else expect(command).not.toContain("--dry-run");
+});
