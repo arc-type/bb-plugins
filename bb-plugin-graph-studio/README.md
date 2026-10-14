@@ -608,3 +608,9 @@ top layer’s last commit. Layer gates refuse commits above that layer before su
 Prompts may read `{{visits.node-id}}` for a node’s visit count (zero before it
 runs, the current visit when reading the worker’s own count). Unknown nodes
 and fan-out targets are rejected; count rounds outside the fan-out.
+
+Task-dev counts review rounds once before critic fan-out. Red-gate repairs and
+pick-conflict repairs have separate counters. Every committed repair passes
+the gate again, including the last allowed round; exhausted automatic rounds
+go to the stage’s "needs you" node. Guidance authorizes another repair without
+restarting the run.

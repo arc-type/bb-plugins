@@ -45,15 +45,15 @@ it.each(["error", "red", "conflict", ""])("routes helper kind %s without changin
   const { graph, children } = run();
   for (const [g, id, ask, normal] of [
     [graph, "preflight", "preflight-ask", "a-fork"],
-    [graph, "a-int", "a-ask", "a-fix"],
-    [graph, "a-gate", "a-ask", "a-fix"],
+    [graph, "a-int", "a-ask", "a-conflict-round"],
+    [graph, "a-gate", "a-ask", "a-red-round"],
     [graph, "a-fold", "a-ask", "a-ask"],
-    [graph, "final-gate", "final-ask", "final-fix"],
+    [graph, "final-gate", "final-ask", "final-red-round"],
     [graph, "final-fold", "final-ask", "final-ask"],
     [graph, "layers", "layers-ask", "layers-ask"],
     [graph, "submit", "layers-ask", "__end__"],
     [children[0]!, "demo-2-wt", "demo-2-ask", "demo-2-impl"],
-    [children[0]!, "demo-2-gate", "demo-2-ask", "demo-2-gatefix"],
+    [children[0]!, "demo-2-gate", "demo-2-ask", "demo-2-red-round"],
     [children[0]!, "demo-2-squash", "demo-2-ask", "__end__"],
   ] as const) {
     const state = emptyRunState("");
@@ -96,4 +96,46 @@ it("puts round counts and limits into compiled repair and needs-you prompts", ()
   for (const id of ["a-fix", "a-ask", "final-fix", "final-ask"]) expect(node(graph, id).prompt).toMatch(/round \{\{visits\./);
   for (const id of ["demo-2-fix", "demo-2-gatefix", "demo-2-ask"]) expect(node(children[0]!, id).prompt).toMatch(/round \{\{visits\./);
   expect(node(graph, "submit").prompt).not.toContain("{{visits.");
+});
+
+it("regates a FIXED result on the last review round before asking for acceptance", () => {
+  const graph = run().children[0]!;
+  const state = emptyRunState("");
+  state.visits["demo-2-review-round"] = node(graph, "demo-2-review-round").maxVisits;
+  state.visits["demo-2-critic"] = 50;
+  state.fields["demo-2-fix"] = { status: "FIXED" };
+  expect(resolveNext(graph, "demo-2-fix", state)).toBe("demo-2-gate");
+  state.fields["demo-2-gate"] = { ok: true };
+  expect(resolveNext(graph, "demo-2-gate", state)).toBe("demo-2-ask");
+  state.visits["demo-2-review-round"] = 0;
+  expect(resolveNext(graph, "demo-2-gate", state)).toBe("demo-2-review-round");
+  state.fields["demo-2-fix"] = { status: "NEEDS_HUMAN" };
+  expect(resolveNext(graph, "demo-2-fix", state)).toBe("demo-2-ask");
+});
+
+it("keeps conflict and gate repair budgets independent at their boundaries", () => {
+  const graph = run().graph;
+  const state = emptyRunState("");
+  state.fields["a-int"] = { ok: false };
+  state.fields["a-gate"] = { ok: false };
+  state.visits["a-fix"] = 8;
+  state.visits["a-conflict-round"] = 4;
+  expect(resolveNext(graph, "a-int", state)).toBe("a-ask");
+  expect(resolveNext(graph, "a-gate", state)).toBe("a-red-round");
+  state.visits["a-conflict-round"] = 3;
+  state.visits["a-red-round"] = 4;
+  expect(resolveNext(graph, "a-int", state)).toBe("a-conflict-round");
+  expect(resolveNext(graph, "a-gate", state)).toBe("a-ask");
+});
+
+it("counts review rounds before fan-out and gate repairs independently", () => {
+  const graph = run().children[0]!;
+  const state = emptyRunState("");
+  state.fields["demo-2-gate"] = { ok: true };
+  expect(resolveNext(graph, "demo-2-gate", state)).toBe("demo-2-review-round");
+  expect(resolveNext(graph, "demo-2-review-round", state)).toBe("demo-2-lenses");
+  state.fields["demo-2-gate"] = { ok: false };
+  expect(resolveNext(graph, "demo-2-gate", state)).toBe("demo-2-red-round");
+  state.visits["demo-2-red-round"] = node(graph, "demo-2-red-round").maxVisits;
+  expect(resolveNext(graph, "demo-2-gate", state)).toBe("demo-2-ask");
 });
